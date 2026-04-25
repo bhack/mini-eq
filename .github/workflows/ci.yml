@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gir1.2-adw-1 \
+            gir1.2-gtk-4.0 \
+            pipewire \
+            pipewire-jack \
+            python3-cairo \
+            python3-gi \
+            python3-pip \
+            python3-venv \
+            wireplumber
+          if apt-cache show gir1.2-wp-0.5 >/dev/null 2>&1; then
+            sudo apt-get install -y gir1.2-wp-0.5
+          else
+            sudo apt-get install -y gir1.2-wp-0.4
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e '.[dev]'
+
+      - name: Lint
+        run: .venv/bin/python -m ruff check .
+
+      - name: Check formatting
+        run: .venv/bin/python -m ruff format --check .
+
+      - name: Test
+        run: .venv/bin/python -m pytest -q
+
+      - name: Build package
+        run: .venv/bin/python -m build
+
+      - name: Check package metadata
+        run: .venv/bin/python -m twine check dist/*
+
+      - name: Smoke-test wheel CLI
+        run: |
+          python3 -m venv /tmp/mini-eq-wheel-test
+          /tmp/mini-eq-wheel-test/bin/python -m pip install dist/mini_eq-*.whl
+          /tmp/mini-eq-wheel-test/bin/mini-eq --help
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: mini-eq-dist
+          path: dist/*
+          if-no-files-found: error
+
+  wireplumber-0-4-compat:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build WirePlumber 0.4 compatibility image
+        run: docker build -f docker/ubuntu-24.04-wp04.Dockerfile -t mini-eq:wp04 .
+
+      - name: Check WirePlumber 0.4 GI compatibility
+        run: docker run --rm mini-eq:wp04
+
+  flatpak:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:9d3a99bef793cf99f55b0106130e68a781fd0815c8d2954f26e1ac9253b19e57
+      options: --privileged
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure Flathub remote
+        run: |
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb
+        with:
+          bundle: mini-eq.flatpak
+          manifest-path: io.github.bhack.mini-eq.json
+          upload-artifact: false
+
+      - name: Install built Flatpak
+        run: flatpak --user install -y ./mini-eq.flatpak
+
+      - name: Smoke-test Flatpak CLI
+        run: flatpak run io.github.bhack.mini-eq --help
+
+      - name: Check WirePlumber 0.5 GI compatibility
+        run: |
+          flatpak run --filesystem="$PWD":ro --command=python3 io.github.bhack.mini-eq \
+            "$PWD/tools/check_wireplumber_gi.py" --expect-version 0.5
+
+      - name: Smoke-test Flatpak runtime modules
+        run: |
+          flatpak run --command=python3 io.github.bhack.mini-eq - <<'PY'
+          from pathlib import Path
+
+          required_files = [
+              "/app/lib/pipewire-0.3/libpipewire-module-filter-chain.so",
+              "/app/lib/spa-0.2/filter-graph/libspa-filter-graph.so",
+              "/app/lib/spa-0.2/filter-graph/libspa-filter-graph-plugin-builtin.so",
+          ]
+
+          missing = [path for path in required_files if not Path(path).exists()]
+          if missing:
+              raise SystemExit(f"missing Flatpak runtime file(s): {', '.join(missing)}")
+          PY
+
+          flatpak run --command=python3 io.github.bhack.mini-eq - <<'PY'
+          from pathlib import Path
+
+          required_license_files = [
+              "/app/share/licenses/io.github.bhack.mini-eq/mini-eq/LICENSE",
+              "/app/share/licenses/io.github.bhack.mini-eq/pipewire-filter-chain-module/COPYING",
+              "/app/share/licenses/io.github.bhack.mini-eq/pipewire-filter-chain-module/LICENSE",
+              "/app/share/licenses/io.github.bhack.mini-eq/wireplumber/LICENSE",
+              "/app/share/licenses/io.github.bhack.mini-eq/python3-jack-client/pycparser/LICENSE",
+              "/app/share/licenses/io.github.bhack.mini-eq/python3-jack-client/cffi/LICENSE",
+              "/app/share/licenses/io.github.bhack.mini-eq/python3-jack-client/JACK-Client/LICENSE",
+              "/app/share/licenses/io.github.bhack.mini-eq/python3-numpy/LICENSE.txt",
+          ]
+
+          missing = [path for path in required_license_files if not Path(path).exists()]
+          if missing:
+              raise SystemExit(f"missing Flatpak license file(s): {', '.join(missing)}")
+          PY
+
+          flatpak run --command=python3 io.github.bhack.mini-eq - <<'PY'
+          import importlib
+
+          required_modules = ["numpy", "jack", "_jack"]
+
+          missing = []
+          for name in required_modules:
+              try:
+                  importlib.import_module(name)
+              except Exception as exc:
+                  missing.append(f"{name}: {exc}")
+          if missing:
+              raise SystemExit(f"missing Python analyzer module(s): {', '.join(missing)}")
+          PY

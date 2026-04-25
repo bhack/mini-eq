@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Mini EQ
+GenericName=System-wide Equalizer
+Comment=Compact system-wide parametric equalizer for PipeWire
+Keywords=equalizer;audio;pipewire;jack;
+Categories=AudioVideo;Audio;
+Exec=mini-eq
+Icon=io.github.bhack.mini-eq
+StartupNotify=true
+Terminal=false
+Type=Application
+StartupWMClass=io.github.bhack.mini-eq

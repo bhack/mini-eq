@@ -1,0 +1,12 @@
+include AGENTS.md
+include CHANGELOG.md
+include SECURITY.md
+include io.github.bhack.mini-eq.json
+include data/*.desktop
+include data/*.metainfo.xml
+include docs/release.md
+include docs/screenshots/README.md
+include docs/screenshots/*.png
+include docker/*.Dockerfile
+include flatpak/patches/*.patch
+include tools/*.py
