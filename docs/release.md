@@ -52,13 +52,15 @@ features in Settings > Advanced Security:
 - Dependency graph
 - Dependabot alerts
 - Dependabot security updates
+- Dependabot version updates
 - Secret scanning
 - Push protection
 - Private vulnerability reporting
 - CodeQL code scanning
 
 Then protect `main` with a branch protection rule or ruleset that requires the
-`CI` status checks before merging.
+`test`, `wireplumber-0-4-compat`, `flatpak`, and `dependency-review` status
+checks before merging.
 
 ## Test The Wheel
 
