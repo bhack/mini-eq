@@ -4,12 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Build and upload artifacts without creating a GitHub release.
+        description: Build and upload artifacts without creating releases or publishing.
         required: true
         type: boolean
         default: true
+      create_github_release:
+        description: Create a GitHub release and attach the built artifacts.
+        required: true
+        type: boolean
+        default: false
       tag_name:
-        description: Release tag to create, for example v0.1.1. Required when dry_run is false.
+        description: Release tag to create, for example v0.1.1. Required when create_github_release is true.
         required: false
         type: string
       target:
@@ -73,7 +78,7 @@ jobs:
   create-release:
     name: Create GitHub release
     needs: build
-    if: ${{ inputs.dry_run == false }}
+    if: ${{ inputs.dry_run == false && inputs.create_github_release == true }}
     runs-on: ubuntu-24.04
 
     permissions:
@@ -98,7 +103,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "$TAG_NAME" ]; then
-            echo "::error::tag_name is required when dry_run is false"
+            echo "::error::tag_name is required when create_github_release is true"
             exit 1
           fi
 

@@ -39,15 +39,18 @@ The default `dry_run=true` mode builds the wheel and sdist, runs
 creating a GitHub release or publishing to a package index.
 
 When creating a release, update the project version first, then dispatch the
-workflow with `dry_run=false` and `tag_name=vX.Y.Z`. The workflow creates a
-GitHub release with generated notes and attaches the built wheel and sdist. Keep
-`draft=true` for the first run, review the generated notes and assets on
-GitHub, then publish the draft manually.
+workflow with `dry_run=false`, `create_github_release=true`, and
+`tag_name=vX.Y.Z`. The workflow creates a GitHub release with generated notes
+and attaches the built wheel and sdist. Keep `draft=true` for the first run,
+review the generated notes and assets on GitHub, then publish the draft
+manually.
 
 Set `publish_testpypi=true` only after the `testpypi` GitHub environment and
 TestPyPI trusted publisher are configured. The TestPyPI job uses
 `pypa/gh-action-pypi-publish` with OIDC and does not use API tokens. Keep PyPI
-publishing separate until TestPyPI installs have been validated.
+publishing separate until TestPyPI installs have been validated. For a
+TestPyPI-only validation run, use `dry_run=false`,
+`create_github_release=false`, and `publish_testpypi=true`.
 
 Configure the TestPyPI trusted publisher with:
 
@@ -106,6 +109,6 @@ For GitHub releases, dispatch the `Release` workflow after the local checks
 above pass. Verify that the README, package URLs, issue tracker, license, and
 screenshots render correctly without a logged-in GitHub session.
 
-Do not publish to TestPyPI or PyPI from this checklist yet. Add package-index
-publishing later with Trusted Publishing/OIDC, validate on TestPyPI first, then
-enable PyPI publishing.
+Validate package-index publishing on TestPyPI before enabling PyPI publishing.
+When adding PyPI publishing, use Trusted Publishing/OIDC and a separate `pypi`
+environment rather than long-lived API tokens.
