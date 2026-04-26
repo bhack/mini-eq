@@ -27,6 +27,11 @@ on:
         required: true
         type: boolean
         default: true
+      publish_testpypi:
+        description: Publish the built artifacts to TestPyPI with Trusted Publishing.
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -136,3 +141,29 @@ jobs:
           fi
 
           gh "${args[@]}"
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: ${{ inputs.dry_run == false && inputs.publish_testpypi == true }}
+    runs-on: ubuntu-24.04
+
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/mini-eq/
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: mini-eq-dist
+          path: dist
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

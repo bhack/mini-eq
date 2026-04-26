@@ -36,7 +36,7 @@ python3 -m twine check dist/*
 Use the `Release` workflow from GitHub Actions after the local checks pass.
 The default `dry_run=true` mode builds the wheel and sdist, runs
 `twine check dist/*`, and uploads `dist/*` as workflow artifacts without
-creating a GitHub release.
+creating a GitHub release or publishing to a package index.
 
 When creating a release, update the project version first, then dispatch the
 workflow with `dry_run=false` and `tag_name=vX.Y.Z`. The workflow creates a
@@ -44,8 +44,18 @@ GitHub release with generated notes and attaches the built wheel and sdist. Keep
 `draft=true` for the first run, review the generated notes and assets on
 GitHub, then publish the draft manually.
 
-This workflow does not publish to TestPyPI or PyPI. Add package-index publishing
-later with Trusted Publishing/OIDC rather than long-lived API tokens.
+Set `publish_testpypi=true` only after the `testpypi` GitHub environment and
+TestPyPI trusted publisher are configured. The TestPyPI job uses
+`pypa/gh-action-pypi-publish` with OIDC and does not use API tokens. Keep PyPI
+publishing separate until TestPyPI installs have been validated.
+
+Configure the TestPyPI trusted publisher with:
+
+- PyPI project name: `mini-eq`
+- Owner: `bhack`
+- Repository: `mini-eq`
+- Workflow: `release.yml`
+- Environment: `testpypi`
 
 ## Security
 
