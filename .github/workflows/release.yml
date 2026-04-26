@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and upload artifacts without creating a GitHub release.
+        required: true
+        type: boolean
+        default: true
+      tag_name:
+        description: Release tag to create, for example v0.1.1. Required when dry_run is false.
+        required: false
+        type: string
+      target:
+        description: Branch, tag, or commit SHA to build and release.
+        required: true
+        type: string
+        default: main
+      draft:
+        description: Create the GitHub release as a draft.
+        required: true
+        type: boolean
+        default: true
+      prerelease:
+        description: Mark the GitHub release as a prerelease.
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.target }}-${{ inputs.tag_name || 'dry-run' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target }}
+
+      - name: Install packaging tools
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install build twine
+
+      - name: Build package
+        run: .venv/bin/python -m build
+
+      - name: Check package metadata
+        run: .venv/bin/python -m twine check dist/*
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: mini-eq-dist
+          path: dist/*
+          if-no-files-found: error
+
+  create-release:
+    name: Create GitHub release
+    needs: build
+    if: ${{ inputs.dry_run == false }}
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target }}
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: mini-eq-dist
+          path: dist
+
+      - name: Validate release inputs
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$TAG_NAME" ]; then
+            echo "::error::tag_name is required when dry_run is false"
+            exit 1
+          fi
+
+          project_version="$(
+            python3 -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])'
+          )"
+          expected_tag="v${project_version}"
+
+          if [ "$TAG_NAME" != "$expected_tag" ]; then
+            echo "::error::tag_name must be ${expected_tag} for pyproject version ${project_version}"
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          DRAFT: ${{ inputs.draft }}
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          TAG_NAME: ${{ inputs.tag_name }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            release create "$TAG_NAME"
+            dist/*
+            --repo "$GITHUB_REPOSITORY"
+            --target "$TARGET"
+            --title "$TAG_NAME"
+            --generate-notes
+            --fail-on-no-commits
+          )
+
+          if [ "$DRAFT" = "true" ]; then
+            args+=(--draft)
+          fi
+
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+
+          gh "${args[@]}"

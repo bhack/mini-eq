@@ -31,6 +31,22 @@ python3 -m build
 python3 -m twine check dist/*
 ```
 
+## GitHub Release Automation
+
+Use the `Release` workflow from GitHub Actions after the local checks pass.
+The default `dry_run=true` mode builds the wheel and sdist, runs
+`twine check dist/*`, and uploads `dist/*` as workflow artifacts without
+creating a GitHub release.
+
+When creating a release, update the project version first, then dispatch the
+workflow with `dry_run=false` and `tag_name=vX.Y.Z`. The workflow creates a
+GitHub release with generated notes and attaches the built wheel and sdist. Keep
+`draft=true` for the first run, review the generated notes and assets on
+GitHub, then publish the draft manually.
+
+This workflow does not publish to TestPyPI or PyPI. Add package-index publishing
+later with Trusted Publishing/OIDC rather than long-lived API tokens.
+
 ## Security
 
 Before changing repository visibility to public:
@@ -76,18 +92,10 @@ python3 -m venv --system-site-packages /tmp/mini-eq-wheel-test
 
 ## Publish
 
-Make the GitHub repository public before publishing to TestPyPI or PyPI, then
-verify that the README, package URLs, issue tracker, license, and screenshots
-render correctly without a logged-in GitHub session.
+For GitHub releases, dispatch the `Release` workflow after the local checks
+above pass. Verify that the README, package URLs, issue tracker, license, and
+screenshots render correctly without a logged-in GitHub session.
 
-Publish to TestPyPI first:
-
-```bash
-python3 -m twine upload --repository testpypi dist/*
-```
-
-Install from TestPyPI and run `mini-eq --check-deps`. If that works, publish to PyPI:
-
-```bash
-python3 -m twine upload dist/*
-```
+Do not publish to TestPyPI or PyPI from this checklist yet. Add package-index
+publishing later with Trusted Publishing/OIDC, validate on TestPyPI first, then
+enable PyPI publishing.
