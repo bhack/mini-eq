@@ -15,6 +15,7 @@ from .core import (
     EQ_PREAMP_MAX_DB,
     EQ_PREAMP_MIN_DB,
     MAX_BANDS,
+    clamp,
 )
 
 
@@ -287,16 +288,14 @@ class MiniEqWindowLayoutMixin:
         route_row, self.route_value_label, self.route_detail_label = self.make_status_row("route", "Routing")
         output_row, self.output_value_label, self.output_detail_label = self.make_status_row("output", "Output")
         profile_row, self.profile_value_label, self.profile_detail_label = self.make_status_row("profile", "Profile")
-        safety_row, self.safety_value_label, self.safety_detail_label = self.make_status_row("safety", "Headroom")
+        headroom_panel = self.make_headroom_panel()
         self.status_card_frames = {
             "route": route_row,
             "output": output_row,
             "profile": profile_row,
-            "safety": safety_row,
         }
 
-        for row in (safety_row,):
-            system_section.append(row)
+        system_section.append(headroom_panel)
 
         signal_path_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         signal_path_box.add_css_class("system-path")
@@ -637,12 +636,53 @@ class MiniEqWindowLayoutMixin:
         row.append(value_label)
         return row, value_label, detail_label
 
+    def make_headroom_panel(self) -> Gtk.Box:
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        panel.add_css_class("headroom-panel")
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title = Gtk.Label(label="Headroom", xalign=0.0)
+        title.add_css_class("metric-title")
+        header.append(title)
+
+        header_spacer = Gtk.Box()
+        header_spacer.set_hexpand(True)
+        header.append(header_spacer)
+
+        self.headroom_peak_label = Gtk.Label(label="Peak --", xalign=1.0)
+        self.headroom_peak_label.add_css_class("headroom-peak-chip")
+        header.append(self.headroom_peak_label)
+        panel.append(header)
+
+        self.headroom_state_label = Gtk.Label(label="Bypassed", xalign=0.0)
+        self.headroom_state_label.add_css_class("headroom-state")
+        self.headroom_state_label.set_wrap(True)
+        self.headroom_state_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        panel.append(self.headroom_state_label)
+
+        self.headroom_meter_area = Gtk.DrawingArea()
+        self.headroom_meter_area.set_content_width(260)
+        self.headroom_meter_area.set_content_height(14)
+        self.headroom_meter_area.set_hexpand(True)
+        self.headroom_meter_area.set_accessible_role(Gtk.AccessibleRole.IMG)
+        set_accessible_label(self.headroom_meter_area, "Headroom Meter")
+        self.headroom_meter_area.set_draw_func(self.on_headroom_meter_draw)
+        panel.append(self.headroom_meter_area)
+
+        self.headroom_detail_label = Gtk.Label(xalign=0.0)
+        self.headroom_detail_label.add_css_class("headroom-detail")
+        self.headroom_detail_label.add_css_class("dim-label")
+        self.headroom_detail_label.set_wrap(True)
+        self.headroom_detail_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        panel.append(self.headroom_detail_label)
+
+        return panel
+
     def set_card_state(self, key: str, value: str, detail: str, warning: bool = False) -> None:
         labels = {
             "route": (self.route_value_label, self.route_detail_label),
             "output": (self.output_value_label, self.output_detail_label),
             "profile": (self.profile_value_label, self.profile_detail_label),
-            "safety": (self.safety_value_label, self.safety_detail_label),
         }
 
         pair = labels.get(key)
@@ -661,6 +701,90 @@ class MiniEqWindowLayoutMixin:
             row.add_css_class("system-row-warning")
         else:
             row.remove_css_class("system-row-warning")
+
+    def set_headroom_state(
+        self,
+        *,
+        state: str,
+        peak_text: str,
+        detail: str,
+        peak_db: float | None,
+        kind: str,
+    ) -> None:
+        self.headroom_peak_db = peak_db
+        self.headroom_state_kind = kind
+        self.headroom_state_label.set_text(state)
+        self.headroom_peak_label.set_text(peak_text)
+        self.headroom_detail_label.set_text(detail)
+
+        for css_class in ("headroom-safe", "headroom-tight", "headroom-risk", "headroom-bypass"):
+            self.headroom_state_label.remove_css_class(css_class)
+            self.headroom_peak_label.remove_css_class(css_class)
+
+        state_class = f"headroom-{kind}"
+        self.headroom_state_label.add_css_class(state_class)
+        self.headroom_peak_label.add_css_class(state_class)
+        self.headroom_meter_area.queue_draw()
+
+    def on_headroom_meter_draw(self, _area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
+        width_f = float(max(width, 1))
+        height_f = float(max(height, 1))
+        track_y = max(2.0, (height_f - 8.0) / 2.0)
+        track_height = min(8.0, height_f - 4.0)
+        radius = track_height / 2.0
+        peak = self.headroom_peak_db
+        kind = getattr(self, "headroom_state_kind", "bypass")
+
+        def rounded_rect(x: float, y: float, rect_width: float, rect_height: float, rect_radius: float) -> None:
+            cr.new_sub_path()
+            cr.arc(x + rect_width - rect_radius, y + rect_radius, rect_radius, -1.5708, 0.0)
+            cr.arc(x + rect_width - rect_radius, y + rect_height - rect_radius, rect_radius, 0.0, 1.5708)
+            cr.arc(x + rect_radius, y + rect_height - rect_radius, rect_radius, 1.5708, 3.1416)
+            cr.arc(x + rect_radius, y + rect_radius, rect_radius, 3.1416, 4.7124)
+            cr.close_path()
+
+        def x_for_db(value: float) -> float:
+            return width_f * clamp((value + 12.0) / 18.0, 0.0, 1.0)
+
+        rounded_rect(0.0, track_y, width_f, track_height, radius)
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.06)
+        cr.fill()
+
+        if kind == "bypass" or peak is None:
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.20)
+            cr.set_line_width(1.0)
+            cr.move_to(x_for_db(0.0), track_y - 1.0)
+            cr.line_to(x_for_db(0.0), track_y + track_height + 1.0)
+            cr.stroke()
+            return
+
+        segments = (
+            (-12.0, -3.0, (0.38, 0.78, 0.50, 0.78)),
+            (-3.0, 0.0, (1.0, 0.72, 0.28, 0.82)),
+            (0.0, 6.0, (1.0, 0.35, 0.28, 0.86)),
+        )
+        cr.save()
+        rounded_rect(0.0, track_y, width_f, track_height, radius)
+        cr.clip()
+        for left_db, right_db, color in segments:
+            left = x_for_db(left_db)
+            right = x_for_db(right_db)
+            cr.rectangle(left, track_y, max(right - left, 1.0), track_height)
+            cr.set_source_rgba(*color)
+            cr.fill()
+        cr.restore()
+
+        zero_x = x_for_db(0.0)
+        cr.set_source_rgba(0.05, 0.07, 0.10, 0.62)
+        cr.set_line_width(1.0)
+        cr.move_to(zero_x, track_y - 1.0)
+        cr.line_to(zero_x, track_y + track_height + 1.0)
+        cr.stroke()
+
+        marker_x = x_for_db(peak)
+        cr.set_source_rgba(0.96, 0.98, 1.0, 0.98)
+        cr.arc(marker_x, track_y + (track_height / 2.0), 3.2, 0.0, 6.2832)
+        cr.fill()
 
     def install_css(self) -> None:
         css = b"""
@@ -785,6 +909,68 @@ class MiniEqWindowLayoutMixin:
             padding: 8px 10px;
             border-radius: 14px;
             background-color: rgba(255, 255, 255, 0.045);
+        }
+
+        .headroom-panel {
+            padding: 9px 10px 10px 10px;
+            border-radius: 14px;
+            background-color: rgba(255, 255, 255, 0.045);
+        }
+
+        .headroom-state {
+            font-size: 14pt;
+            font-weight: 800;
+            color: #f7fbff;
+        }
+
+        .headroom-peak-chip {
+            padding: 4px 9px;
+            border-radius: 999px;
+            font-size: 9pt;
+            font-weight: 800;
+            background-color: rgba(127, 145, 165, 0.14);
+            color: rgba(223, 231, 239, 0.90);
+        }
+
+        .headroom-detail {
+            font-size: 9pt;
+            color: rgba(219, 228, 236, 0.80);
+        }
+
+        .headroom-state.headroom-safe {
+            color: #75e493;
+        }
+
+        .headroom-peak-chip.headroom-safe {
+            background-color: rgba(78, 184, 109, 0.14);
+            color: #75e493;
+        }
+
+        .headroom-state.headroom-tight {
+            color: #ffcb62;
+        }
+
+        .headroom-peak-chip.headroom-tight {
+            background-color: rgba(255, 178, 74, 0.16);
+            color: #ffcb62;
+        }
+
+        .headroom-state.headroom-risk {
+            color: #ff978f;
+        }
+
+        .headroom-peak-chip.headroom-risk {
+            background-color: rgba(255, 92, 80, 0.16);
+            color: #ff978f;
+        }
+
+        .headroom-state.headroom-bypass {
+            color: rgba(223, 231, 239, 0.86);
+        }
+
+        .headroom-peak-chip.headroom-bypass {
+            background-color: rgba(127, 145, 165, 0.14);
+            color: rgba(223, 231, 239, 0.86);
         }
 
         .preamp-row {

@@ -143,9 +143,9 @@ class MiniEqWindow(
         self.output_detail_label = Gtk.Label(xalign=0.0)
         self.profile_value_label = Gtk.Label(xalign=0.0)
         self.profile_detail_label = Gtk.Label(xalign=0.0)
-        self.safety_value_label = Gtk.Label(xalign=0.0)
-        self.safety_detail_label = Gtk.Label(xalign=0.0)
         self.preset_state_label = Gtk.Label(xalign=1.0)
+        self.headroom_peak_db: float | None = None
+        self.headroom_state_kind = "bypass"
 
         self.controller.set_status_callback(self.set_status)
         self.controller.set_analyzer_levels_callback(self.on_analyzer_levels)
@@ -419,32 +419,39 @@ class MiniEqWindow(
         self.set_card_state("profile", profile_value, profile_detail, warning=profile_warning)
 
         if not self.controller.eq_enabled:
-            self.set_card_state(
-                "safety",
-                "Bypassed",
-                "EQ curve is loaded but not currently applied to the signal path.",
+            self.set_headroom_state(
+                state="Bypassed",
+                peak_text="EQ off",
+                detail="Curve is loaded but not currently applied.",
+                peak_db=None,
+                kind="bypass",
             )
         else:
             peak = self.estimate_curve_peak_db()
             if peak > 0.5:
-                self.set_card_state(
-                    "safety",
-                    f"{peak:+.1f} dB peak",
-                    f"Lower preamp by about {peak:.1f} dB for safe headroom.",
-                    warning=True,
+                self.set_headroom_state(
+                    state=f"{peak:+.1f} dB peak",
+                    peak_text=f"Peak {peak:+.1f} dB",
+                    detail=f"Lower preamp by about {peak:.1f} dB.",
+                    peak_db=peak,
+                    kind="risk",
                 )
                 warnings.append(f"Current EQ curve can clip by about {peak:.1f} dB. Reduce preamp accordingly.")
             elif peak > -0.5:
-                self.set_card_state(
-                    "safety",
-                    "Near unity",
-                    f"Peak is {peak:+.1f} dB. Headroom is tight but still near flat.",
+                self.set_headroom_state(
+                    state="Near unity",
+                    peak_text=f"Peak {peak:+.1f} dB",
+                    detail="Headroom is tight; lower preamp if boosts increase.",
+                    peak_db=peak,
+                    kind="tight",
                 )
             else:
-                self.set_card_state(
-                    "safety",
-                    f"{abs(peak):.1f} dB margin",
-                    f"Peak is {peak:+.1f} dB, leaving useful headroom.",
+                self.set_headroom_state(
+                    state=f"{abs(peak):.1f} dB margin",
+                    peak_text=f"Peak {peak:+.1f} dB",
+                    detail="Useful headroom remains.",
+                    peak_db=peak,
+                    kind="safe",
                 )
 
         if warnings:
