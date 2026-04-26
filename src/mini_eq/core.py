@@ -6,7 +6,10 @@ import math
 import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+
+import numpy as np
 
 APP_NAME = "Mini EQ"
 CONTROL_CLIENT_NAME = "Mini EQ Control"
@@ -24,6 +27,7 @@ GRAPH_FREQ_MIN = 20.0
 GRAPH_FREQ_MAX = 20000.0
 GRAPH_DB_MIN = -24.0
 GRAPH_DB_MAX = 24.0
+RESPONSE_PEAK_F_STEP = 1.02
 EQ_FREQUENCY_MIN_HZ = 20.0
 EQ_FREQUENCY_MAX_HZ = 20000.0
 EQ_GAIN_MIN_DB = -20.0
@@ -168,6 +172,9 @@ class BiquadCoefficients:
             "a1": self.a1,
             "a2": self.a2,
         }
+
+
+IDENTITY_BIQUAD_COEFFICIENTS = BiquadCoefficients(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 
 
 def eq_band_to_dict(band: EqBand) -> dict[str, object]:
@@ -526,6 +533,8 @@ def compute_log_spaced_band_defaults(num_bands: int) -> list[tuple[float, float]
 
 
 def identity_biquad_coefficients(gain: float = 1.0) -> BiquadCoefficients:
+    if gain == 1.0:
+        return IDENTITY_BIQUAD_COEFFICIENTS
     return BiquadCoefficients(float(gain), 0.0, 0.0, 1.0, 0.0, 0.0)
 
 
@@ -645,20 +654,105 @@ def total_response_db(bands: list[EqBand], preamp_db: float, sample_rate: float,
     return clamp(preamp_db + (20.0 * math.log10(magnitude)), GRAPH_DB_MIN - 12.0, GRAPH_DB_MAX + 12.0)
 
 
+@lru_cache(maxsize=32)
+def log_response_frequencies(sample_rate: float = SAMPLE_RATE, f_step: float = RESPONSE_PEAK_F_STEP) -> np.ndarray:
+    max_frequency = min(GRAPH_FREQ_MAX, (float(sample_rate) * 0.5) - 1.0)
+    if max_frequency <= GRAPH_FREQ_MIN:
+        return np.array([max(1.0, max_frequency)], dtype=np.float64)
+
+    f_step = max(float(f_step), 1.0001)
+    frequencies: list[float] = []
+    frequency = GRAPH_FREQ_MIN
+    while frequency <= max_frequency:
+        frequencies.append(frequency)
+        frequency *= f_step
+
+    if frequencies[-1] < max_frequency:
+        frequencies.append(max_frequency)
+
+    return np.array(frequencies, dtype=np.float64)
+
+
+@lru_cache(maxsize=32)
+def stepped_response_frequencies(sample_rate: float = SAMPLE_RATE, steps: int = 192) -> np.ndarray:
+    max_frequency = min(GRAPH_FREQ_MAX, (float(sample_rate) * 0.5) - 1.0)
+    if max_frequency <= GRAPH_FREQ_MIN:
+        return np.array([max(1.0, max_frequency)], dtype=np.float64)
+
+    return np.geomspace(GRAPH_FREQ_MIN, max_frequency, max(2, int(steps)), dtype=np.float64)
+
+
+def response_peak_frequencies(
+    bands: list[EqBand],
+    sample_rate: float = SAMPLE_RATE,
+    *,
+    steps: int | None = None,
+    f_step: float = RESPONSE_PEAK_F_STEP,
+) -> np.ndarray:
+    frequencies = (
+        stepped_response_frequencies(float(sample_rate), max(2, int(steps)))
+        if steps is not None
+        else log_response_frequencies(float(sample_rate), float(f_step))
+    )
+
+    solo_active = bands_have_solo(bands)
+    max_frequency = min(GRAPH_FREQ_MAX, (float(sample_rate) * 0.5) - 1.0)
+    center_frequencies = [
+        clamp(band.frequency, GRAPH_FREQ_MIN, max_frequency) for band in bands if band_is_effective(band, solo_active)
+    ]
+    if not center_frequencies:
+        return frequencies
+
+    return np.unique(np.concatenate([frequencies, np.array(center_frequencies, dtype=np.float64)]))
+
+
+def total_response_db_at_frequencies(
+    bands: list[EqBand],
+    preamp_db: float,
+    sample_rate: float,
+    frequencies: np.ndarray,
+    *,
+    clamp_output: bool = True,
+) -> np.ndarray:
+    frequency_values = np.atleast_1d(np.asarray(frequencies, dtype=np.float64))
+    if frequency_values.size == 0:
+        return np.array([], dtype=np.float64)
+
+    frequency_values = np.clip(frequency_values, 1.0, (float(sample_rate) * 0.5) - 1.0)
+    omega = 2.0 * np.pi * frequency_values / float(sample_rate)
+    z1 = np.exp(-1j * omega)
+    z2 = z1 * z1
+    response = np.ones(frequency_values.shape, dtype=np.complex128)
+    solo_active = bands_have_solo(bands)
+
+    for band in bands:
+        coefficients = band_biquad_coefficients(band, sample_rate, solo_active)
+        if coefficients == IDENTITY_BIQUAD_COEFFICIENTS:
+            continue
+
+        numerator = coefficients.b0 + (coefficients.b1 * z1) + (coefficients.b2 * z2)
+        denominator = coefficients.a0 + (coefficients.a1 * z1) + (coefficients.a2 * z2)
+        valid = np.abs(denominator) >= 1e-12
+        band_response = np.ones(frequency_values.shape, dtype=np.complex128)
+        band_response[valid] = numerator[valid] / denominator[valid]
+        response *= band_response
+
+    db_values = float(preamp_db) + (20.0 * np.log10(np.maximum(np.abs(response), 1e-12)))
+    if clamp_output:
+        return np.clip(db_values, GRAPH_DB_MIN - 12.0, GRAPH_DB_MAX + 12.0)
+    return db_values
+
+
 def estimate_response_peak_db(
     bands: list[EqBand],
     preamp_db: float,
     sample_rate: float = SAMPLE_RATE,
     *,
-    steps: int = 192,
+    steps: int | None = None,
+    f_step: float = RESPONSE_PEAK_F_STEP,
 ) -> float:
-    peak = GRAPH_DB_MIN
-    log_min = math.log10(GRAPH_FREQ_MIN)
-    log_span = math.log10(GRAPH_FREQ_MAX) - log_min
-
-    for index in range(max(2, int(steps))):
-        position = index / float(max(2, int(steps)) - 1)
-        frequency = math.pow(10.0, log_min + (log_span * position))
-        peak = max(peak, total_response_db(bands, preamp_db, sample_rate, frequency))
-
-    return peak
+    frequencies = response_peak_frequencies(bands, sample_rate, steps=steps, f_step=f_step)
+    response = total_response_db_at_frequencies(bands, preamp_db, sample_rate, frequencies, clamp_output=False)
+    if response.size == 0:
+        return float(preamp_db)
+    return float(np.max(response))

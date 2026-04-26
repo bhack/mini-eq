@@ -31,41 +31,25 @@ from .core import (
     clamp,
     format_frequency,
     total_response_db,
+    total_response_db_at_frequencies,
 )
 from .gtk_utils import create_dropdown_from_strings
 
-GRAPH_FAST_REDRAW_INTERVAL_S = 1.0 / 45.0
+ENGINE_CONTROL_REFRESH_INTERVAL_MS = 16
 
 
 class MiniEqWindowGraphMixin:
-    def queue_graph_draw(self, *, fast: bool = False) -> None:
-        def queue_layers() -> None:
-            self.graph_area.queue_draw()
-            if hasattr(self, "graph_response_area"):
-                self.graph_response_area.queue_draw()
+    def queue_graph_draw(self) -> None:
+        self.graph_area.queue_draw()
+        if hasattr(self, "graph_response_area"):
+            self.graph_response_area.queue_draw()
 
-        if not fast:
-            queue_layers()
-            return
-
-        now = GLib.get_monotonic_time() / 1_000_000.0
-        if now - getattr(self, "graph_last_redraw_time", 0.0) >= GRAPH_FAST_REDRAW_INTERVAL_S:
-            self.graph_last_redraw_time = now
-            queue_layers()
-
-    def queue_response_draw(self, *, fast: bool = False) -> None:
+    def queue_response_draw(self) -> None:
         if not hasattr(self, "graph_response_area"):
-            self.queue_graph_draw(fast=fast)
+            self.queue_graph_draw()
             return
 
-        if not fast:
-            self.graph_response_area.queue_draw()
-            return
-
-        now = GLib.get_monotonic_time() / 1_000_000.0
-        if now - getattr(self, "graph_response_last_redraw_time", 0.0) >= GRAPH_FAST_REDRAW_INTERVAL_S:
-            self.graph_response_last_redraw_time = now
-            self.graph_response_area.queue_draw()
+        self.graph_response_area.queue_draw()
 
     def invalidate_graph_background_cache(self) -> None:
         self.graph_background_revision = getattr(self, "graph_background_revision", 0) + 1
@@ -95,33 +79,79 @@ class MiniEqWindowGraphMixin:
     def update_quick_fader_strip(self) -> None:
         solo_active = bands_have_solo(self.controller.bands)
         for index in range(len(self.band_fader_widgets)):
-            band = self.controller.bands[index]
-            visible = index < self.visible_band_count
-            self.band_fader_boxes[index].set_visible(visible)
-            fader = self.band_fader_widgets[index]
-            fader.set_visible(visible)
-            fader.set_band_state(
-                gain_db=band.gain_db,
-                frequency=band.frequency,
-                frequency_label=format_frequency(band.frequency),
-                q_value=band.q,
-                q_label=f"Q {band.q:.2f}",
-                filter_type=band.filter_type,
-                filter_type_label=FILTER_TYPE_ORDER[FILTER_TYPE_INDEX_BY_VALUE.get(band.filter_type, 0)],
-                selected=index == self.selected_band_index,
-                active=band.filter_type != FILTER_TYPES["Off"],
-                muted=band.mute,
-                soloed=band.solo,
-                solo_active=solo_active,
-            )
-
-            if index == self.selected_band_index:
-                self.band_fader_boxes[index].set_opacity(1.0)
-            else:
-                effective = band_is_effective(band, solo_active)
-                self.band_fader_boxes[index].set_opacity(0.95 if effective else 0.55)
+            self.update_band_fader(index, solo_active)
 
         self.fader_title_label.set_text(f"{self.visible_band_count}-Band Fader Strip")
+
+    def update_band_fader(self, index: int, solo_active: bool | None = None) -> None:
+        if index < 0 or index >= len(self.band_fader_widgets):
+            return
+
+        if solo_active is None:
+            solo_active = bands_have_solo(self.controller.bands)
+
+        band = self.controller.bands[index]
+        visible = index < self.visible_band_count
+        self.band_fader_boxes[index].set_visible(visible)
+        fader = self.band_fader_widgets[index]
+        fader.set_visible(visible)
+        fader.set_band_state(
+            gain_db=band.gain_db,
+            frequency=band.frequency,
+            frequency_label=format_frequency(band.frequency),
+            q_value=band.q,
+            q_label=f"Q {band.q:.2f}",
+            filter_type=band.filter_type,
+            filter_type_label=FILTER_TYPE_ORDER[FILTER_TYPE_INDEX_BY_VALUE.get(band.filter_type, 0)],
+            selected=index == self.selected_band_index,
+            active=band.filter_type != FILTER_TYPES["Off"],
+            muted=band.mute,
+            soloed=band.solo,
+            solo_active=solo_active,
+        )
+
+        if index == self.selected_band_index:
+            self.band_fader_boxes[index].set_opacity(1.0)
+        else:
+            effective = band_is_effective(band, solo_active)
+            self.band_fader_boxes[index].set_opacity(0.95 if effective else 0.55)
+
+    def schedule_curve_metadata_refresh(self) -> None:
+        if getattr(self, "curve_metadata_refresh_source_id", 0) != 0:
+            return
+
+        self.curve_metadata_refresh_source_id = GLib.idle_add(self.on_curve_metadata_refresh_idle)
+
+    def on_curve_metadata_refresh_idle(self) -> bool:
+        self.curve_metadata_refresh_source_id = 0
+        if getattr(self, "ui_shutting_down", False):
+            return False
+
+        self.update_status_summary()
+        self.update_preset_state()
+        return False
+
+    def schedule_band_engine_update(self, index: int) -> None:
+        self.pending_engine_band_indexes.add(index)
+        if getattr(self, "engine_control_refresh_source_id", 0) != 0:
+            return
+
+        self.engine_control_refresh_source_id = GLib.timeout_add(
+            ENGINE_CONTROL_REFRESH_INTERVAL_MS,
+            self.on_engine_control_refresh_timeout,
+        )
+
+    def on_engine_control_refresh_timeout(self) -> bool:
+        self.engine_control_refresh_source_id = 0
+        if getattr(self, "ui_shutting_down", False):
+            self.pending_engine_band_indexes.clear()
+            return False
+
+        pending_indexes = sorted(self.pending_engine_band_indexes)
+        self.pending_engine_band_indexes.clear()
+        for index in pending_indexes:
+            self.controller.apply_band_to_engine(index)
+        return False
 
     def update_focus_summary(self) -> None:
         selected = self.controller.bands[self.selected_band_index]
@@ -214,7 +244,7 @@ class MiniEqWindowGraphMixin:
         self.controller.set_preamp_db(value)
         self.update_status_summary()
         self.invalidate_graph_response_cache()
-        self.queue_response_draw(fast=True)
+        self.queue_response_draw()
 
     def on_band_card_pressed(
         self, gesture: Gtk.GestureClick, _press_count: int, _x: float, _y: float, index: int
@@ -234,55 +264,58 @@ class MiniEqWindowGraphMixin:
         if self.updating_ui:
             return
 
-        self.controller.set_band_gain(index, gain_db)
+        changed = self.controller.set_band_gain(index, gain_db, apply=False)
+        if changed:
+            self.schedule_band_engine_update(index)
         self.selected_band_index = index
         self.updating_ui = True
         try:
-            self.update_quick_fader_strip()
+            self.update_band_fader(index)
             self.update_focus_summary()
         finally:
             self.updating_ui = False
 
-        self.update_status_summary()
         self.invalidate_graph_response_cache()
-        self.queue_response_draw(fast=True)
-        self.update_preset_state()
+        self.queue_response_draw()
+        self.schedule_curve_metadata_refresh()
 
     def on_custom_band_frequency_changed(self, index: int, frequency: float) -> None:
         if self.updating_ui:
             return
 
-        self.controller.set_band_frequency(index, frequency)
+        changed = self.controller.set_band_frequency(index, frequency, apply=False)
+        if changed:
+            self.schedule_band_engine_update(index)
         self.selected_band_index = index
         self.updating_ui = True
         try:
-            self.update_quick_fader_strip()
+            self.update_band_fader(index)
             self.update_focus_summary()
         finally:
             self.updating_ui = False
 
-        self.update_status_summary()
         self.invalidate_graph_response_cache()
-        self.queue_response_draw(fast=True)
-        self.update_preset_state()
+        self.queue_response_draw()
+        self.schedule_curve_metadata_refresh()
 
     def on_custom_band_q_changed(self, index: int, q_value: float) -> None:
         if self.updating_ui:
             return
 
-        self.controller.set_band_q(index, q_value)
+        changed = self.controller.set_band_q(index, q_value, apply=False)
+        if changed:
+            self.schedule_band_engine_update(index)
         self.selected_band_index = index
         self.updating_ui = True
         try:
-            self.update_quick_fader_strip()
+            self.update_band_fader(index)
             self.update_focus_summary()
         finally:
             self.updating_ui = False
 
-        self.update_status_summary()
         self.invalidate_graph_response_cache()
-        self.queue_response_draw(fast=True)
-        self.update_preset_state()
+        self.queue_response_draw()
+        self.schedule_curve_metadata_refresh()
 
     def on_custom_band_mute_toggled(self, index: int, muted: bool) -> None:
         if self.updating_ui:
@@ -299,7 +332,7 @@ class MiniEqWindowGraphMixin:
 
         self.update_status_summary()
         self.invalidate_graph_response_cache()
-        self.queue_response_draw(fast=True)
+        self.queue_response_draw()
         self.update_preset_state()
 
     def on_custom_band_solo_toggled(self, index: int, soloed: bool) -> None:
@@ -317,7 +350,7 @@ class MiniEqWindowGraphMixin:
 
         self.update_status_summary()
         self.invalidate_graph_response_cache()
-        self.queue_response_draw(fast=True)
+        self.queue_response_draw()
         self.update_preset_state()
 
     def close_band_edit_popover(self) -> None:
@@ -438,7 +471,7 @@ class MiniEqWindowGraphMixin:
 
         self.update_status_summary()
         self.invalidate_graph_response_cache()
-        self.queue_response_draw(fast=True)
+        self.queue_response_draw()
 
     def frequency_to_x(self, frequency: float, width: float, left: float, right: float) -> float:
         usable = max(width - left - right, 1.0)
@@ -501,11 +534,19 @@ class MiniEqWindowGraphMixin:
         if getattr(self, "graph_response_cache_key", None) == cache_key:
             return self.graph_response_cache_points
 
-        points: list[tuple[float, float]] = []
-        for pixel in range(int(left), int(width - right)):
-            freq = self.x_to_frequency(float(pixel), width, left, right)
-            db_value = total_response_db(self.controller.bands, self.controller.preamp_db, SAMPLE_RATE, freq)
-            points.append((float(pixel), self.db_to_y(db_value, height, top, bottom)))
+        pixels = list(range(int(left), int(width - right)))
+        frequencies = [self.x_to_frequency(float(pixel), width, left, right) for pixel in pixels]
+        db_values = total_response_db_at_frequencies(
+            self.controller.bands,
+            self.controller.preamp_db,
+            SAMPLE_RATE,
+            frequencies,
+            clamp_output=True,
+        )
+        points = [
+            (float(pixel), self.db_to_y(float(db_value), height, top, bottom))
+            for pixel, db_value in zip(pixels, db_values, strict=True)
+        ]
 
         self.graph_response_cache_key = cache_key
         self.graph_response_cache_points = points
@@ -534,11 +575,13 @@ class MiniEqWindowGraphMixin:
         if getattr(self, "graph_selected_response_cache_key", None) == cache_key:
             return self.graph_selected_response_cache_points
 
-        points: list[tuple[float, float]] = []
-        for pixel in range(int(left), int(width - right)):
-            freq = self.x_to_frequency(float(pixel), width, left, right)
-            db_value = total_response_db([selected_band], 0.0, SAMPLE_RATE, freq)
-            points.append((float(pixel), self.db_to_y(db_value, height, top, bottom)))
+        pixels = list(range(int(left), int(width - right)))
+        frequencies = [self.x_to_frequency(float(pixel), width, left, right) for pixel in pixels]
+        db_values = total_response_db_at_frequencies([selected_band], 0.0, SAMPLE_RATE, frequencies, clamp_output=True)
+        points = [
+            (float(pixel), self.db_to_y(float(db_value), height, top, bottom))
+            for pixel, db_value in zip(pixels, db_values, strict=True)
+        ]
 
         self.graph_selected_response_cache_key = cache_key
         self.graph_selected_response_cache_points = points

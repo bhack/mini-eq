@@ -233,6 +233,40 @@ def test_estimate_response_peak_uses_combined_transfer_function() -> None:
     assert peak == pytest.approx(9.0, abs=0.2)
 
 
+def test_estimate_response_peak_samples_filter_centers() -> None:
+    bands = [
+        core.EqBand(filter_type=core.FILTER_TYPES["Bell"], frequency=1234.5, gain_db=8.0, q=6.0),
+    ]
+
+    peak = core.estimate_response_peak_db(bands, -1.0, 48000.0)
+
+    assert peak == pytest.approx(7.0, abs=0.05)
+
+
+def test_estimate_response_peak_is_not_display_clamped() -> None:
+    bands = [
+        core.EqBand(filter_type=core.FILTER_TYPES["Bell"], frequency=1000.0, gain_db=20.0, q=2.0),
+        core.EqBand(filter_type=core.FILTER_TYPES["Bell"], frequency=1000.0, gain_db=20.0, q=2.0),
+    ]
+
+    peak = core.estimate_response_peak_db(bands, 0.0, 48000.0)
+
+    assert peak > core.GRAPH_DB_MAX + 12.0
+    assert peak == pytest.approx(40.0, abs=0.1)
+
+
+def test_vectorized_response_matches_scalar_response() -> None:
+    bands = [
+        core.EqBand(filter_type=core.FILTER_TYPES["Bell"], frequency=800.0, gain_db=4.0, q=1.2),
+        core.EqBand(filter_type=core.FILTER_TYPES["Hi-shelf"], frequency=5000.0, gain_db=-3.0, q=0.7),
+    ]
+
+    vector_response = core.total_response_db_at_frequencies(bands, -2.0, 48000.0, [1000.0])[0]
+    scalar_response = core.total_response_db(bands, -2.0, 48000.0, 1000.0)
+
+    assert vector_response == pytest.approx(scalar_response, abs=1e-9)
+
+
 def test_bell_response_uses_gain_db_at_center_frequency() -> None:
     boost = core.EqBand(filter_type=core.FILTER_TYPES["Bell"], frequency=1000.0, gain_db=6.0, q=1.4)
     cut = core.EqBand(filter_type=core.FILTER_TYPES["Bell"], frequency=1000.0, gain_db=-4.5, q=1.4)

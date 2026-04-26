@@ -567,35 +567,64 @@ class SystemWideEqController:
         self.eq_mode = int(mode)
 
     def set_preamp_db(self, value_db: float) -> None:
-        self.preamp_db = clamp(value_db, EQ_PREAMP_MIN_DB, EQ_PREAMP_MAX_DB)
+        preamp_db = clamp(value_db, EQ_PREAMP_MIN_DB, EQ_PREAMP_MAX_DB)
+        if self.preamp_db == preamp_db:
+            return
+        self.preamp_db = preamp_db
         self.apply_preamp_to_engine()
 
     def set_eq_enabled(self, enabled: bool) -> None:
-        self.eq_enabled = bool(enabled)
+        eq_enabled = bool(enabled)
+        if self.eq_enabled == eq_enabled:
+            return
+        self.eq_enabled = eq_enabled
         self.apply_enabled_to_engine()
 
     def set_band_type(self, index: int, filter_type: int) -> None:
+        if self.bands[index].filter_type == filter_type:
+            return
         self.bands[index].filter_type = filter_type
         self.apply_band_to_engine(index)
 
-    def set_band_frequency(self, index: int, frequency: float) -> None:
-        self.bands[index].frequency = clamp(frequency, EQ_FREQUENCY_MIN_HZ, EQ_FREQUENCY_MAX_HZ)
-        self.apply_band_to_engine(index)
+    def set_band_frequency(self, index: int, frequency: float, *, apply: bool = True) -> bool:
+        frequency = clamp(frequency, EQ_FREQUENCY_MIN_HZ, EQ_FREQUENCY_MAX_HZ)
+        if self.bands[index].frequency == frequency:
+            return False
+        self.bands[index].frequency = frequency
+        if apply:
+            self.apply_band_to_engine(index)
+        return True
 
-    def set_band_gain(self, index: int, gain_db: float) -> None:
-        self.bands[index].gain_db = clamp(gain_db, EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB)
-        self.apply_band_to_engine(index)
+    def set_band_gain(self, index: int, gain_db: float, *, apply: bool = True) -> bool:
+        gain_db = clamp(gain_db, EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB)
+        if self.bands[index].gain_db == gain_db:
+            return False
+        self.bands[index].gain_db = gain_db
+        if apply:
+            self.apply_band_to_engine(index)
+        return True
 
-    def set_band_q(self, index: int, q_value: float) -> None:
-        self.bands[index].q = clamp(q_value, EQ_Q_MIN, EQ_Q_MAX)
-        self.apply_band_to_engine(index)
+    def set_band_q(self, index: int, q_value: float, *, apply: bool = True) -> bool:
+        q_value = clamp(q_value, EQ_Q_MIN, EQ_Q_MAX)
+        if self.bands[index].q == q_value:
+            return False
+        self.bands[index].q = q_value
+        if apply:
+            self.apply_band_to_engine(index)
+        return True
 
     def set_band_mute(self, index: int, muted: bool) -> None:
-        self.bands[index].mute = bool(muted)
+        muted = bool(muted)
+        if self.bands[index].mute == muted:
+            return
+        self.bands[index].mute = muted
         self.apply_state_to_engine()
 
     def set_band_solo(self, index: int, solo: bool) -> None:
-        self.bands[index].solo = bool(solo)
+        solo = bool(solo)
+        if self.bands[index].solo == solo:
+            return
+        self.bands[index].solo = solo
         self.apply_state_to_engine()
 
     def build_preset_payload(self, preset_name: str | None = None) -> dict[str, object]:

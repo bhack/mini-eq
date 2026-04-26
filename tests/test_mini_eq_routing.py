@@ -333,6 +333,31 @@ def test_live_biquad_updates_use_active_sample_rate(monkeypatch: pytest.MonkeyPa
     assert captured == [96000.0]
 
 
+def test_band_gain_update_skips_engine_when_value_is_unchanged() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.bands = [core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, 3.0, 1.0)]
+    calls: list[int] = []
+    controller.apply_band_to_engine = lambda index: calls.append(index)
+
+    assert routing.SystemWideEqController.set_band_gain(controller, 0, 3.0) is False
+    assert routing.SystemWideEqController.set_band_gain(controller, 0, 3.1) is True
+
+    assert calls == [0]
+    assert controller.bands[0].gain_db == pytest.approx(3.1)
+
+
+def test_band_gain_update_can_defer_engine_apply() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.bands = [core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, 3.0, 1.0)]
+    calls: list[int] = []
+    controller.apply_band_to_engine = lambda index: calls.append(index)
+
+    assert routing.SystemWideEqController.set_band_gain(controller, 0, 3.1, apply=False) is True
+
+    assert calls == []
+    assert controller.bands[0].gain_db == pytest.approx(3.1)
+
+
 def test_full_state_biquad_updates_use_active_sample_rate(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.bands = [core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, 3.0, 1.0)]

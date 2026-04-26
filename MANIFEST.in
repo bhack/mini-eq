@@ -5,6 +5,7 @@ include io.github.bhack.mini-eq.json
 include src/mini_eq/style.css
 include data/*.desktop
 include data/*.metainfo.xml
+include docs/performance.md
 include docs/release.md
 include docs/screenshots/README.md
 include docs/screenshots/*.png

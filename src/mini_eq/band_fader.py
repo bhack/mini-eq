@@ -632,7 +632,8 @@ class EqBandFader(Gtk.DrawingArea):
         multiplier = self.interaction_multiplier_for_state(state)
         gain = self.drag_start_gain_db - ((offset_y / usable_height) * GAIN_RANGE_DB * multiplier)
         gain = round(clamp(gain, GAIN_MIN_DB, GAIN_MAX_DB) * 10.0) / 10.0
-        self.gain_changed_callback(self.index, gain)
+        if gain != self.gain_db:
+            self.gain_changed_callback(self.index, gain)
 
     def frequency_from_octaves(self, base_frequency: float, octaves: float) -> float:
         frequency = clamp(base_frequency * math.pow(2.0, octaves), FREQUENCY_MIN_HZ, FREQUENCY_MAX_HZ)
@@ -645,12 +646,14 @@ class EqBandFader(Gtk.DrawingArea):
     def update_frequency_from_drag(self, offset_x: float, state: Gdk.ModifierType) -> None:
         octaves = offset_x / self.scrub_pixels_per_octave_for_state(state)
         frequency = self.frequency_from_octaves(self.drag_start_frequency, octaves)
-        self.frequency_changed_callback(self.index, frequency)
+        if frequency != self.frequency:
+            self.frequency_changed_callback(self.index, frequency)
 
     def update_q_from_drag(self, offset_x: float, state: Gdk.ModifierType) -> None:
         octaves = offset_x / self.scrub_pixels_per_octave_for_state(state)
         q_value = self.q_from_octaves(self.drag_start_q, octaves)
-        self.q_changed_callback(self.index, q_value)
+        if q_value != self.q_value:
+            self.q_changed_callback(self.index, q_value)
 
     def on_drag_begin(self, _gesture: Gtk.GestureDrag, x: float, y: float) -> None:
         self.grab_focus()

@@ -86,7 +86,9 @@ class MiniEqWindow(
         self.analyzer_db_floor = ANALYZER_DB_FLOOR
         self.analyzer_display_gain_db = ANALYZER_DISPLAY_GAIN_DEFAULT
         self.analyzer_last_redraw_time = 0.0
-        self.graph_last_redraw_time = 0.0
+        self.curve_metadata_refresh_source_id = 0
+        self.engine_control_refresh_source_id = 0
+        self.pending_engine_band_indexes: set[int] = set()
         self.graph_background_revision = 0
         self.graph_response_revision = 0
         self.graph_response_cache_key = None
@@ -200,6 +202,13 @@ class MiniEqWindow(
         if self.post_present_source_id > 0:
             destroy_glib_source(self.post_present_source_id)
             self.post_present_source_id = 0
+        if self.curve_metadata_refresh_source_id > 0:
+            destroy_glib_source(self.curve_metadata_refresh_source_id)
+            self.curve_metadata_refresh_source_id = 0
+        if self.engine_control_refresh_source_id > 0:
+            destroy_glib_source(self.engine_control_refresh_source_id)
+            self.engine_control_refresh_source_id = 0
+        self.pending_engine_band_indexes.clear()
         self.controller.set_status_callback(None)
         self.controller.set_outputs_changed_callback(None)
         self.controller.set_analyzer_levels_callback(None)
