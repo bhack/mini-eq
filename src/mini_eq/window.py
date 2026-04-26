@@ -33,7 +33,7 @@ from .window_analyzer import MiniEqWindowAnalyzerMixin
 from .window_graph import MiniEqWindowGraphMixin
 from .window_layout import MiniEqWindowLayoutMixin
 from .window_presets import MiniEqWindowPresetMixin
-from .wireplumber_backend import WirePlumberNode
+from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positive_int
 
 TOAST_TIMEOUT_SECONDS = 2
 TOAST_IGNORED_PREFIXES = (
@@ -44,23 +44,6 @@ TOAST_IGNORED_PREFIXES = (
     "system audio routed",
     "system audio routing disabled",
 )
-
-
-def parse_positive_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return 0
-
-    return parsed if parsed > 0 else 0
-
-
-def parse_rate_from_latency(value: str) -> int:
-    if "/" not in value:
-        return 0
-
-    _frames, rate = value.rsplit("/", 1)
-    return parse_positive_int(rate)
 
 
 class MiniEqWindow(
@@ -116,7 +99,6 @@ class MiniEqWindow(
         self.warning_banner.set_wrap(True)
         self.warning_banner.set_visible(False)
         self.status_card_frames: dict[str, Gtk.Widget] = {}
-        self.status_card_badges: dict[str, Gtk.Label] = {}
         self.system_state_label = Gtk.Label(xalign=0.5)
 
         self.output_combo = Gtk.DropDown(model=self.output_sink_model)
@@ -317,10 +299,7 @@ class MiniEqWindow(
         if sink is None:
             return "Unavailable"
 
-        rate = parse_positive_int(sink.property_value("audio.rate"))
-        if rate <= 0:
-            rate = parse_rate_from_latency(sink.property_value("node.max-latency"))
-
+        rate = node_sample_rate(sink)
         channels = parse_positive_int(sink.property_value("audio.channels"))
 
         channel_text = {1: "mono", 2: "stereo"}.get(channels, f"{channels} ch" if channels > 0 else "unknown channels")

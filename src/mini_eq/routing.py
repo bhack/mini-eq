@@ -47,38 +47,9 @@ from .wireplumber_backend import (
     DEFAULT_CONFIGURED_AUDIO_SINK_KEY,
     WirePlumberBackend,
     WirePlumberNode,
+    node_sample_rate,
 )
 from .wireplumber_stream_router import WirePlumberStreamRouter
-
-
-def parse_positive_int(value: str | None) -> int:
-    try:
-        parsed = int(value or "")
-    except (TypeError, ValueError):
-        return 0
-
-    return parsed if parsed > 0 else 0
-
-
-def parse_rate_from_latency(value: str | None) -> int:
-    if not value or "/" not in value:
-        return 0
-
-    _frames, rate = value.rsplit("/", 1)
-    return parse_positive_int(rate)
-
-
-def node_sample_rate(node: WirePlumberNode | None) -> float:
-    if node is None:
-        return 0.0
-
-    rate = parse_positive_int(node.property_value("audio.rate"))
-    if rate <= 0:
-        rate = parse_rate_from_latency(node.property_value("node.max-latency"))
-    if rate <= 0:
-        rate = parse_rate_from_latency(node.property_value("node.latency"))
-
-    return float(rate) if rate > 0 else 0.0
 
 
 class SystemWideEqController:

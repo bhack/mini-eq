@@ -116,25 +116,12 @@ class MiniEqWindowGraphMixin:
             )
 
             if index == self.selected_band_index:
-                self.band_fader_boxes[index].remove_css_class("eq-band-box-focus")
                 self.band_fader_boxes[index].set_opacity(1.0)
             else:
-                self.band_fader_boxes[index].remove_css_class("eq-band-box-focus")
                 effective = band_is_effective(band, solo_active)
                 self.band_fader_boxes[index].set_opacity(0.95 if effective else 0.55)
 
         self.fader_title_label.set_text(f"{self.visible_band_count}-Band Fader Strip")
-
-    def update_selected_band_controls(self) -> None:
-        if not hasattr(self, "selected_band_spin"):
-            return
-
-        selected = self.controller.bands[self.selected_band_index]
-        self.selected_band_spin.set_value(self.selected_band_index + 1)
-        self.selected_type_combo.set_selected(FILTER_TYPE_INDEX_BY_VALUE[selected.filter_type])
-        self.selected_frequency_spin.set_value(selected.frequency)
-        self.selected_gain_spin.set_value(selected.gain_db)
-        self.selected_q_spin.set_value(selected.q)
 
     def update_focus_summary(self) -> None:
         selected = self.controller.bands[self.selected_band_index]
@@ -188,7 +175,6 @@ class MiniEqWindowGraphMixin:
             self.analyzer_display_gain_scale.set_value(self.analyzer_display_gain_db)
 
             self.update_quick_fader_strip()
-            self.update_selected_band_controls()
             self.update_focus_summary()
         finally:
             self.updating_ui = False
@@ -230,47 +216,6 @@ class MiniEqWindowGraphMixin:
         self.invalidate_graph_response_cache()
         self.queue_response_draw(fast=True)
 
-    def on_selected_band_index_changed(self, spin: Gtk.SpinButton) -> None:
-        if self.updating_ui:
-            return
-
-        self.selected_band_index = int(spin.get_value()) - 1
-        if self.selected_band_index >= self.visible_band_count:
-            self.set_visible_band_count(self.selected_band_index + 1)
-        self.sync_ui_from_state()
-
-    def on_selected_type_changed(self, combo: Gtk.DropDown, _param: object) -> None:
-        if self.updating_ui:
-            return
-
-        selected = combo.get_selected()
-        if selected >= len(FILTER_TYPE_ORDER):
-            return
-
-        self.controller.set_band_type(self.selected_band_index, FILTER_TYPES[FILTER_TYPE_ORDER[selected]])
-        self.sync_ui_from_state()
-
-    def on_selected_frequency_changed(self, spin: Gtk.SpinButton) -> None:
-        if self.updating_ui:
-            return
-
-        self.controller.set_band_frequency(self.selected_band_index, spin.get_value())
-        self.sync_ui_from_state()
-
-    def on_selected_gain_changed(self, spin: Gtk.SpinButton) -> None:
-        if self.updating_ui:
-            return
-
-        self.controller.set_band_gain(self.selected_band_index, spin.get_value())
-        self.sync_ui_from_state()
-
-    def on_selected_q_changed(self, spin: Gtk.SpinButton) -> None:
-        if self.updating_ui:
-            return
-
-        self.controller.set_band_q(self.selected_band_index, spin.get_value())
-        self.sync_ui_from_state()
-
     def on_band_card_pressed(
         self, gesture: Gtk.GestureClick, _press_count: int, _x: float, _y: float, index: int
     ) -> None:
@@ -294,7 +239,6 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
         try:
             self.update_quick_fader_strip()
-            self.update_selected_band_controls()
             self.update_focus_summary()
         finally:
             self.updating_ui = False
@@ -313,7 +257,6 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
         try:
             self.update_quick_fader_strip()
-            self.update_selected_band_controls()
             self.update_focus_summary()
         finally:
             self.updating_ui = False
@@ -332,7 +275,6 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
         try:
             self.update_quick_fader_strip()
-            self.update_selected_band_controls()
             self.update_focus_summary()
         finally:
             self.updating_ui = False
@@ -351,7 +293,6 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
         try:
             self.update_quick_fader_strip()
-            self.update_selected_band_controls()
             self.update_focus_summary()
         finally:
             self.updating_ui = False
@@ -370,7 +311,6 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
         try:
             self.update_quick_fader_strip()
-            self.update_selected_band_controls()
             self.update_focus_summary()
         finally:
             self.updating_ui = False
@@ -492,7 +432,6 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
         try:
             self.update_quick_fader_strip()
-            self.update_selected_band_controls()
             self.update_focus_summary()
         finally:
             self.updating_ui = False

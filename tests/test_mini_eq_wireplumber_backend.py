@@ -148,6 +148,47 @@ def test_parse_bool_property_accepts_wireplumber_truthy_values() -> None:
     assert wp_backend.parse_bool_property(None) is False
 
 
+def test_node_sample_rate_uses_audio_rate_and_latency_fallbacks() -> None:
+    direct_rate = wp_backend.WirePlumberNode(
+        local_id=1,
+        bound_id=39,
+        object_serial="67",
+        media_class=wp_backend.AUDIO_SINK,
+        node_name="alsa_output.direct",
+        node_description=None,
+        application_name=None,
+        node_dont_move=False,
+        properties={"audio.rate": "48000", "node.max-latency": "1024/44100"},
+    )
+    max_latency_rate = wp_backend.WirePlumberNode(
+        local_id=2,
+        bound_id=40,
+        object_serial="68",
+        media_class=wp_backend.AUDIO_SINK,
+        node_name="alsa_output.max_latency",
+        node_description=None,
+        application_name=None,
+        node_dont_move=False,
+        properties={"node.max-latency": "1024/44100"},
+    )
+    latency_rate = wp_backend.WirePlumberNode(
+        local_id=3,
+        bound_id=41,
+        object_serial="69",
+        media_class=wp_backend.AUDIO_SINK,
+        node_name="alsa_output.latency",
+        node_description=None,
+        application_name=None,
+        node_dont_move=False,
+        properties={"node.latency": "1024/96000"},
+    )
+
+    assert wp_backend.node_sample_rate(direct_rate) == 48000.0
+    assert wp_backend.node_sample_rate(max_latency_rate) == 44100.0
+    assert wp_backend.node_sample_rate(latency_rate) == 96000.0
+    assert wp_backend.node_sample_rate(None) == 0.0
+
+
 def test_node_classification_and_display_name() -> None:
     sink = wp_backend.WirePlumberNode(
         local_id=1,

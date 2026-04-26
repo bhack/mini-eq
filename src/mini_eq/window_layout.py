@@ -12,18 +12,10 @@ from .band_fader import EqBandFader
 from .core import (
     APP_NAME,
     DEFAULT_ACTIVE_BANDS,
-    EQ_FREQUENCY_MAX_HZ,
-    EQ_FREQUENCY_MIN_HZ,
-    EQ_GAIN_MAX_DB,
-    EQ_GAIN_MIN_DB,
     EQ_PREAMP_MAX_DB,
     EQ_PREAMP_MIN_DB,
-    EQ_Q_MAX,
-    EQ_Q_MIN,
-    FILTER_TYPE_ORDER,
     MAX_BANDS,
 )
-from .gtk_utils import create_dropdown_from_strings
 
 
 def set_accessible_label(widget: Gtk.Widget, label: str) -> None:
@@ -550,25 +542,6 @@ class MiniEqWindowLayoutMixin:
         self.fader_title_label.set_tooltip_text("Drag Gain; Edit Frequency, Q, and Filter Type on the Selected Band")
         fader_section.append(self.fader_title_label)
 
-        self.selected_band_spin = Gtk.SpinButton.new_with_range(1.0, float(MAX_BANDS), 1.0)
-        self.selected_band_spin.set_digits(0)
-        self.selected_band_spin.connect("value-changed", self.on_selected_band_index_changed)
-
-        self.selected_type_combo = create_dropdown_from_strings(FILTER_TYPE_ORDER)
-        self.selected_type_combo.connect("notify::selected", self.on_selected_type_changed)
-
-        self.selected_frequency_spin = Gtk.SpinButton.new_with_range(EQ_FREQUENCY_MIN_HZ, EQ_FREQUENCY_MAX_HZ, 1.0)
-        self.selected_frequency_spin.set_digits(2)
-        self.selected_frequency_spin.connect("value-changed", self.on_selected_frequency_changed)
-
-        self.selected_gain_spin = Gtk.SpinButton.new_with_range(EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB, 0.1)
-        self.selected_gain_spin.set_digits(2)
-        self.selected_gain_spin.connect("value-changed", self.on_selected_gain_changed)
-
-        self.selected_q_spin = Gtk.SpinButton.new_with_range(EQ_Q_MIN, EQ_Q_MAX, 0.01)
-        self.selected_q_spin.set_digits(3)
-        self.selected_q_spin.connect("value-changed", self.on_selected_q_changed)
-
         self.fader_scroller = Gtk.ScrolledWindow()
         self.fader_scroller.set_hexpand(True)
         self.fader_scroller.set_vexpand(False)
@@ -760,13 +733,6 @@ class MiniEqWindowLayoutMixin:
             background-color: rgba(255, 255, 255, 0.045);
         }
 
-        .preset-box {
-            padding: 8px 10px;
-            border-radius: 18px;
-            border: 1px solid rgba(255, 255, 255, 0.04);
-            background-image: linear-gradient(135deg, rgba(25, 31, 40, 0.92), rgba(27, 33, 42, 0.90));
-        }
-
         .preset-row {
             margin-top: 2px;
         }
@@ -791,52 +757,6 @@ class MiniEqWindowLayoutMixin:
         .preset-state-unsaved {
             background-color: rgba(127, 145, 165, 0.14);
             color: rgba(223, 231, 239, 0.90);
-        }
-
-        .status-card {
-            border-radius: 18px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background-image: linear-gradient(180deg, rgba(22, 30, 42, 0.98), rgba(14, 19, 29, 0.96));
-        }
-
-        .status-card-warning {
-            border-color: rgba(255, 161, 72, 0.55);
-            background-image: linear-gradient(180deg, rgba(58, 34, 18, 0.98), rgba(28, 18, 12, 0.96));
-        }
-
-        .status-card-icon-box {
-            min-width: 32px;
-            min-height: 32px;
-            padding: 6px;
-            border-radius: 12px;
-            background-color: rgba(255, 174, 53, 0.10);
-        }
-
-        .status-card-icon {
-            color: #ffb24a;
-        }
-
-        .status-card-badge {
-            min-width: 28px;
-            padding: 4px 8px;
-            border-radius: 999px;
-            font-size: 9pt;
-            font-weight: 800;
-            margin-top: 8px;
-        }
-
-        .status-card-badge-ok {
-            background-color: rgba(78, 184, 109, 0.14);
-            color: #4eb86d;
-        }
-
-        .status-card-badge-warning {
-            background-color: rgba(255, 178, 74, 0.16);
-            color: #ffb24a;
-        }
-
-        .system-card {
-            border-radius: 20px;
         }
 
         .system-state-chip {
@@ -917,31 +837,10 @@ class MiniEqWindowLayoutMixin:
             color: #ffe0b2;
         }
 
-        .path-strip {
-            padding: 9px 12px;
-            border-radius: 14px;
-            background-color: rgba(255, 255, 255, 0.04);
-            color: rgba(225, 232, 239, 0.84);
-        }
-
-        .control-row {
-            padding: 8px 10px;
-            border-radius: 18px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            background-color: rgba(18, 24, 33, 0.64);
-        }
-
         .panel-card {
             border-radius: 22px;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background-image: linear-gradient(180deg, rgba(18, 27, 39, 0.98), rgba(12, 18, 28, 0.96));
-        }
-
-        .sidebar-card {
-            border-radius: 18px;
-            border-color: rgba(255, 255, 255, 0.055);
-            background-image: none;
-            background-color: rgba(18, 24, 33, 0.66);
         }
 
         .graph-shell-panel {
@@ -957,10 +856,6 @@ class MiniEqWindowLayoutMixin:
             color: #f7fbff;
         }
 
-        .graph-header-subtitle {
-            color: rgba(221, 229, 236, 0.78);
-        }
-
         .graph-chip {
             padding: 4px 10px;
             border-radius: 999px;
@@ -968,11 +863,6 @@ class MiniEqWindowLayoutMixin:
             color: #9fe5ff;
             font-size: 9pt;
             font-weight: 700;
-        }
-
-        .graph-chip-muted {
-            background-color: rgba(255, 255, 255, 0.06);
-            color: rgba(225, 232, 239, 0.82);
         }
 
         .graph-header scale trough {
@@ -992,14 +882,6 @@ class MiniEqWindowLayoutMixin:
 
         .quick-view-shell {
             padding: 0;
-        }
-
-        .signal-path-card {
-            border-radius: 18px;
-        }
-
-        .analyzer-card {
-            border-radius: 18px;
         }
 
         .analyzer-state-chip {
@@ -1030,43 +912,8 @@ class MiniEqWindowLayoutMixin:
             color: #ffb24a;
         }
 
-        .focus-shell {
-            border-color: rgba(255, 174, 53, 0.55);
-            box-shadow: inset 0 0 0 1px rgba(255, 174, 53, 0.06);
-        }
-
-        .focus-header {
-            padding-bottom: 6px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        }
-
-        .focus-summary {
-            padding: 4px 10px;
-            border-radius: 999px;
-            background-color: rgba(255, 178, 74, 0.10);
-            color: rgba(245, 213, 154, 0.92);
-        }
-
-        .focus-strip {
-            padding: 2px 0 0 0;
-        }
-
-        .focus-field {
-            min-width: 72px;
-        }
-
         .fader-scroller {
             min-height: 230px;
-        }
-
-        .fader-editor-row {
-            padding: 8px 10px;
-            border-radius: 14px;
-            background-color: rgba(255, 255, 255, 0.035);
-        }
-
-        .fader-editor-field {
-            min-height: 30px;
         }
 
         .eq-band-box {
@@ -1074,11 +921,6 @@ class MiniEqWindowLayoutMixin:
             border-radius: 16px;
             background-color: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.04);
-        }
-
-        .eq-band-box-focus {
-            background-color: rgba(255, 190, 96, 0.10);
-            border-color: rgba(255, 190, 96, 0.32);
         }
 
         """
