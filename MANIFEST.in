@@ -2,6 +2,7 @@ include AGENTS.md
 include CHANGELOG.md
 include SECURITY.md
 include io.github.bhack.mini-eq.json
+include src/mini_eq/style.css
 include data/*.desktop
 include data/*.metainfo.xml
 include docs/release.md

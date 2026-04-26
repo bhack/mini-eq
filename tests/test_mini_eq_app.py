@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+from importlib.resources import files
 from types import SimpleNamespace
 
 from tests._mini_eq_imports import import_mini_eq_module
 
 app = import_mini_eq_module("app")
+
+
+def test_style_resource_is_packaged_with_application_css() -> None:
+    css = files("mini_eq").joinpath("style.css").read_text(encoding="utf-8")
+
+    assert ".toolbar-row" in css
+    assert ".headroom-panel" in css
 
 
 class FakeWindow:

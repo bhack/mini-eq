@@ -48,6 +48,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 mini_eq = [
+    "style.css",
     "assets/icons/hicolor/*/apps/*.png",
     "assets/source/*.png",
 ]
