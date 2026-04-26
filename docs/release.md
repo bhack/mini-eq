@@ -60,6 +60,20 @@ Configure the TestPyPI trusted publisher with:
 - Workflow: `release.yml`
 - Environment: `testpypi`
 
+Set `publish_pypi=true` only after the `pypi` GitHub environment and PyPI
+trusted publisher are configured. The PyPI job also uses
+`pypa/gh-action-pypi-publish` with OIDC and does not use API tokens. Keep the
+`pypi` environment protected with required review before publishing production
+packages.
+
+Configure the PyPI trusted publisher with:
+
+- PyPI project name: `mini-eq`
+- Owner: `bhack`
+- Repository: `mini-eq`
+- Workflow: `release.yml`
+- Environment: `pypi`
+
 ## Security
 
 Before changing repository visibility to public:
@@ -110,5 +124,7 @@ above pass. Verify that the README, package URLs, issue tracker, license, and
 screenshots render correctly without a logged-in GitHub session.
 
 Validate package-index publishing on TestPyPI before enabling PyPI publishing.
-When adding PyPI publishing, use Trusted Publishing/OIDC and a separate `pypi`
-environment rather than long-lived API tokens.
+For production PyPI publishing, dispatch the workflow with `dry_run=false`,
+`create_github_release=true`, `tag_name=vX.Y.Z`, and `publish_pypi=true`.
+Use Trusted Publishing/OIDC and the separate `pypi` environment rather than
+long-lived API tokens.
