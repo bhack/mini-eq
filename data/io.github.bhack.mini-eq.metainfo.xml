@@ -33,6 +33,11 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.1.1" date="2026-04-27">
+      <description>
+        <p>Fix package metadata for PyPI publishing.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-04-24">
       <description>
         <p>Initial release preparation.</p>
