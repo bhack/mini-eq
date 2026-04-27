@@ -158,6 +158,7 @@ and PipeWire JACK.
 
 ## Acknowledgements
 
-Mini EQ is inspired in part by EasyEffects and the broader Linux PipeWire audio
-tooling ecosystem. Mini EQ is a separate project focused on a compact
-system-wide parametric EQ workflow.
+Mini EQ is inspired in part by [EasyEffects](https://github.com/wwmm/easyeffects)
+and the broader [PipeWire](https://pipewire.org/) audio tooling ecosystem.
+Mini EQ is a separate project focused on a compact system-wide parametric EQ
+workflow.
