@@ -78,6 +78,9 @@ Generate the public release screenshot with deterministic demo data:
 PYTHONPATH=src python3 tools/render_demo_screenshot.py docs/screenshots/mini-eq.png
 ```
 
+When the public screenshot changes materially, refresh `docs/social-preview.png`
+so repository/package presentation stays visually consistent.
+
 Do not commit screenshots that show personal device names, Bluetooth device
 names, usernames, hostnames, local paths, or private preset names. Prefer
 `tools/render_demo_screenshot.py` over desktop screenshots because it renders
