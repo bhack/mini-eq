@@ -4,11 +4,13 @@ Use this note when preparing a Flathub submission for Mini EQ.
 
 ## Current Status
 
-- The upstream Flatpak manifest is `io.github.bhack.mini-eq.json`.
+- The upstream local Flatpak manifest is `io.github.bhack.mini-eq.yaml`.
+- Python Flatpak dependencies are generated in `python3-dependencies.yaml`
+  with `flatpak-pip-generator`.
 - The manifest builds in project CI and installs the desktop file, AppStream
   metadata, icons, licenses, PipeWire filter-chain module, WirePlumber
   introspection, JACK client bindings, and NumPy.
-- `flatpak-builder-lint manifest io.github.bhack.mini-eq.json` passes locally.
+- `flatpak-builder-lint manifest io.github.bhack.mini-eq.yaml` passes locally.
 - The GitHub `v0.1.1` release is published, and PyPI has `mini-eq==0.1.1`.
 
 ## Submission Constraints
@@ -22,13 +24,11 @@ Flathub submissions should contain only the manifest and required packaging
 files. Do not include Mini EQ source code or generated build artifacts in the
 Flathub submission repository.
 
-The upstream manifest currently uses:
+The upstream manifest uses:
 
-```json
-{
-  "type": "dir",
-  "path": "."
-}
+```yaml
+- type: dir
+  path: .
 ```
 
 That is correct for local CI, but the Flathub submission copy should point at a
@@ -45,7 +45,7 @@ is required, and which functionality is expected to work inside the sandbox.
 
 1. Confirm the latest GitHub release is not marked as a draft.
 2. Confirm the release is suitable for Flathub stable, not a nightly snapshot.
-3. Prepare a Flathub submission manifest from `io.github.bhack.mini-eq.json`.
+3. Prepare a Flathub submission manifest from `io.github.bhack.mini-eq.yaml`.
 4. Replace the `mini-eq` module source with the public release archive and hash.
 5. Include `flatpak/patches/wireplumber-0.5.14-tools-disabled-po.patch` in the
    submission, preserving the manifest's patch path or adjusting it consistently.
@@ -54,14 +54,14 @@ is required, and which functionality is expected to work inside the sandbox.
 ```bash
 appstreamcli validate --no-net data/io.github.bhack.mini-eq.metainfo.xml
 desktop-file-validate data/io.github.bhack.mini-eq.desktop
-flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.bhack.mini-eq.json
+flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.bhack.mini-eq.yaml
 ```
 
 7. Build with Flathub tooling and run the app:
 
 ```bash
 flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak run --command=flathub-build org.flatpak.Builder --install io.github.bhack.mini-eq.json
+flatpak run --command=flathub-build org.flatpak.Builder --install io.github.bhack.mini-eq.yaml
 flatpak run io.github.bhack.mini-eq --check-deps
 ```
 

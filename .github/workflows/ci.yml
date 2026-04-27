@@ -88,7 +88,7 @@ jobs:
             esac
 
             case "$path" in
-              .github/workflows/ci.yml|io.github.bhack.mini-eq.json|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_wireplumber_gi.py)
+              .github/workflows/ci.yml|io.github.bhack.mini-eq.yaml|python3-dependencies.yaml|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_wireplumber_gi.py)
                 flatpak=true
                 ;;
             esac
@@ -247,7 +247,7 @@ jobs:
         uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb
         with:
           bundle: mini-eq.flatpak
-          manifest-path: io.github.bhack.mini-eq.json
+          manifest-path: io.github.bhack.mini-eq.yaml
           upload-artifact: false
 
       - name: Install built Flatpak
@@ -289,10 +289,6 @@ jobs:
               "/app/share/licenses/io.github.bhack.mini-eq/pipewire-filter-chain-module/COPYING",
               "/app/share/licenses/io.github.bhack.mini-eq/pipewire-filter-chain-module/LICENSE",
               "/app/share/licenses/io.github.bhack.mini-eq/wireplumber/LICENSE",
-              "/app/share/licenses/io.github.bhack.mini-eq/python3-jack-client/pycparser/LICENSE",
-              "/app/share/licenses/io.github.bhack.mini-eq/python3-jack-client/cffi/LICENSE",
-              "/app/share/licenses/io.github.bhack.mini-eq/python3-jack-client/JACK-Client/LICENSE",
-              "/app/share/licenses/io.github.bhack.mini-eq/python3-numpy/LICENSE.txt",
           ]
 
           missing = [path for path in required_license_files if not Path(path).exists()]

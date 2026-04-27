@@ -143,7 +143,7 @@ Build and install the local Flatpak:
 
 ```bash
 flatpak run org.flatpak.Builder --user --install --force-clean --install-deps-from=flathub \
-  flatpak-build io.github.bhack.mini-eq.json
+  flatpak-build io.github.bhack.mini-eq.yaml
 flatpak run io.github.bhack.mini-eq --check-deps
 flatpak run io.github.bhack.mini-eq
 ```

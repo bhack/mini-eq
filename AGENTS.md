@@ -26,7 +26,8 @@ using the app, and keep maintainer-only process notes in this file or under
 - `src/mini_eq/screenshot.py` and `tools/render_demo_screenshot.py`: maintainer
   screenshot tooling, not user-facing CLI.
 - `data/`: desktop and AppStream metadata.
-- `io.github.bhack.mini-eq.json`: Flatpak manifest.
+- `io.github.bhack.mini-eq.yaml`: local Flatpak manifest.
+- `python3-dependencies.yaml`: generated Flatpak Python dependencies.
 - `tests/`: pytest suite for core behavior and non-visual integration seams.
 
 ## Development Commands
