@@ -35,6 +35,10 @@ FOCUS_BLUE_LIGHT = (0.68, 0.84, 1.0)
 RESPONSE_AMBER = (0.84, 0.46, 0.12)
 
 
+def filter_type_label(filter_type: int) -> str:
+    return FILTER_TYPE_ORDER[FILTER_TYPE_INDEX_BY_VALUE.get(filter_type, 0)]
+
+
 class MiniEqWindowGraphMixin:
     def queue_graph_draw(self) -> None:
         self.graph_area.queue_draw()
@@ -99,7 +103,7 @@ class MiniEqWindowGraphMixin:
             q_value=band.q,
             q_label=f"{band.q:.2f}",
             filter_type=band.filter_type,
-            filter_type_label=FILTER_TYPE_ORDER[FILTER_TYPE_INDEX_BY_VALUE.get(band.filter_type, 0)],
+            filter_type_label=filter_type_label(band.filter_type),
             selected=index == self.selected_band_index,
             active=band.filter_type != FILTER_TYPES["Off"],
             muted=band.mute,
@@ -152,21 +156,23 @@ class MiniEqWindowGraphMixin:
 
     def update_focus_summary(self) -> None:
         selected = self.controller.bands[self.selected_band_index]
+        selected_filter_type = filter_type_label(selected.filter_type)
         self.focus_label.set_text(
             f"Band {self.selected_band_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
         )
-        self.band_count_label.set_text(FILTER_TYPE_ORDER[selected.filter_type])
+        self.band_count_label.set_text(selected_filter_type)
         self.inspector_summary_label.set_text(
-            f"{FILTER_TYPE_ORDER[selected.filter_type]} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
+            f"{selected_filter_type} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
         )
 
     def update_selected_band_editor(self) -> None:
         selected = self.controller.bands[self.selected_band_index]
-        self.selected_band_label.set_text("Selected Band")
-        filter_type = FILTER_TYPE_ORDER[FILTER_TYPE_INDEX_BY_VALUE.get(selected.filter_type, 0)]
-        self.selected_band_gain_label.set_text(
-            f"Band {self.selected_band_index + 1} • {filter_type} • {selected.gain_db:+.1f} dB"
-        )
+        band_title = f"Band {self.selected_band_index + 1}"
+        self.selected_band_label.set_text(band_title)
+        filter_type = filter_type_label(selected.filter_type)
+        band_detail = f"{filter_type} • {selected.gain_db:+.1f} dB"
+        self.selected_band_gain_label.set_text(band_detail)
+        self.selected_band_gain_label.set_tooltip_text(f"{band_title} • {band_detail}")
         self.selected_band_type_combo.set_selected(FILTER_TYPE_INDEX_BY_VALUE.get(selected.filter_type, 0))
         self.selected_band_frequency_spin.set_value(selected.frequency)
         self.selected_band_q_spin.set_value(selected.q)

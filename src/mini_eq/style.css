@@ -324,6 +324,10 @@
     font-weight: 800;
 }
 
+.band-editor-selected {
+    min-width: 170px;
+}
+
 .band-editor-state {
     padding: 0 2px;
 }

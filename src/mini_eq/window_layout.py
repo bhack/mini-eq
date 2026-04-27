@@ -34,6 +34,13 @@ def set_accessible_description(widget: Gtk.Widget, description: str) -> None:
     widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [description])
 
 
+def constrain_editor_label(label: Gtk.Label, width_chars: int) -> None:
+    label.set_width_chars(width_chars)
+    label.set_max_width_chars(width_chars)
+    label.set_ellipsize(Pango.EllipsizeMode.END)
+    label.set_single_line_mode(True)
+
+
 class MiniEqWindowLayoutMixin:
     def build_window_content(self, auto_route: bool) -> None:
         toolbar_view = Adw.ToolbarView()
@@ -630,11 +637,15 @@ class MiniEqWindowLayoutMixin:
         band_editor.set_valign(Gtk.Align.CENTER)
 
         selected_band_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        selected_band_box.set_size_request(150, -1)
-        self.selected_band_label = Gtk.Label(label="Selected Band", xalign=0.0)
+        selected_band_box.add_css_class("band-editor-selected")
+        selected_band_box.set_size_request(170, -1)
+        selected_band_box.set_hexpand(False)
+        self.selected_band_label = Gtk.Label(label="Band 1", xalign=0.0)
+        constrain_editor_label(self.selected_band_label, 12)
         self.selected_band_label.add_css_class("band-editor-title")
         selected_band_box.append(self.selected_band_label)
-        self.selected_band_gain_label = Gtk.Label(label="Band 1 • Bell • +0.0 dB", xalign=0.0)
+        self.selected_band_gain_label = Gtk.Label(label="Bell • +0.0 dB", xalign=0.0)
+        constrain_editor_label(self.selected_band_gain_label, 22)
         self.selected_band_gain_label.add_css_class("dim-label")
         selected_band_box.append(self.selected_band_gain_label)
         band_editor.append(selected_band_box)
