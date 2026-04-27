@@ -9,20 +9,125 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+
+    outputs:
+      flatpak: ${{ steps.filter.outputs.flatpak }}
+      test: ${{ steps.filter.outputs.test }}
+      wp04: ${{ steps.filter.outputs.wp04 }}
+
+    steps:
+      - name: Detect changed files
+        id: filter
+        env:
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          files="$(mktemp)"
+
+          set_all() {
+            {
+              echo "test=true"
+              echo "wp04=true"
+              echo "flatpak=true"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch)
+              set_all
+              exit 0
+              ;;
+            pull_request)
+              gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename' > "$files"
+              ;;
+            push)
+              if [[ -z "${BEFORE:-}" || "$BEFORE" =~ ^0+$ ]]; then
+                set_all
+                exit 0
+              fi
+              gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$GITHUB_SHA" --jq '.files[].filename' > "$files"
+              ;;
+            *)
+              set_all
+              exit 0
+              ;;
+          esac
+
+          test=false
+          wp04=false
+          flatpak=false
+
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/ci.yml)
+                test=true
+                wp04=true
+                flatpak=true
+                ;;
+              README.md|pyproject.toml|MANIFEST.in|src/*|tests/*|data/*|tools/*)
+                test=true
+                ;;
+            esac
+
+            case "$path" in
+              .github/workflows/ci.yml|docker/ubuntu-24.04-wp04.Dockerfile|tools/check_wireplumber_gi.py|src/mini_eq/wireplumber_backend.py)
+                wp04=true
+                ;;
+            esac
+
+            case "$path" in
+              .github/workflows/ci.yml|io.github.bhack.mini-eq.json|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_wireplumber_gi.py)
+                flatpak=true
+                ;;
+            esac
+          done < "$files"
+
+          {
+            echo "test=$test"
+            echo "wp04=$wp04"
+            echo "flatpak=$flatpak"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### CI scope"
+            echo
+            echo "- test: \`$test\`"
+            echo "- wireplumber-0-4-compat: \`$wp04\`"
+            echo "- flatpak: \`$flatpak\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   test:
+    needs: changes
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
 
     steps:
+      - name: Require change detection
+        if: ${{ needs.changes.result != 'success' }}
+        run: exit 1
+
+      - name: Skip unchanged scope
+        if: ${{ needs.changes.outputs.test != 'true' }}
+        run: echo "No Python/package changes detected; skipping test job work."
+
       - name: Check out repository
+        if: ${{ needs.changes.outputs.test == 'true' }}
         uses: actions/checkout@v6
 
       - name: Install system dependencies
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -42,33 +147,41 @@ jobs:
           fi
 
       - name: Install Python dependencies
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: |
           python3 -m venv --system-site-packages .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -e '.[dev]'
 
       - name: Lint
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: .venv/bin/python -m ruff check .
 
       - name: Check formatting
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: .venv/bin/python -m ruff format --check .
 
       - name: Test
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: .venv/bin/python -m pytest -q
 
       - name: Build package
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: .venv/bin/python -m build
 
       - name: Check package metadata
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: .venv/bin/python -m twine check dist/*
 
       - name: Smoke-test wheel CLI
+        if: ${{ needs.changes.outputs.test == 'true' }}
         run: |
           python3 -m venv /tmp/mini-eq-wheel-test
           /tmp/mini-eq-wheel-test/bin/python -m pip install dist/mini_eq-*.whl
           /tmp/mini-eq-wheel-test/bin/mini-eq --help
 
       - name: Upload package artifacts
+        if: ${{ needs.changes.outputs.test == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: mini-eq-dist
@@ -76,19 +189,34 @@ jobs:
           if-no-files-found: error
 
   wireplumber-0-4-compat:
+    needs: changes
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
 
     steps:
+      - name: Require change detection
+        if: ${{ needs.changes.result != 'success' }}
+        run: exit 1
+
+      - name: Skip unchanged scope
+        if: ${{ needs.changes.outputs.wp04 != 'true' }}
+        run: echo "No WirePlumber 0.4 compatibility changes detected; skipping compatibility job work."
+
       - name: Check out repository
+        if: ${{ needs.changes.outputs.wp04 == 'true' }}
         uses: actions/checkout@v6
 
       - name: Build WirePlumber 0.4 compatibility image
+        if: ${{ needs.changes.outputs.wp04 == 'true' }}
         run: docker build -f docker/ubuntu-24.04-wp04.Dockerfile -t mini-eq:wp04 .
 
       - name: Check WirePlumber 0.4 GI compatibility
+        if: ${{ needs.changes.outputs.wp04 == 'true' }}
         run: docker run --rm mini-eq:wp04
 
   flatpak:
+    needs: changes
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container:
@@ -96,15 +224,26 @@ jobs:
       options: --privileged
 
     steps:
+      - name: Require change detection
+        if: ${{ needs.changes.result != 'success' }}
+        run: exit 1
+
+      - name: Skip unchanged scope
+        if: ${{ needs.changes.outputs.flatpak != 'true' }}
+        run: echo "No Flatpak-relevant changes detected; skipping Flatpak job work."
+
       - name: Check out repository
+        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         uses: actions/checkout@v6
 
       - name: Configure Flathub remote
+        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: |
           flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
       - name: Build Flatpak
+        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb
         with:
           bundle: mini-eq.flatpak
@@ -112,17 +251,21 @@ jobs:
           upload-artifact: false
 
       - name: Install built Flatpak
+        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: flatpak --user install -y ./mini-eq.flatpak
 
       - name: Smoke-test Flatpak CLI
+        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: flatpak run io.github.bhack.mini-eq --help
 
       - name: Check WirePlumber 0.5 GI compatibility
+        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: |
           flatpak run --filesystem="$PWD":ro --command=python3 io.github.bhack.mini-eq \
             "$PWD/tools/check_wireplumber_gi.py" --expect-version 0.5
 
       - name: Smoke-test Flatpak runtime modules
+        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: |
           flatpak run --command=python3 io.github.bhack.mini-eq - <<'PY'
           from pathlib import Path
