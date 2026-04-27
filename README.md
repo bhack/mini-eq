@@ -1,11 +1,32 @@
 # Mini EQ
 
+[![PyPI](https://img.shields.io/pypi/v/mini-eq.svg)](https://pypi.org/project/mini-eq/)
+[![GitHub release](https://img.shields.io/github/v/release/bhack/mini-eq?sort=semver)](https://github.com/bhack/mini-eq/releases)
+[![License](https://img.shields.io/github/license/bhack/mini-eq.svg)](LICENSE)
+
 Mini EQ is a small system-wide parametric equalizer for PipeWire desktops.
 It uses GTK/Libadwaita for the UI, WirePlumber for routing/default-output
 control, PipeWire filter-chain with builtin biquad filters for the equalizer,
 and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer.
 
+![Mini EQ screenshot](https://raw.githubusercontent.com/bhack/mini-eq/main/docs/screenshots/mini-eq.png)
+
+## Features
+
+- System-wide parametric EQ for PipeWire desktop playback.
+- GTK/Libadwaita interface with a compact 10-band fader workflow.
+- WirePlumber routing and default-output tracking.
+- PipeWire filter-chain DSP using builtin biquad filters.
+- Optional spectrum analyzer through the PipeWire JACK compatibility layer.
+- Equalizer APO preset import from the UI or `--import-apo`.
+
 ## Install
+
+Recommended install paths:
+
+1. Flathub once accepted. This will be the preferred desktop install path.
+2. PyPI, after the system desktop/audio dependencies below are installed.
+3. Source checkout, for development or testing unreleased changes.
 
 Mini EQ depends on system desktop/audio packages that are not installed by
 Python packaging: GTK4/Libadwaita 1.4+ GI bindings, WirePlumber introspection,
@@ -83,10 +104,6 @@ Install the desktop launcher and icon for the current user:
 ```bash
 mini-eq --install-desktop
 ```
-
-## Screenshot
-
-![Mini EQ screenshot](https://raw.githubusercontent.com/bhack/mini-eq/main/docs/screenshots/mini-eq.png)
 
 ## Test
 

@@ -8,7 +8,7 @@ import gi
 
 gi.require_version("Adw", "1")
 
-from demo_runtime import DEMO_PRESET_NAME, DemoController
+from demo_runtime import DEMO_PRESET_NAME, DemoController, demo_analyzer_levels
 from gi.repository import Adw, GLib
 
 from mini_eq import core
@@ -41,6 +41,10 @@ class DemoScreenshotApplication(Adw.Application):
         self.window = MiniEqWindow(self, self.controller, auto_route=True)
         self.window.current_preset_name = DEMO_PRESET_NAME
         self.window.saved_preset_signature = self.controller.state_signature()
+        self.window.analyzer_enabled = True
+        self.window.analyzer_display_gain_db = 24.0
+        self.window.analyzer_levels = demo_analyzer_levels()
+        self.window.sync_ui_from_state()
         self.window.refresh_preset_list()
         self.window.set_visible(True)
         self.window.present()
@@ -48,6 +52,16 @@ class DemoScreenshotApplication(Adw.Application):
         GLib.timeout_add(self.delay_ms, self.on_capture_timeout)
 
     def on_capture_timeout(self) -> bool:
+        if self.window is None:
+            raise RuntimeError("window is not available")
+
+        self.window.analyzer_enabled = True
+        self.window.analyzer_levels = demo_analyzer_levels()
+        self.window.queue_analyzer_draw(force=True)
+        GLib.timeout_add(120, self.on_capture_ready_timeout)
+        return False
+
+    def on_capture_ready_timeout(self) -> bool:
         if self.window is None:
             raise RuntimeError("window is not available")
 

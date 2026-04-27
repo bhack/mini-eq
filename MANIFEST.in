@@ -8,6 +8,7 @@ include data/*.metainfo.xml
 include docs/flathub.md
 include docs/performance.md
 include docs/release.md
+include docs/social-preview.png
 include docs/screenshots/README.md
 include docs/screenshots/*.png
 include docker/*.Dockerfile

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 
 from mini_eq import core
+from mini_eq.analyzer import ANALYZER_BIN_COUNT
 from mini_eq.core import EQ_MODES, FILTER_TYPES, PRESET_VERSION, EqBand, eq_band_to_dict
 from mini_eq.wireplumber_backend import WirePlumberNode
 
@@ -10,6 +12,16 @@ DEMO_PRESET_NAME = "Studio Reference"
 DEMO_OUTPUT_NAME = "studio-monitor"
 DEMO_OUTPUT_LABEL = "Studio Monitor"
 DEMO_VIRTUAL_SINK_LABEL = "Mini EQ"
+
+
+def demo_analyzer_levels(count: int = ANALYZER_BIN_COUNT) -> list[float]:
+    levels: list[float] = []
+    for index in range(count):
+        phase = (index / max(count - 1, 1)) * math.pi * 4.0
+        envelope = 0.58 + (0.34 * (0.5 + 0.5 * math.sin(phase + 1.2)))
+        tilt = 1.0 - (index / max(count - 1, 1)) * 0.30
+        levels.append(max(0.08, envelope * tilt))
+    return levels
 
 
 class DemoController:
@@ -118,8 +130,9 @@ class DemoController:
     def set_analyzer_levels_callback(self, callback) -> None:
         self.analyzer_levels_callback = callback
 
-    def set_analyzer_enabled(self, enabled: bool) -> None:
+    def set_analyzer_enabled(self, enabled: bool) -> bool:
         self.analyzer_enabled = enabled
+        return True
 
     def route_system_audio(self, enabled: bool) -> None:
         self.route_enabled = enabled
