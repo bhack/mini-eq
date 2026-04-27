@@ -380,11 +380,20 @@
     border-color: alpha(var(--window-fg-color), 0.026);
 }
 
+.compact-band-editor-bottom-bar {
+    margin: 0;
+}
+
 .compact-band-editor-launcher {
-    padding: 3px 10px;
-    border-radius: 10px;
+    padding: 5px 12px;
+    min-height: 38px;
+    border-radius: 12px;
     border: 1px solid var(--mini-border-subtle);
-    background-color: alpha(var(--window-fg-color), 0.018);
+    background-color: alpha(var(--window-fg-color), 0.024);
+}
+
+.compact-band-editor-launcher-row {
+    min-height: 0;
 }
 
 .compact-band-editor-detail {

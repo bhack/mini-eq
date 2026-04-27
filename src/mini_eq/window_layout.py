@@ -766,15 +766,23 @@ class MiniEqWindowLayoutMixin:
         self.fader_scroller.set_child(fader_center_shell)
         fader_section.append(self.fader_scroller)
 
-        self.compact_band_editor_launcher = Gtk.Button()
+        self.compact_band_editor_launcher = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.compact_band_editor_launcher.add_css_class("compact-band-editor-launcher")
         self.compact_band_editor_launcher.set_hexpand(True)
-        self.compact_band_editor_launcher.set_visible(False)
         self.compact_band_editor_launcher.set_tooltip_text("Edit Selected Band")
         set_accessible_label(self.compact_band_editor_launcher, "Edit Selected Band")
 
+        compact_band_editor_bottom_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        compact_band_editor_bottom_bar.set_hexpand(True)
+        compact_band_editor_bottom_bar.set_margin_top(6)
+        compact_band_editor_bottom_bar.set_margin_bottom(6)
+        compact_band_editor_bottom_bar.set_margin_start(10)
+        compact_band_editor_bottom_bar.set_margin_end(10)
+        compact_band_editor_bottom_bar.add_css_class("compact-band-editor-bottom-bar")
+
         compact_band_editor_launcher_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         compact_band_editor_launcher_box.set_hexpand(True)
+        compact_band_editor_launcher_box.add_css_class("compact-band-editor-launcher-row")
 
         self.compact_band_editor_title_label = Gtk.Label(label="Band 1", xalign=0.0)
         self.compact_band_editor_title_label.add_css_class("band-editor-title")
@@ -791,8 +799,8 @@ class MiniEqWindowLayoutMixin:
         compact_band_editor_affordance.add_css_class("compact-band-editor-affordance")
         compact_band_editor_launcher_box.append(compact_band_editor_affordance)
 
-        self.compact_band_editor_launcher.set_child(compact_band_editor_launcher_box)
-        fader_section.append(self.compact_band_editor_launcher)
+        self.compact_band_editor_launcher.append(compact_band_editor_launcher_box)
+        compact_band_editor_bottom_bar.append(self.compact_band_editor_launcher)
 
         compact_band_editor_sheet_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         compact_band_editor_sheet_body.add_css_class("compact-band-editor-sheet")
@@ -804,6 +812,8 @@ class MiniEqWindowLayoutMixin:
         compact_band_editor_sheet.set_show_drag_handle(True)
         compact_band_editor_sheet.set_full_width(True)
         compact_band_editor_sheet.set_sheet(compact_band_editor_sheet_body)
+        compact_band_editor_sheet.set_bottom_bar(compact_band_editor_bottom_bar)
+        compact_band_editor_sheet.set_reveal_bottom_bar(False)
         compact_band_editor_sheet.set_open(False)
 
         band_editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1028,7 +1038,7 @@ class MiniEqWindowLayoutMixin:
                 if use_sheet:
                     band_editor.set_spacing(2)
                     band_editor_compact_box.set_spacing(2)
-                    band_editor_compact_top_row.set_spacing(4)
+                    band_editor_compact_top_row.set_spacing(6)
                     band_editor_compact_bottom_row.set_spacing(4)
                     self.selected_band_type_combo.set_size_request(104, -1)
                     self.selected_band_frequency_spin.set_size_request(96, -1)
@@ -1036,15 +1046,20 @@ class MiniEqWindowLayoutMixin:
                     self.selected_band_gain_spin.set_size_request(88, -1)
                     reorder_children(
                         band_editor_compact_top_row,
-                        (selected_band_box, type_box, compact_editor_spacer, state_box),
+                        (selected_band_box, type_box, state_box),
                     )
                     reorder_children(
                         band_editor_compact_bottom_row,
                         (frequency_box, q_box, gain_box),
                     )
+                    if compact_editor_spacer.get_parent() is not None and isinstance(
+                        compact_editor_spacer.get_parent(), Gtk.Box
+                    ):
+                        compact_editor_spacer.get_parent().remove(compact_editor_spacer)
                     if editor_spacer.get_parent() is not None and isinstance(editor_spacer.get_parent(), Gtk.Box):
                         editor_spacer.get_parent().remove(editor_spacer)
                     compact_band_editor_sheet.set_can_open(True)
+                    compact_band_editor_sheet.set_reveal_bottom_bar(True)
                     band_editor.add_css_class("band-editor-sheet")
                     band_editor_wide_row.set_visible(False)
                     band_editor_compact_box.set_visible(True)
@@ -1065,6 +1080,7 @@ class MiniEqWindowLayoutMixin:
                     ):
                         compact_editor_spacer.get_parent().remove(compact_editor_spacer)
                     compact_band_editor_sheet.set_can_open(False)
+                    compact_band_editor_sheet.set_reveal_bottom_bar(False)
                     compact_band_editor_sheet.set_open(False)
                     band_editor.remove_css_class("band-editor-sheet")
                     band_editor.add_css_class("band-editor-inline-compact")
@@ -1076,6 +1092,7 @@ class MiniEqWindowLayoutMixin:
             graph_height, fader_height, fader_scroller_height = wide_surface_sizes(page_size)
             graph_shell.set_spacing(6)
             compact_band_editor_sheet.set_can_open(False)
+            compact_band_editor_sheet.set_reveal_bottom_bar(False)
             compact_band_editor_sheet.set_open(False)
             self.graph_area.set_content_height(graph_height)
             self.analyzer_area.set_content_height(graph_height)
@@ -1159,21 +1176,6 @@ class MiniEqWindowLayoutMixin:
         compact_band_editor_sheet.set_content(content_scroller)
         self.compact_band_editor_sheet = compact_band_editor_sheet
 
-        def open_compact_band_editor(_button: Gtk.Button | None = None) -> None:
-            if workspace.get_collapsed():
-                compact_band_editor_sheet.set_open(True)
-
-            self.compact_band_editor_launcher.connect("clicked", open_compact_band_editor)
-
-        def sync_compact_band_editor_launcher_visibility(
-            _object: GObject.Object | None = None, _param: object | None = None
-        ) -> None:
-            self.compact_band_editor_launcher.set_visible(
-                workspace.get_collapsed()
-                and compact_band_editor_sheet.get_can_open()
-                and not compact_band_editor_sheet.get_open()
-            )
-
         def sync_compact_vertical_balance(_object: GObject.Object | None = None, _param: object | None = None) -> None:
             page_size = current_page_size()
             compact = workspace.get_collapsed()
@@ -1190,11 +1192,7 @@ class MiniEqWindowLayoutMixin:
             content_top_spacer.set_visible(False)
             content_bottom_spacer.set_visible(False)
 
-        workspace.connect("notify::collapsed", sync_compact_band_editor_launcher_visibility)
-        compact_band_editor_sheet.connect("notify::open", sync_compact_band_editor_launcher_visibility)
-        compact_band_editor_sheet.connect("notify::can-open", sync_compact_band_editor_launcher_visibility)
         content_scroller.get_vadjustment().connect("notify::page-size", sync_compact_band_editor)
-        content_scroller.get_vadjustment().connect("notify::page-size", sync_compact_band_editor_launcher_visibility)
         workspace.connect("notify::collapsed", sync_compact_vertical_balance)
         compact_band_editor_sheet.connect("notify::can-open", sync_compact_vertical_balance)
         content_scroller.get_vadjustment().connect("notify::page-size", sync_compact_vertical_balance)
