@@ -5,17 +5,12 @@ import math
 import cairo
 import gi
 
-gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import GLib, Gtk
 
 from .analyzer import analyzer_db_to_display_norm, analyzer_level_to_display_norm
 from .core import (
-    EQ_FREQUENCY_MAX_HZ,
-    EQ_FREQUENCY_MIN_HZ,
-    EQ_Q_MAX,
-    EQ_Q_MIN,
     FILTER_TYPE_INDEX_BY_VALUE,
     FILTER_TYPE_ORDER,
     FILTER_TYPES,
@@ -33,9 +28,11 @@ from .core import (
     total_response_db,
     total_response_db_at_frequencies,
 )
-from .gtk_utils import create_dropdown_from_strings
 
 ENGINE_CONTROL_REFRESH_INTERVAL_MS = 16
+FOCUS_BLUE = (0.47, 0.72, 1.0)
+FOCUS_BLUE_LIGHT = (0.68, 0.84, 1.0)
+RESPONSE_AMBER = (0.84, 0.46, 0.12)
 
 
 class MiniEqWindowGraphMixin:
@@ -81,7 +78,7 @@ class MiniEqWindowGraphMixin:
         for index in range(len(self.band_fader_widgets)):
             self.update_band_fader(index, solo_active)
 
-        self.fader_title_label.set_text(f"{self.visible_band_count}-Band Fader Strip")
+        self.fader_title_label.set_text(f"{self.visible_band_count} Bands")
 
     def update_band_fader(self, index: int, solo_active: bool | None = None) -> None:
         if index < 0 or index >= len(self.band_fader_widgets):
@@ -100,7 +97,7 @@ class MiniEqWindowGraphMixin:
             frequency=band.frequency,
             frequency_label=format_frequency(band.frequency),
             q_value=band.q,
-            q_label=f"Q {band.q:.2f}",
+            q_label=f"{band.q:.2f}",
             filter_type=band.filter_type,
             filter_type_label=FILTER_TYPE_ORDER[FILTER_TYPE_INDEX_BY_VALUE.get(band.filter_type, 0)],
             selected=index == self.selected_band_index,
@@ -163,6 +160,19 @@ class MiniEqWindowGraphMixin:
             f"{FILTER_TYPE_ORDER[selected.filter_type]} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
         )
 
+    def update_selected_band_editor(self) -> None:
+        selected = self.controller.bands[self.selected_band_index]
+        self.selected_band_label.set_text("Selected Band")
+        filter_type = FILTER_TYPE_ORDER[FILTER_TYPE_INDEX_BY_VALUE.get(selected.filter_type, 0)]
+        self.selected_band_gain_label.set_text(
+            f"Band {self.selected_band_index + 1} • {filter_type} • {selected.gain_db:+.1f} dB"
+        )
+        self.selected_band_type_combo.set_selected(FILTER_TYPE_INDEX_BY_VALUE.get(selected.filter_type, 0))
+        self.selected_band_frequency_spin.set_value(selected.frequency)
+        self.selected_band_q_spin.set_value(selected.q)
+        self.selected_band_mute_button.set_active(selected.mute)
+        self.selected_band_solo_button.set_active(selected.solo)
+
     def update_eq_power_indicator(self) -> None:
         self.bypass_state_label.remove_css_class("toolbar-inline-state-live")
         self.bypass_state_label.remove_css_class("toolbar-inline-state-bypass")
@@ -189,23 +199,26 @@ class MiniEqWindowGraphMixin:
                 if self.analyzer_frozen and self.analyzer_enabled
                 else ("Live" if self.analyzer_enabled else "Off")
             )
-            self.analyzer_summary_label.set_text(
-                "Output monitor"
-                if not self.analyzer_enabled
-                else f"Output monitor • {int(round(self.analyzer_smoothing * 100.0))}% smooth"
-            )
+            if not self.analyzer_enabled:
+                analyzer_summary = "Monitor off"
+            elif self.analyzer_frozen:
+                analyzer_summary = f"Monitor • Frozen • {int(round(self.analyzer_smoothing * 100.0))}% smooth"
+            else:
+                analyzer_summary = f"Monitor • {int(round(self.analyzer_smoothing * 100.0))}% smooth"
+            self.analyzer_summary_label.set_text(analyzer_summary)
             self.analyzer_smoothing_label.set_text(f"{int(round(self.analyzer_smoothing * 100.0))}%")
             self.analyzer_display_gain_label.set_text(f"{self.analyzer_display_gain_db:+.0f} dB")
             self.preamp_scale.set_value(self.controller.preamp_db)
             self.preamp_label.set_text(f"{self.controller.preamp_db:.1f} dB")
             self.mode_combo.set_selected(MODE_INDEX_BY_VALUE[self.controller.eq_mode])
-            self.graph_title_label.set_text("EQ Curve")
+            self.graph_title_label.set_text("Curve")
             self.analyzer_mode_combo.set_selected(0)
             self.analyzer_smoothing_scale.set_value(self.analyzer_smoothing * 100.0)
             self.analyzer_display_gain_scale.set_value(self.analyzer_display_gain_db)
 
             self.update_quick_fader_strip()
             self.update_focus_summary()
+            self.update_selected_band_editor()
         finally:
             self.updating_ui = False
 
@@ -272,6 +285,7 @@ class MiniEqWindowGraphMixin:
         try:
             self.update_band_fader(index)
             self.update_focus_summary()
+            self.update_selected_band_editor()
         finally:
             self.updating_ui = False
 
@@ -291,6 +305,7 @@ class MiniEqWindowGraphMixin:
         try:
             self.update_band_fader(index)
             self.update_focus_summary()
+            self.update_selected_band_editor()
         finally:
             self.updating_ui = False
 
@@ -310,6 +325,7 @@ class MiniEqWindowGraphMixin:
         try:
             self.update_band_fader(index)
             self.update_focus_summary()
+            self.update_selected_band_editor()
         finally:
             self.updating_ui = False
 
@@ -327,6 +343,7 @@ class MiniEqWindowGraphMixin:
         try:
             self.update_quick_fader_strip()
             self.update_focus_summary()
+            self.update_selected_band_editor()
         finally:
             self.updating_ui = False
 
@@ -345,6 +362,7 @@ class MiniEqWindowGraphMixin:
         try:
             self.update_quick_fader_strip()
             self.update_focus_summary()
+            self.update_selected_band_editor()
         finally:
             self.updating_ui = False
 
@@ -352,109 +370,6 @@ class MiniEqWindowGraphMixin:
         self.invalidate_graph_response_cache()
         self.queue_response_draw()
         self.update_preset_state()
-
-    def close_band_edit_popover(self) -> None:
-        popover = getattr(self, "band_edit_popover", None)
-        if popover is None:
-            return
-
-        try:
-            popover.popdown()
-            popover.unparent()
-        except Exception:
-            pass
-        self.band_edit_popover = None
-
-    def on_custom_band_edit_requested(self, index: int, field: str, anchor: Gtk.Widget) -> None:
-        if self.updating_ui:
-            return
-
-        self.selected_band_index = index
-        self.close_band_edit_popover()
-
-        popover = Gtk.Popover()
-        popover.set_has_arrow(False)
-        popover.set_autohide(True)
-        popover.set_parent(anchor)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_margin_top(10)
-        box.set_margin_bottom(10)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        popover.set_child(box)
-
-        band = self.controller.bands[index]
-
-        if field == "type":
-            label = Gtk.Label(label="Filter type", xalign=0.0)
-            label.add_css_class("metric-title")
-            box.append(label)
-
-            dropdown = create_dropdown_from_strings(FILTER_TYPE_ORDER)
-            dropdown.set_selected(FILTER_TYPE_INDEX_BY_VALUE.get(band.filter_type, 0))
-            dropdown.set_size_request(170, -1)
-
-            def on_type_selected(combo: Gtk.DropDown, _param: object) -> None:
-                selected = combo.get_selected()
-                if selected >= len(FILTER_TYPE_ORDER):
-                    return
-                self.controller.set_band_type(index, FILTER_TYPES[FILTER_TYPE_ORDER[selected]])
-                self.sync_ui_from_state()
-                popover.popdown()
-
-            dropdown.connect("notify::selected", on_type_selected)
-            box.append(dropdown)
-        else:
-            label_text = "Frequency" if field == "frequency" else "Q"
-            label = Gtk.Label(label=label_text, xalign=0.0)
-            label.add_css_class("metric-title")
-            box.append(label)
-
-            if field == "frequency":
-                spin = Gtk.SpinButton.new_with_range(EQ_FREQUENCY_MIN_HZ, EQ_FREQUENCY_MAX_HZ, 0.01)
-                spin.set_digits(2)
-                spin.set_value(band.frequency)
-            else:
-                spin = Gtk.SpinButton.new_with_range(EQ_Q_MIN, EQ_Q_MAX, 0.001)
-                spin.set_digits(3)
-                spin.set_value(band.q)
-
-            spin.set_size_request(170, -1)
-            box.append(spin)
-
-            button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            apply_button = Gtk.Button(label="Apply")
-            apply_button.add_css_class("suggested-action")
-            button_row.append(apply_button)
-            box.append(button_row)
-
-            def apply_value(_widget: Gtk.Widget | None = None) -> None:
-                if field == "frequency":
-                    self.on_custom_band_frequency_changed(index, spin.get_value())
-                else:
-                    self.on_custom_band_q_changed(index, spin.get_value())
-                popover.popdown()
-
-            def on_spin_key_pressed(
-                _controller: Gtk.EventControllerKey,
-                keyval: int,
-                _keycode: int,
-                _state: Gdk.ModifierType,
-            ) -> bool:
-                if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-                    apply_value()
-                    return True
-                return False
-
-            apply_button.connect("clicked", apply_value)
-            spin_key = Gtk.EventControllerKey()
-            spin_key.connect("key-pressed", on_spin_key_pressed)
-            spin.add_controller(spin_key)
-            spin.grab_focus()
-
-        self.band_edit_popover = popover
-        popover.popup()
 
     def on_band_fader_changed(self, scale: Gtk.Scale, index: int) -> None:
         if self.updating_ui:
@@ -472,6 +387,53 @@ class MiniEqWindowGraphMixin:
         self.update_status_summary()
         self.invalidate_graph_response_cache()
         self.queue_response_draw()
+
+    def on_selected_band_type_changed(self, combo: Gtk.DropDown, _param: object) -> None:
+        if self.updating_ui:
+            return
+
+        selected = combo.get_selected()
+        if selected >= len(FILTER_TYPE_ORDER):
+            return
+
+        index = self.selected_band_index
+        self.controller.set_band_type(index, FILTER_TYPES[FILTER_TYPE_ORDER[selected]])
+        self.updating_ui = True
+        try:
+            self.update_quick_fader_strip()
+            self.update_focus_summary()
+            self.update_selected_band_editor()
+        finally:
+            self.updating_ui = False
+
+        self.update_status_summary()
+        self.invalidate_graph_response_cache()
+        self.queue_response_draw()
+        self.update_preset_state()
+
+    def on_selected_band_frequency_changed(self, spin: Gtk.SpinButton) -> None:
+        if self.updating_ui:
+            return
+
+        self.on_custom_band_frequency_changed(self.selected_band_index, spin.get_value())
+
+    def on_selected_band_q_changed(self, spin: Gtk.SpinButton) -> None:
+        if self.updating_ui:
+            return
+
+        self.on_custom_band_q_changed(self.selected_band_index, spin.get_value())
+
+    def on_selected_band_mute_changed(self, button: Gtk.ToggleButton, _param: object) -> None:
+        if self.updating_ui:
+            return
+
+        self.on_custom_band_mute_toggled(self.selected_band_index, button.get_active())
+
+    def on_selected_band_solo_changed(self, button: Gtk.ToggleButton, _param: object) -> None:
+        if self.updating_ui:
+            return
+
+        self.on_custom_band_solo_toggled(self.selected_band_index, button.get_active())
 
     def frequency_to_x(self, frequency: float, width: float, left: float, right: float) -> float:
         usable = max(width - left - right, 1.0)
@@ -658,7 +620,7 @@ class MiniEqWindowGraphMixin:
         for db_value in db_lines:
             y = self.db_to_y(float(db_value), height_f, top, bottom)
             if db_value == 0:
-                cr.set_source_rgba(0.97, 0.66, 0.22, 0.32)
+                cr.set_source_rgba(0.72, 0.80, 0.88, 0.24)
                 cr.set_line_width(1.6)
             else:
                 cr.set_source_rgba(0.45, 0.52, 0.60, 0.18)
@@ -667,7 +629,7 @@ class MiniEqWindowGraphMixin:
             cr.line_to(width_f - right, y)
             cr.stroke()
             label = "+0 dB" if db_value == 0 else f"{db_value:+d}"
-            self.draw_text(cr, label, 10, y + 4, (0.72, 0.76, 0.80), 11.0)
+            self.draw_text(cr, label, 10, y + 4, (0.72, 0.76, 0.80), 11.5)
 
         analyzer_db_lines = [-60, -40, -20, 0]
         for db_value in analyzer_db_lines:
@@ -678,7 +640,7 @@ class MiniEqWindowGraphMixin:
             cr.line_to(width_f - right, y)
             cr.stroke()
             label = "0 dBFS" if db_value == 0 else str(db_value)
-            self.draw_text(cr, label, width_f - right + 8, y + 4, (0.45, 0.78, 0.86), 10.0)
+            self.draw_text(cr, label, width_f - right + 8, y + 4, (0.45, 0.78, 0.86), 10.5)
 
         for freq in freq_lines:
             x = self.frequency_to_x(float(freq), width_f, left, right)
@@ -688,18 +650,18 @@ class MiniEqWindowGraphMixin:
             cr.line_to(x, height_f - bottom)
             cr.stroke()
             label = f"{int(freq / 1000)}k" if freq >= 1000 else str(freq)
-            self.draw_text(cr, label, x - 10, height_f - 10, (0.72, 0.76, 0.80), 11.0)
+            self.draw_text(cr, label, x - 10, height_f - 10, (0.72, 0.76, 0.80), 11.5)
 
         cr.set_source_rgba(0.85, 0.90, 0.96, 0.10)
         cr.set_line_width(1.0)
         cr.rectangle(left, top, plot_width, plot_height)
         cr.stroke()
 
-        self.draw_text(cr, "20 Hz", left, 18, (0.82, 0.85, 0.89), 11.0)
-        self.draw_text(cr, "20 kHz", width_f - 58, 18, (0.82, 0.85, 0.89), 11.0)
-        analyzer_label = "Output monitor" if self.analyzer_enabled else "Analyzer off"
+        self.draw_text(cr, "20 Hz", left, 18, (0.82, 0.85, 0.89), 11.5)
+        self.draw_text(cr, "20 kHz", width_f - 58, 18, (0.82, 0.85, 0.89), 11.5)
+        analyzer_label = "Monitor" if self.analyzer_enabled else "Analyzer off"
         analyzer_color = (0.50, 0.86, 0.98) if self.analyzer_enabled else (0.65, 0.70, 0.75)
-        self.draw_text(cr, analyzer_label, left + 10, top + 18, analyzer_color, 12.0)
+        self.draw_text(cr, analyzer_label, left + 10, top + 18, analyzer_color, 12.5)
 
     def graph_cached_response_surface(
         self,
@@ -795,10 +757,10 @@ class MiniEqWindowGraphMixin:
             cr.line_to(points[-1][0], base_y)
             cr.close_path()
             gradient = cairo.LinearGradient(0, top, 0, height_f - bottom)
-            fill_alpha_top = 0.30 if self.controller.eq_enabled else 0.12
+            fill_alpha_top = 0.24 if self.controller.eq_enabled else 0.10
             fill_alpha_bottom = 0.02 if self.controller.eq_enabled else 0.01
-            gradient.add_color_stop_rgba(0.0, 0.98, 0.64, 0.18, fill_alpha_top)
-            gradient.add_color_stop_rgba(1.0, 0.98, 0.64, 0.18, fill_alpha_bottom)
+            gradient.add_color_stop_rgba(0.0, *RESPONSE_AMBER, fill_alpha_top)
+            gradient.add_color_stop_rgba(1.0, *RESPONSE_AMBER, fill_alpha_bottom)
             cr.set_source(gradient)
             cr.fill()
 
@@ -810,7 +772,7 @@ class MiniEqWindowGraphMixin:
                     cr.line_to(x, y)
                 cr.stroke()
 
-            cr.set_source_rgba(0.98, 0.64, 0.18, 0.16 if self.controller.eq_enabled else 0.08)
+            cr.set_source_rgba(*RESPONSE_AMBER, 0.12 if self.controller.eq_enabled else 0.06)
             cr.set_line_width(6.0)
             cr.new_path()
             cr.move_to(points[0][0], points[0][1])
@@ -819,9 +781,9 @@ class MiniEqWindowGraphMixin:
             cr.stroke()
 
             if self.controller.eq_enabled:
-                cr.set_source_rgb(0.98, 0.64, 0.18)
+                cr.set_source_rgb(*RESPONSE_AMBER)
             else:
-                cr.set_source_rgb(0.72, 0.61, 0.46)
+                cr.set_source_rgb(0.58, 0.64, 0.72)
             cr.set_line_width(2.6)
             cr.new_path()
             cr.move_to(points[0][0], points[0][1])
@@ -844,7 +806,7 @@ class MiniEqWindowGraphMixin:
             selected = index == self.selected_band_index
             effective = band_is_effective(band, solo_active)
             if selected:
-                cr.set_source_rgb(0.98, 0.74, 0.26)
+                cr.set_source_rgb(*FOCUS_BLUE_LIGHT)
             elif effective:
                 cr.set_source_rgb(0.78, 0.85, 0.93)
             else:
@@ -853,7 +815,7 @@ class MiniEqWindowGraphMixin:
             cr.fill()
 
             if selected:
-                cr.set_source_rgba(0.98, 0.74, 0.26, 0.24)
+                cr.set_source_rgba(*FOCUS_BLUE, 0.24)
                 cr.arc(x, y, 12.0, 0.0, math.tau)
                 cr.fill()
 

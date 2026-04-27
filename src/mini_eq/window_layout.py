@@ -14,8 +14,13 @@ from .band_fader import EqBandFader
 from .core import (
     APP_NAME,
     DEFAULT_ACTIVE_BANDS,
+    EQ_FREQUENCY_MAX_HZ,
+    EQ_FREQUENCY_MIN_HZ,
     EQ_PREAMP_MAX_DB,
     EQ_PREAMP_MIN_DB,
+    EQ_Q_MAX,
+    EQ_Q_MIN,
+    FILTER_TYPE_ORDER,
     MAX_BANDS,
     clamp,
 )
@@ -75,7 +80,7 @@ class MiniEqWindowLayoutMixin:
 
             button.connect("clicked", on_clicked)
 
-        import_button = Gtk.Button(label="Import APO Preset…")
+        import_button = Gtk.Button(label="Import Equalizer APO…")
         import_button.add_css_class("popover-action")
         connect_tool_action(import_button, self.on_import_apo_clicked)
         tools_box.append(import_button)
@@ -86,11 +91,19 @@ class MiniEqWindowLayoutMixin:
         tools_box.append(clear_button)
 
         tools_popover.set_child(tools_box)
-        tools_button = Gtk.MenuButton(label="Tools")
-        tools_button.add_css_class("toolbar-button")
-        tools_button.set_tooltip_text("Tools")
-        set_accessible_label(tools_button, "Tools")
+        tools_button = Gtk.MenuButton()
+        tools_button.set_icon_name("open-menu-symbolic")
+        tools_button.add_css_class("toolbar-icon-button")
+        tools_button.set_tooltip_text("App Menu")
+        set_accessible_label(tools_button, "App Menu")
         tools_button.set_popover(tools_popover)
+        header_bar.pack_end(tools_button)
+
+        route_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        route_box.add_css_class("route-box")
+        route_box.append(Gtk.Label(label="Audio Routing", xalign=0.0))
+        set_accessible_label(self.route_switch, "Audio Routing")
+        route_box.append(self.route_switch)
 
         utility_pane_button = Gtk.ToggleButton()
         utility_pane_button.set_icon_name("sidebar-show-right-symbolic")
@@ -99,12 +112,6 @@ class MiniEqWindowLayoutMixin:
         set_accessible_label(utility_pane_button, "Utility Pane")
         utility_pane_button.set_active(True)
 
-        route_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        route_box.add_css_class("route-box")
-        route_box.append(Gtk.Label(label="Audio Routing", xalign=0.0))
-        set_accessible_label(self.route_switch, "Audio Routing")
-        route_box.append(self.route_switch)
-
         bypass_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         bypass_box.add_css_class("route-box")
         bypass_box.append(Gtk.Label(label="EQ Bypass", xalign=0.0))
@@ -112,13 +119,13 @@ class MiniEqWindowLayoutMixin:
         self.bypass_state_label.set_accessible_role(Gtk.AccessibleRole.STATUS)
         set_accessible_label(self.bypass_state_label, "EQ Processing State")
         self.bypass_state_label.set_width_chars(8)
+        self.bypass_state_label.set_size_request(82, -1)
         self.bypass_state_label.set_xalign(0.5)
         bypass_box.append(self.bypass_state_label)
         set_accessible_label(self.bypass_switch, "EQ Bypass")
         bypass_box.append(self.bypass_switch)
 
         secondary_tools = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        secondary_tools.append(tools_button)
         secondary_tools.append(bypass_box)
         secondary_tools.append(route_box)
         secondary_tools.append(utility_pane_button)
@@ -143,11 +150,53 @@ class MiniEqWindowLayoutMixin:
         workspace.append(right_column)
         root.append(workspace)
 
+        utility_pane_width = 324
+        utility_pane_spacing = 14
+
+        def window_can_resize_for_utility_pane() -> bool:
+            maximized = getattr(self, "is_maximized", lambda: False)()
+            fullscreen = getattr(self, "is_fullscreen", lambda: False)()
+            return not maximized and not fullscreen
+
+        def resize_window_for_utility_pane(visible: bool) -> None:
+            nonlocal utility_pane_width
+
+            if not window_can_resize_for_utility_pane():
+                return
+
+            window_width = self.get_allocated_width()
+            window_height = self.get_allocated_height()
+            if window_width <= 1 or window_height <= 1:
+                return
+
+            if visible:
+                target_width = window_width + utility_pane_width + utility_pane_spacing
+            else:
+                allocated_width = right_column.get_allocated_width()
+                if allocated_width > 1:
+                    utility_pane_width = allocated_width
+                target_width = max(900, window_width - utility_pane_width - utility_pane_spacing)
+
+            self.set_default_size(int(target_width), int(window_height))
+
+        def set_utility_pane_visible(visible: bool, *, resize_window: bool = True) -> None:
+            if right_column.get_visible() == visible:
+                return
+
+            if resize_window:
+                resize_window_for_utility_pane(visible)
+
+            right_column.set_visible(visible)
+            workspace.set_spacing(utility_pane_spacing if visible else 0)
+            left_column.queue_resize()
+            workspace.queue_resize()
+
         def on_utility_pane_toggled(button: Gtk.ToggleButton) -> None:
-            right_column.set_visible(button.get_active())
+            set_utility_pane_visible(button.get_active())
 
         def on_utility_pane_visibility_changed(_column: Gtk.Box, _param: object) -> None:
             visible = right_column.get_visible()
+            workspace.set_spacing(utility_pane_spacing if visible else 0)
             if utility_pane_button.get_active() != visible:
                 utility_pane_button.set_active(visible)
 
@@ -165,7 +214,7 @@ class MiniEqWindowLayoutMixin:
             if keyval != Gdk.KEY_F9:
                 return False
 
-            right_column.set_visible(not right_column.get_visible())
+            utility_pane_button.set_active(not utility_pane_button.get_active())
             return True
 
         utility_pane_key_controller.connect("key-pressed", on_utility_pane_key_pressed)
@@ -232,12 +281,12 @@ class MiniEqWindowLayoutMixin:
         connect_preset_action(self.preset_delete_button, self.on_preset_delete_clicked)
         preset_more_box.append(self.preset_delete_button)
 
-        self.preset_import_button = Gtk.Button(label="Import…")
+        self.preset_import_button = Gtk.Button(label="Import Mini EQ Preset…")
         self.preset_import_button.add_css_class("popover-action")
         connect_preset_action(self.preset_import_button, self.on_preset_import_clicked)
         preset_more_box.append(self.preset_import_button)
 
-        self.preset_export_button = Gtk.Button(label="Export…")
+        self.preset_export_button = Gtk.Button(label="Export Mini EQ Preset…")
         self.preset_export_button.add_css_class("popover-action")
         connect_preset_action(self.preset_export_button, self.on_preset_export_clicked)
         preset_more_box.append(self.preset_export_button)
@@ -260,7 +309,7 @@ class MiniEqWindowLayoutMixin:
         system_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         system_section.add_css_class("utility-section")
         system_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        system_title = Gtk.Label(label="System", xalign=0.0)
+        system_title = Gtk.Label(label="Status", xalign=0.0)
         system_title.add_css_class("heading")
         system_header.append(system_title)
         system_header_spacer = Gtk.Box()
@@ -352,19 +401,13 @@ class MiniEqWindowLayoutMixin:
         analyzer_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         analyzer_section.add_css_class("utility-section")
         analyzer_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        analyzer_title = Gtk.Label(label="Analyzer", xalign=0.0)
+        analyzer_title = Gtk.Label(label="Monitor", xalign=0.0)
         analyzer_title.add_css_class("heading")
         analyzer_header.append(analyzer_title)
         analyzer_header_spacer = Gtk.Box()
         analyzer_header_spacer.set_hexpand(True)
         analyzer_header.append(analyzer_header_spacer)
         analyzer_header_suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.analyzer_state_label.add_css_class("graph-chip")
-        self.analyzer_state_label.add_css_class("analyzer-state-chip")
-        self.analyzer_state_label.set_width_chars(6)
-        self.analyzer_state_label.set_xalign(0.5)
-        self.analyzer_state_label.set_valign(Gtk.Align.CENTER)
-        analyzer_header_suffix.append(self.analyzer_state_label)
 
         analyzer_settings_popover = Gtk.Popover()
         analyzer_settings_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
@@ -383,7 +426,7 @@ class MiniEqWindowLayoutMixin:
         analyzer_header_suffix.append(analyzer_settings_button)
 
         self.analyzer_switch.set_valign(Gtk.Align.CENTER)
-        set_accessible_label(self.analyzer_switch, "Analyzer")
+        set_accessible_label(self.analyzer_switch, "Monitor")
         analyzer_header_suffix.append(self.analyzer_switch)
         analyzer_header.append(analyzer_header_suffix)
         analyzer_section.append(analyzer_header)
@@ -485,7 +528,7 @@ class MiniEqWindowLayoutMixin:
         self.graph_area.set_hexpand(True)
         self.graph_area.set_vexpand(True)
         self.graph_area.set_accessible_role(Gtk.AccessibleRole.IMG)
-        set_accessible_label(self.graph_area, "EQ Curve")
+        set_accessible_label(self.graph_area, "Curve")
         set_accessible_description(self.graph_area, "Frequency response curve with optional analyzer levels")
         self.graph_area.set_draw_func(self.on_graph_draw)
         graph_click = Gtk.GestureClick()
@@ -537,17 +580,16 @@ class MiniEqWindowLayoutMixin:
         fader_section.set_margin_bottom(10)
         fader_section.set_margin_start(14)
         fader_section.set_margin_end(14)
-        self.fader_title_label = Gtk.Label(label=f"{DEFAULT_ACTIVE_BANDS}-Band Fader Strip", xalign=0.0)
+        self.fader_title_label = Gtk.Label(label=f"{DEFAULT_ACTIVE_BANDS} Bands", xalign=0.0)
         self.fader_title_label.add_css_class("heading")
-        self.fader_title_label.add_css_class("accent-heading")
-        self.fader_title_label.set_tooltip_text("Drag Gain; Edit Frequency, Q, and Filter Type on the Selected Band")
+        self.fader_title_label.set_tooltip_text("Drag Gain; Edit the Selected Band Below")
         fader_section.append(self.fader_title_label)
 
         self.fader_scroller = Gtk.ScrolledWindow()
         self.fader_scroller.set_hexpand(True)
         self.fader_scroller.set_vexpand(False)
         self.fader_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        self.fader_scroller.set_min_content_height(230)
+        self.fader_scroller.set_min_content_height(212)
         self.fader_scroller.add_css_class("fader-scroller")
 
         fader_grid = Gtk.Grid(column_spacing=7, row_spacing=0)
@@ -561,7 +603,7 @@ class MiniEqWindowLayoutMixin:
         for index in range(MAX_BANDS):
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             box.set_halign(Gtk.Align.CENTER)
-            box.set_hexpand(True)
+            box.set_hexpand(False)
             box.set_size_request(76, -1)
             box.add_css_class("eq-band-box")
             band_click = Gtk.GestureClick()
@@ -572,11 +614,6 @@ class MiniEqWindowLayoutMixin:
                 index,
                 self.on_custom_band_fader_selected,
                 self.on_custom_band_fader_changed,
-                self.on_custom_band_frequency_changed,
-                self.on_custom_band_q_changed,
-                self.on_custom_band_mute_toggled,
-                self.on_custom_band_solo_toggled,
-                self.on_custom_band_edit_requested,
             )
             box.append(fader)
 
@@ -586,11 +623,100 @@ class MiniEqWindowLayoutMixin:
 
         self.fader_scroller.set_child(fader_grid)
         fader_section.append(self.fader_scroller)
+
+        band_editor = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        band_editor.add_css_class("band-editor")
+        band_editor.set_hexpand(True)
+        band_editor.set_valign(Gtk.Align.CENTER)
+
+        selected_band_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        selected_band_box.set_size_request(150, -1)
+        self.selected_band_label = Gtk.Label(label="Selected Band", xalign=0.0)
+        self.selected_band_label.add_css_class("band-editor-title")
+        selected_band_box.append(self.selected_band_label)
+        self.selected_band_gain_label = Gtk.Label(label="Band 1 • Bell • +0.0 dB", xalign=0.0)
+        self.selected_band_gain_label.add_css_class("dim-label")
+        selected_band_box.append(self.selected_band_gain_label)
+        band_editor.append(selected_band_box)
+
+        state_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        state_box.add_css_class("band-editor-state")
+        state_box.set_valign(Gtk.Align.CENTER)
+
+        self.selected_band_mute_button = Gtk.ToggleButton(label="M")
+        self.selected_band_mute_button.add_css_class("band-editor-toggle")
+        self.selected_band_mute_button.set_tooltip_text("Mute Selected Band")
+        set_accessible_label(self.selected_band_mute_button, "Mute Selected Band")
+        state_box.append(self.selected_band_mute_button)
+
+        self.selected_band_solo_button = Gtk.ToggleButton(label="S")
+        self.selected_band_solo_button.add_css_class("band-editor-toggle")
+        self.selected_band_solo_button.set_tooltip_text("Solo Selected Band")
+        set_accessible_label(self.selected_band_solo_button, "Solo Selected Band")
+        state_box.append(self.selected_band_solo_button)
+        band_editor.append(state_box)
+
+        type_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        type_box.add_css_class("band-editor-field")
+        type_label = Gtk.Label(label="Type", xalign=0.0)
+        type_label.add_css_class("metric-title")
+        type_box.append(type_label)
+        self.selected_band_type_combo = Gtk.DropDown(model=Gtk.StringList.new(FILTER_TYPE_ORDER))
+        self.selected_band_type_combo.set_size_request(142, -1)
+        self.selected_band_type_combo.add_css_class("toolbar-select")
+        self.selected_band_type_combo.add_css_class("band-editor-input")
+        set_accessible_label(self.selected_band_type_combo, "Selected Band Filter Type")
+        type_box.append(self.selected_band_type_combo)
+        band_editor.append(type_box)
+
+        frequency_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        frequency_box.add_css_class("band-editor-field")
+        frequency_label = Gtk.Label(label="Frequency", xalign=0.0)
+        frequency_label.add_css_class("metric-title")
+        frequency_box.append(frequency_label)
+        self.selected_band_frequency_spin = Gtk.SpinButton.new_with_range(
+            EQ_FREQUENCY_MIN_HZ,
+            EQ_FREQUENCY_MAX_HZ,
+            0.1,
+        )
+        self.selected_band_frequency_spin.set_digits(1)
+        self.selected_band_frequency_spin.set_size_request(126, -1)
+        self.selected_band_frequency_spin.add_css_class("band-editor-input")
+        set_accessible_label(self.selected_band_frequency_spin, "Selected Band Frequency")
+        frequency_box.append(self.selected_band_frequency_spin)
+        band_editor.append(frequency_box)
+
+        q_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        q_box.add_css_class("band-editor-field")
+        q_label = Gtk.Label(label="Q", xalign=0.0)
+        q_label.add_css_class("metric-title")
+        q_box.append(q_label)
+        self.selected_band_q_spin = Gtk.SpinButton.new_with_range(EQ_Q_MIN, EQ_Q_MAX, 0.001)
+        self.selected_band_q_spin.set_digits(3)
+        self.selected_band_q_spin.set_size_request(96, -1)
+        self.selected_band_q_spin.add_css_class("band-editor-input")
+        set_accessible_label(self.selected_band_q_spin, "Selected Band Q")
+        q_box.append(self.selected_band_q_spin)
+        band_editor.append(q_box)
+
+        editor_spacer = Gtk.Box()
+        editor_spacer.set_hexpand(True)
+        band_editor.append(editor_spacer)
+
+        fader_section.append(band_editor)
         fader_shell.append(fader_section)
         left_column.append(fader_shell)
 
+        content_clamp = Adw.Clamp()
+        content_clamp.set_maximum_size(1320)
+        content_clamp.set_tightening_threshold(1180)
+        content_clamp.set_hexpand(True)
+        content_clamp.set_vexpand(False)
+        content_clamp.set_valign(Gtk.Align.START)
+        content_clamp.set_child(root)
+
         self.toast_overlay = Adw.ToastOverlay()
-        self.toast_overlay.set_child(root)
+        self.toast_overlay.set_child(content_clamp)
         toolbar_view.set_content(self.toast_overlay)
         self.set_content(toolbar_view)
 
@@ -601,6 +727,11 @@ class MiniEqWindowLayoutMixin:
         self.analyzer_freeze_switch.connect("notify::active", self.on_analyzer_freeze_changed)
         self.analyzer_smoothing_scale.connect("value-changed", self.on_analyzer_smoothing_changed)
         self.analyzer_display_gain_scale.connect("value-changed", self.on_analyzer_display_gain_changed)
+        self.selected_band_type_combo.connect("notify::selected", self.on_selected_band_type_changed)
+        self.selected_band_frequency_spin.connect("value-changed", self.on_selected_band_frequency_changed)
+        self.selected_band_q_spin.connect("value-changed", self.on_selected_band_q_changed)
+        self.selected_band_mute_button.connect("notify::active", self.on_selected_band_mute_changed)
+        self.selected_band_solo_button.connect("notify::active", self.on_selected_band_solo_changed)
         self.bypass_switch.connect("notify::active", self.on_bypass_changed)
         self.route_switch.connect("notify::active", self.on_route_changed)
         self.connect("close-request", self.on_close_request)
@@ -762,7 +893,7 @@ class MiniEqWindowLayoutMixin:
 
         segments = (
             (-12.0, -3.0, (0.38, 0.78, 0.50, 0.78)),
-            (-3.0, 0.0, (1.0, 0.72, 0.28, 0.82)),
+            (-3.0, 0.0, (0.58, 0.66, 0.76, 0.64)),
             (0.0, 6.0, (1.0, 0.35, 0.28, 0.86)),
         )
         cr.save()

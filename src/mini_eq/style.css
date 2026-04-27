@@ -1,12 +1,12 @@
 .toolbar-row {
-    padding: 6px 10px;
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    background-color: rgba(30, 34, 40, 0.72);
+    padding: 5px 6px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background-color: transparent;
 }
 
 .toolbar-button {
-    padding: 3px 10px;
+    padding: 3px 9px;
     min-height: 30px;
 }
 
@@ -28,43 +28,43 @@
 }
 
 .route-box {
-    padding: 2px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.045);
-    background-color: rgba(255, 255, 255, 0.04);
+    padding: 0 2px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background-color: transparent;
 }
 
 .toolbar-inline-state {
-    min-width: 58px;
-    padding: 3px 10px;
-    border-radius: 999px;
-    background-color: rgba(127, 145, 165, 0.14);
+    min-width: 52px;
+    padding: 2px 8px;
+    border-radius: 8px;
+    background-color: rgba(127, 145, 165, 0.075);
     color: rgba(223, 231, 239, 0.90);
     font-size: 9pt;
     font-weight: 700;
 }
 
 .toolbar-inline-state-live {
-    background-color: rgba(78, 184, 109, 0.16);
+    background-color: rgba(78, 184, 109, 0.13);
     color: #75e493;
 }
 
 .toolbar-inline-state-bypass {
-    background-color: rgba(127, 145, 165, 0.14);
+    background-color: rgba(127, 145, 165, 0.075);
     color: rgba(223, 231, 239, 0.86);
 }
 
 .utility-section {
-    padding: 10px;
-    border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.055);
-    background-color: rgba(18, 24, 33, 0.66);
+    padding: 9px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.018);
+    background-color: rgba(18, 24, 33, 0.16);
 }
 
 .utility-row {
-    padding: 8px 10px;
-    border-radius: 14px;
-    background-color: rgba(255, 255, 255, 0.045);
+    padding: 8px 9px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.016);
 }
 
 .preset-row {
@@ -84,8 +84,8 @@
 }
 
 .preset-state-modified {
-    background-color: rgba(255, 178, 74, 0.16);
-    color: #ffcb62;
+    background-color: rgba(186, 170, 255, 0.14);
+    color: #d8ccff;
 }
 
 .preset-state-unsaved {
@@ -106,8 +106,8 @@
 }
 
 .system-state-warning {
-    background-color: rgba(255, 178, 74, 0.16);
-    color: #ffcb62;
+    background-color: rgba(255, 92, 80, 0.16);
+    color: #ffb3ad;
 }
 
 .system-state-bypass {
@@ -116,19 +116,19 @@
 }
 
 .system-row {
-    padding: 8px 10px;
-    border-radius: 14px;
-    background-color: rgba(255, 255, 255, 0.045);
+    padding: 7px 8px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.014);
 }
 
 .headroom-panel {
-    padding: 9px 10px 10px 10px;
-    border-radius: 14px;
-    background-color: rgba(255, 255, 255, 0.045);
+    padding: 8px 9px 9px 9px;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.014);
 }
 
 .headroom-state {
-    font-size: 14pt;
+    font-size: 13pt;
     font-weight: 800;
     color: #f7fbff;
 }
@@ -136,14 +136,14 @@
 .headroom-peak-chip {
     padding: 4px 9px;
     border-radius: 999px;
-    font-size: 9pt;
+    font-size: 9.5pt;
     font-weight: 800;
     background-color: rgba(127, 145, 165, 0.14);
     color: rgba(223, 231, 239, 0.90);
 }
 
 .headroom-detail {
-    font-size: 9pt;
+    font-size: 9.5pt;
     color: rgba(219, 228, 236, 0.80);
 }
 
@@ -157,12 +157,12 @@
 }
 
 .headroom-state.headroom-tight {
-    color: #ffcb62;
+    color: #ffb3ad;
 }
 
 .headroom-peak-chip.headroom-tight {
-    background-color: rgba(255, 178, 74, 0.16);
-    color: #ffcb62;
+    background-color: rgba(255, 92, 80, 0.12);
+    color: #ffb3ad;
 }
 
 .headroom-state.headroom-risk {
@@ -190,7 +190,7 @@
 
 .system-row-warning {
     padding-left: 8px;
-    border-left: 2px solid rgba(255, 178, 74, 0.75);
+    border-left: 2px solid rgba(255, 92, 80, 0.70);
 }
 
 .system-row .metric-value {
@@ -204,7 +204,7 @@
 }
 
 .metric-title {
-    font-size: 9pt;
+    font-size: 9.5pt;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -218,7 +218,7 @@
 }
 
 .metric-detail {
-    font-size: 9pt;
+    font-size: 9.5pt;
     color: rgba(219, 228, 236, 0.80);
 }
 
@@ -228,9 +228,9 @@
 }
 
 .warning-banner-alert {
-    border: 1px solid rgba(255, 161, 72, 0.45);
-    background-color: rgba(86, 50, 22, 0.55);
-    color: #ffe0b2;
+    border: 1px solid rgba(255, 92, 80, 0.42);
+    background-color: rgba(78, 27, 28, 0.52);
+    color: #ffd2d0;
 }
 
 .panel-card {
@@ -252,21 +252,12 @@
     color: #f7fbff;
 }
 
-.graph-chip {
-    padding: 4px 10px;
-    border-radius: 999px;
-    background-color: rgba(82, 170, 214, 0.14);
-    color: #9fe5ff;
-    font-size: 9pt;
-    font-weight: 700;
-}
-
 .graph-header scale trough {
     min-height: 4px;
 }
 
 .graph-header label {
-    font-size: 9pt;
+    font-size: 9.5pt;
 }
 
 .graph-stage {
@@ -278,10 +269,6 @@
 
 .quick-view-shell {
     padding: 0;
-}
-
-.analyzer-state-chip {
-    min-width: 42px;
 }
 
 .signal-chip-row {
@@ -301,20 +288,67 @@
 }
 
 .path-strip-detail {
+    font-size: 9.5pt;
     color: rgba(225, 232, 239, 0.70);
 }
 
 .accent-heading {
-    color: #ffb24a;
+    color: #9fe5ff;
 }
 
 .fader-scroller {
-    min-height: 230px;
+    min-height: 212px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.030);
+    background-color: rgba(255, 255, 255, 0.020);
 }
 
 .eq-band-box {
     padding: 6px 5px 8px 5px;
-    border-radius: 16px;
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    background-color: transparent;
+    border: 1px solid transparent;
+}
+
+.band-editor {
+    margin-top: 2px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background-color: rgba(255, 255, 255, 0.020);
+    border: 1px solid rgba(255, 255, 255, 0.030);
+}
+
+.band-editor-title {
+    color: #f7fbff;
+    font-size: 10.5pt;
+    font-weight: 800;
+}
+
+.band-editor-state {
+    padding: 0 2px;
+}
+
+.band-editor-field {
+    margin-left: 4px;
+}
+
+.band-editor-input {
+    min-height: 30px;
+}
+
+.band-editor-toggle {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 0;
+    border-radius: 9px;
+    font-weight: 800;
+    color: rgba(220, 228, 236, 0.76);
+    background-color: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.040);
+}
+
+.band-editor-toggle:checked {
+    color: #ddecff;
+    background-color: rgba(82, 151, 233, 0.28);
+    border-color: rgba(117, 178, 255, 0.42);
 }

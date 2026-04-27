@@ -112,7 +112,7 @@ class MiniEqWindow(
         self.bypass_state_label = Gtk.Label(xalign=1.0)
         self.analyzer_switch = Gtk.Switch()
         self.analyzer_freeze_switch = Gtk.Switch()
-        self.analyzer_mode_combo = create_dropdown_from_strings(["Output monitor"])
+        self.analyzer_mode_combo = create_dropdown_from_strings(["Monitor"])
         self.analyzer_mode_combo.set_sensitive(False)
         self.analyzer_state_label = Gtk.Label(xalign=1.0)
         self.analyzer_summary_label = Gtk.Label(xalign=0.0)
