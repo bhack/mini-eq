@@ -30,7 +30,6 @@ GAIN_DRAG_COARSE_MULTIPLIER = 2.0
 
 FOCUS_BLUE = (0.47, 0.72, 1.0)
 FOCUS_BLUE_LIGHT = (0.68, 0.84, 1.0)
-FOCUS_BLUE_DARK = (0.24, 0.48, 0.76)
 
 FILTER_TYPE_SHORT_LABELS = {
     "Off": "Off",
@@ -63,11 +62,13 @@ class EqBandFader(Gtk.DrawingArea):
         index: int,
         select_callback: Callable[[int], None],
         gain_changed_callback: Callable[[int, float], None],
+        activate_callback: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__()
         self.index = index
         self.select_callback = select_callback
         self.gain_changed_callback = gain_changed_callback
+        self.activate_callback = activate_callback
         self.gain_db = 0.0
         self.frequency = 0.0
         self.frequency_label = ""
@@ -88,7 +89,7 @@ class EqBandFader(Gtk.DrawingArea):
         self.dragging_gain = False
 
         self.set_content_width(72)
-        self.set_content_height(212)
+        self.set_content_height(182)
         self.set_hexpand(False)
         self.set_focusable(True)
         self.set_accessible_role(Gtk.AccessibleRole.SLIDER)
@@ -217,6 +218,13 @@ class EqBandFader(Gtk.DrawingArea):
         normalized = clamp((bottom - y) / max(bottom - top, 1.0), 0.0, 1.0)
         return round(((normalized * GAIN_RANGE_DB) + GAIN_MIN_DB) * 10.0) / 10.0
 
+    def track_bounds(self, height: float) -> tuple[float, float]:
+        track_top = 56.0
+        minimum_track_length = 42.0
+        bottom_margin = 44.0 if self.show_q_in_tile(height) else 32.0
+        track_bottom = max(track_top + minimum_track_length, height - bottom_margin)
+        return track_top, track_bottom
+
     def selected_frequency_label(self) -> str:
         if self.frequency >= 1000.0:
             return f"{self.frequency / 1000.0:.2g} kHz"
@@ -227,8 +235,11 @@ class EqBandFader(Gtk.DrawingArea):
 
     def compact_q_label(self) -> str:
         if self.q_value >= 10.0:
-            return f"Q {self.q_value:.1f}"
-        return f"Q {self.q_value:.2f}"
+            return f"{self.q_value:.1f}"
+        return f"{self.q_value:.2f}"
+
+    def show_q_in_tile(self, height: float) -> bool:
+        return height >= 170.0
 
     def draw_text(
         self,
@@ -250,35 +261,24 @@ class EqBandFader(Gtk.DrawingArea):
         cr.move_to(text_x, y)
         cr.show_text(text)
 
-    def draw_micro_badge(
+    def draw_state_badge(
         self,
         cr,
         label: str,
         x: float,
         y: float,
         *,
-        active: bool,
-        alpha: float,
+        width: float,
         color: tuple[float, float, float],
+        alpha: float,
     ) -> None:
-        width = 16.0
-        height = 12.0
-        rounded_rectangle(cr, x, y, width, height, 5.0)
-        if active:
-            cr.set_source_rgba(*color, 0.25 * alpha)
-            cr.fill_preserve()
-            cr.set_source_rgba(*color, 0.55 * alpha)
-            cr.set_line_width(1.0)
-            cr.stroke()
-            text_color = (0.94, 0.97, 1.0)
-        else:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.035 * alpha)
-            cr.fill_preserve()
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.08 * alpha)
-            cr.set_line_width(1.0)
-            cr.stroke()
-            text_color = (0.50, 0.57, 0.64)
-        self.draw_text(cr, label, x + (width / 2.0), y + 9.4, 7.6, text_color, bold=True)
+        rounded_rectangle(cr, x, y, width, 15.0, 6.5)
+        cr.set_source_rgba(*color, 0.22 * alpha)
+        cr.fill_preserve()
+        cr.set_source_rgba(*color, 0.50 * alpha)
+        cr.set_line_width(1.0)
+        cr.stroke()
+        self.draw_text(cr, label, x + (width / 2.0), y + 10.7, 7.8, (0.94, 0.97, 1.0), bold=True)
 
     def on_draw(self, _area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
         width_f = float(width)
@@ -291,11 +291,11 @@ class EqBandFader(Gtk.DrawingArea):
         if engaged:
             rounded_rectangle(cr, 2.0, 2.0, width_f - 4.0, height_f - 4.0, 15.0)
             if self.selected:
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.036 * alpha)
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.026 * alpha)
             else:
                 cr.set_source_rgba(1.0, 1.0, 1.0, 0.045 * alpha)
             cr.fill_preserve()
-            border_alpha = 0.34 if self.selected else 0.15
+            border_alpha = 0.30 if self.selected else 0.15
             if self.focused:
                 border_alpha = max(border_alpha, 0.34)
             if self.selected:
@@ -305,28 +305,27 @@ class EqBandFader(Gtk.DrawingArea):
             cr.set_line_width(1.0)
             cr.stroke()
 
-        self.draw_text(cr, str(self.index + 1), center_x, 16.0, 9.5, (0.82, 0.86, 0.90), bold=True)
+        self.draw_text(cr, str(self.index + 1), center_x, 15.0, 10.0, (0.82, 0.86, 0.90), bold=True)
 
-        type_color = FOCUS_BLUE_LIGHT if self.selected else (0.66, 0.72, 0.78)
+        type_color = (0.72, 0.78, 0.84) if self.selected else (0.66, 0.72, 0.78)
         if not self.active:
             type_color = (0.50, 0.56, 0.62)
-        self.draw_text(cr, self.compact_filter_type_label(), center_x, 31.0, 8.6, type_color, bold=True)
+        self.draw_text(cr, self.compact_filter_type_label(), center_x, 29.5, 9.0, type_color, bold=True)
 
         gain_text = f"{self.gain_db:+.1f} dB"
-        gain_width = 58.0
-        rounded_rectangle(cr, center_x - gain_width / 2.0, 37.0, gain_width, 18.0, 8.0)
+        gain_width = 60.0
+        rounded_rectangle(cr, center_x - gain_width / 2.0, 35.0, gain_width, 18.0, 8.0)
         if self.selected:
-            cr.set_source_rgba(*FOCUS_BLUE_DARK, 0.30 * alpha)
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.08 * alpha)
         else:
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.07 * alpha)
         cr.fill()
-        gain_color = FOCUS_BLUE_LIGHT if self.selected else (0.90, 0.94, 0.98)
+        gain_color = (0.91, 0.95, 0.99) if self.selected else (0.90, 0.94, 0.98)
         if not self.active:
             gain_color = (0.62, 0.68, 0.74)
-        self.draw_text(cr, gain_text, center_x, 50.0, 8.8, gain_color, bold=True)
+        self.draw_text(cr, gain_text, center_x, 48.1, 9.3, gain_color, bold=True)
 
-        track_top = 74.0
-        track_bottom = height_f - 58.0
+        track_top, track_bottom = self.track_bounds(height_f)
         track_x = center_x - 3.5
         track_width = 7.0
         knob_y = self.gain_to_y(self.gain_db, track_top, track_bottom)
@@ -350,8 +349,8 @@ class EqBandFader(Gtk.DrawingArea):
         rounded_rectangle(cr, track_x, fill_top, track_width, fill_bottom - fill_top, 4.0)
         fill_gradient = cairo.LinearGradient(0, fill_top, 0, fill_bottom)
         if self.selected or self.dragging_gain:
-            fill_gradient.add_color_stop_rgba(0.0, 0.48, 0.72, 0.98, 0.82 * alpha)
-            fill_gradient.add_color_stop_rgba(1.0, 0.30, 0.58, 0.88, 0.82 * alpha)
+            fill_gradient.add_color_stop_rgba(0.0, 0.56, 0.69, 0.81, 0.56 * alpha)
+            fill_gradient.add_color_stop_rgba(1.0, 0.38, 0.51, 0.64, 0.56 * alpha)
         else:
             fill_gradient.add_color_stop_rgba(0.0, 0.58, 0.68, 0.78, 0.52 * alpha)
             fill_gradient.add_color_stop_rgba(1.0, 0.38, 0.48, 0.60, 0.52 * alpha)
@@ -382,7 +381,7 @@ class EqBandFader(Gtk.DrawingArea):
 
         rounded_rectangle(cr, knob_x, knob_y_top, knob_width, knob_height, 5.0)
         if self.selected or self.dragging_gain:
-            cr.set_source_rgba(0.42, 0.69, 0.96, 0.98 * alpha)
+            cr.set_source_rgba(0.54, 0.72, 0.90, 0.98 * alpha)
         else:
             cr.set_source_rgba(0.70, 0.77, 0.84, 0.98 * alpha)
         cr.fill_preserve()
@@ -396,34 +395,46 @@ class EqBandFader(Gtk.DrawingArea):
         cr.stroke()
 
         overview_freq_color = (0.76, 0.81, 0.86) if self.active else (0.54, 0.59, 0.64)
-        if self.selected:
-            overview_freq_color = FOCUS_BLUE_LIGHT
-        self.draw_text(cr, self.selected_frequency_label(), center_x, height_f - 38.0, 8.9, overview_freq_color)
+        if self.show_q_in_tile(height_f):
+            q_color = (0.60, 0.66, 0.72) if self.active else (0.46, 0.52, 0.58)
+            self.draw_text(cr, self.selected_frequency_label(), center_x, height_f - 25.0, 9.0, overview_freq_color)
+            self.draw_text(cr, self.compact_q_label(), center_x, height_f - 11.0, 8.6, q_color)
+        else:
+            self.draw_text(cr, self.selected_frequency_label(), center_x, height_f - 13.0, 9.0, overview_freq_color)
 
-        q_color = (0.62, 0.68, 0.74) if self.active else (0.46, 0.52, 0.58)
-        if self.selected:
-            q_color = (0.78, 0.88, 0.98)
-        self.draw_text(cr, self.compact_q_label(), center_x, height_f - 23.0, 8.5, q_color)
-
-        badge_y = height_f - 18.0
-        self.draw_micro_badge(
-            cr,
-            "M",
-            center_x - 18.0,
-            badge_y,
-            active=self.muted,
-            alpha=alpha,
-            color=(0.96, 0.42, 0.42),
-        )
-        self.draw_micro_badge(
-            cr,
-            "S",
-            center_x + 2.0,
-            badge_y,
-            active=self.soloed,
-            alpha=alpha,
-            color=FOCUS_BLUE,
-        )
+        badge_y = 52.0
+        badge_right = width_f - 8.0
+        if self.muted and self.soloed:
+            badge_width = 24.0
+            self.draw_state_badge(
+                cr,
+                "M/S",
+                badge_right - badge_width,
+                badge_y,
+                width=badge_width,
+                color=(0.78, 0.65, 0.98),
+                alpha=alpha,
+            )
+        elif self.muted:
+            self.draw_state_badge(
+                cr,
+                "M",
+                badge_right - 14.0,
+                badge_y,
+                width=14.0,
+                color=(0.94, 0.44, 0.44),
+                alpha=alpha,
+            )
+        elif self.soloed:
+            self.draw_state_badge(
+                cr,
+                "S",
+                badge_right - 14.0,
+                badge_y,
+                width=14.0,
+                color=FOCUS_BLUE,
+                alpha=alpha,
+            )
 
     def interaction_multiplier_for_state(self, state: Gdk.ModifierType) -> float:
         if state & Gdk.ModifierType.SHIFT_MASK:
@@ -440,7 +451,8 @@ class EqBandFader(Gtk.DrawingArea):
         return GAIN_STEP_DB
 
     def update_gain_from_drag(self, offset_y: float, state: Gdk.ModifierType) -> None:
-        usable_height = max(float(self.get_allocated_height()) - 126.0, 1.0)
+        track_top, track_bottom = self.track_bounds(float(self.get_allocated_height()))
+        usable_height = max(track_bottom - track_top, 1.0)
         multiplier = self.interaction_multiplier_for_state(state)
         gain = self.drag_start_gain_db - ((offset_y / usable_height) * GAIN_RANGE_DB * multiplier)
         gain = round(clamp(gain, GAIN_MIN_DB, GAIN_MAX_DB) * 10.0) / 10.0
@@ -543,6 +555,8 @@ class EqBandFader(Gtk.DrawingArea):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space):
             self.grab_focus()
             self.select_callback(self.index)
+            if self.activate_callback is not None:
+                self.activate_callback(self.index)
             return True
 
         return False

@@ -20,6 +20,8 @@ from .band_fader import EqBandFader
 from .core import (
     APP_NAME,
     DEFAULT_ACTIVE_BANDS,
+    EQ_GAIN_MAX_DB,
+    EQ_GAIN_MIN_DB,
     EQ_MODES,
     MODE_ORDER,
     SAMPLE_RATE,
@@ -36,6 +38,9 @@ from .window_presets import MiniEqWindowPresetMixin
 from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positive_int
 
 TOAST_TIMEOUT_SECONDS = 2
+MIN_WINDOW_WIDTH = 980
+MIN_WINDOW_HEIGHT = 660
+ROUTING_CLOSE_SETTLE_MS = 300
 TOAST_IGNORED_PREFIXES = (
     "filter-chain PipeWire EQ ready:",
     "filter-chain PipeWire EQ stopped",
@@ -60,7 +65,8 @@ class MiniEqWindow(
         self.post_present_source_id = 0
         self.post_present_ready = False
         self.toast_overlay: Adw.ToastOverlay | None = None
-        self.set_default_size(1320, 810)
+        self.set_default_size(1360, 700)
+        self.set_size_request(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self.updating_ui = False
         self.selected_band_index = 0
         self.visible_band_count = DEFAULT_ACTIVE_BANDS
@@ -96,6 +102,10 @@ class MiniEqWindow(
         self.graph_selected_response_cache_key = None
         self.graph_selected_response_cache_points: list[tuple[float, float]] = []
         self.analyzer_last_frame_time = time.monotonic()
+        self.adaptive_narrow_breakpoint = None
+        self.utility_pane_button: Gtk.ToggleButton | None = None
+        self.utility_pane_column: Gtk.Box | None = None
+        self.close_finish_source_id = 0
 
         self.warning_banner = Gtk.Label(xalign=0.0)
         self.warning_banner.set_wrap(True)
@@ -110,6 +120,7 @@ class MiniEqWindow(
         self.route_switch = Gtk.Switch()
         self.bypass_switch = Gtk.Switch()
         self.bypass_state_label = Gtk.Label(xalign=1.0)
+        self.selected_band_gain_spin = Gtk.SpinButton.new_with_range(EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB, 0.1)
         self.analyzer_switch = Gtk.Switch()
         self.analyzer_freeze_switch = Gtk.Switch()
         self.analyzer_mode_combo = create_dropdown_from_strings(["Monitor"])
@@ -146,6 +157,7 @@ class MiniEqWindow(
         self.profile_value_label = Gtk.Label(xalign=0.0)
         self.profile_detail_label = Gtk.Label(xalign=0.0)
         self.preset_state_label = Gtk.Label(xalign=1.0)
+        self.main_preset_name_label = Gtk.Label(xalign=0.0)
         self.headroom_peak_db: float | None = None
         self.headroom_state_kind = "bypass"
 
@@ -214,6 +226,44 @@ class MiniEqWindow(
         self.controller.set_analyzer_levels_callback(None)
         self.stop_preset_monitoring()
         self.stop_analyzer_preview(stop_backend=False)
+
+    def finish_close_request(self) -> bool:
+        self.close_finish_source_id = 0
+        application = self.get_application()
+        if application is not None:
+            application.quit()
+        return False
+
+    def begin_close_request_shutdown(self) -> None:
+        if self.ui_shutting_down or self.close_finish_source_id > 0:
+            return
+
+        routed = self.route_switch.get_active()
+        if routed:
+            self.updating_ui = True
+            try:
+                self.route_switch.set_active(False)
+            finally:
+                self.updating_ui = False
+
+            try:
+                self.controller.route_system_audio(False, announce=False)
+            except Exception:
+                pass
+            finally:
+                self.update_info_label()
+                self.update_status_summary()
+
+        self.set_visible(False)
+        self.prepare_for_shutdown()
+
+        if routed:
+            self.close_finish_source_id = GLib.timeout_add(ROUTING_CLOSE_SETTLE_MS, self.finish_close_request)
+            return
+
+        application = self.get_application()
+        if application is not None:
+            GLib.idle_add(application.quit)
 
     def set_status(self, message: str) -> None:
         if self.ui_shutting_down:
@@ -295,11 +345,13 @@ class MiniEqWindow(
         return False
 
     def on_close_request(self, window: Gtk.Window) -> bool:
-        self.prepare_for_shutdown()
-        application = self.get_application()
-        if application is not None:
-            GLib.idle_add(application.quit)
-        return False
+        del window
+
+        if self.ui_shutting_down:
+            return False
+
+        self.begin_close_request_shutdown()
+        return True
 
     def output_sink_info(self) -> WirePlumberNode | None:
         return self.controller.get_sink(self.controller.output_sink)
@@ -411,12 +463,12 @@ class MiniEqWindow(
 
         route_detail = f"Apps -> {self.controller.virtual_sink_name}."
         if not route_enabled:
-            route_detail = "Apps stay on their device."
+            route_detail = "System audio is not routed through Mini EQ yet."
         if self.controller.follow_default_output:
             route_detail += " Automatic output selection."
         else:
             route_detail += " Manual output override."
-        self.set_card_state("route", "Auto-route on" if route_enabled else "Auto-route off", route_detail)
+        self.set_card_state("route", "Routing live" if route_enabled else "Standby", route_detail)
 
         if sink is None:
             self.set_card_state("output", "Output unavailable", self.controller.output_sink, warning=True)
@@ -463,17 +515,27 @@ class MiniEqWindow(
                     kind="safe",
                 )
 
+        self.warning_banner.remove_css_class("warning-banner-alert")
+        self.warning_banner.remove_css_class("warning-banner-info")
+
         if warnings:
             self.warning_banner.set_text("  ".join(warnings))
             self.warning_banner.add_css_class("warning-banner-alert")
             self.warning_banner.set_visible(True)
+        elif not route_enabled:
+            self.warning_banner.set_text(
+                "Enable Audio Routing when you want desktop audio to pass through Mini EQ. "
+                "You can shape the curve first and switch routing on when ready."
+            )
+            self.warning_banner.add_css_class("warning-banner-info")
+            self.warning_banner.set_visible(True)
         else:
-            self.warning_banner.remove_css_class("warning-banner-alert")
             self.warning_banner.set_visible(False)
 
         self.system_state_label.remove_css_class("system-state-live")
         self.system_state_label.remove_css_class("system-state-warning")
         self.system_state_label.remove_css_class("system-state-bypass")
+        self.system_state_label.remove_css_class("system-state-idle")
 
         if not self.controller.eq_enabled:
             self.system_state_label.set_text("Bypassed")
@@ -485,8 +547,8 @@ class MiniEqWindow(
             self.system_state_label.set_text("Processing")
             self.system_state_label.add_css_class("system-state-live")
         else:
-            self.system_state_label.set_text("Ready")
-            self.system_state_label.add_css_class("system-state-live")
+            self.system_state_label.set_text("Standby")
+            self.system_state_label.add_css_class("system-state-idle")
 
     def refresh_output_sinks(self) -> None:
         if self.ui_shutting_down:

@@ -30,8 +30,10 @@ Recommended install paths:
 3. Source checkout, for development or testing unreleased changes.
 
 Mini EQ depends on system desktop/audio packages that are not installed by
-Python packaging: GTK4/Libadwaita 1.4+ GI bindings, WirePlumber introspection,
-PipeWire, and PipeWire JACK compatibility.
+Python packaging: GTK 4.12+ and Libadwaita 1.6+ GI bindings, WirePlumber
+introspection, PipeWire, and PipeWire JACK compatibility.
+
+If your distro ships older GTK or Libadwaita builds, prefer the Flatpak build.
 
 Package names vary by distro release. Mini EQ prefers WirePlumber 0.5
 introspection when available and falls back to WirePlumber 0.4, which is what

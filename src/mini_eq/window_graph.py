@@ -77,6 +77,14 @@ class MiniEqWindowGraphMixin:
             self.set_visible_band_count(self.selected_band_index + 1)
         self.sync_ui_from_state()
 
+    def open_compact_band_editor(self) -> None:
+        split_view = getattr(self, "utility_split_view", None)
+        sheet = getattr(self, "compact_band_editor_sheet", None)
+        if split_view is None or sheet is None:
+            return
+        if split_view.get_collapsed() and sheet.get_can_open():
+            sheet.set_open(True)
+
     def update_quick_fader_strip(self) -> None:
         solo_active = bands_have_solo(self.controller.bands)
         for index in range(len(self.band_fader_widgets)):
@@ -93,7 +101,8 @@ class MiniEqWindowGraphMixin:
 
         band = self.controller.bands[index]
         visible = index < self.visible_band_count
-        self.band_fader_boxes[index].set_visible(visible)
+        box = self.band_fader_boxes[index]
+        box.set_visible(visible)
         fader = self.band_fader_widgets[index]
         fader.set_visible(visible)
         fader.set_band_state(
@@ -111,11 +120,16 @@ class MiniEqWindowGraphMixin:
             solo_active=solo_active,
         )
 
+        box.remove_css_class("eq-band-box-selected")
+        box.remove_css_class("eq-band-box-muted")
         if index == self.selected_band_index:
-            self.band_fader_boxes[index].set_opacity(1.0)
+            box.set_opacity(1.0)
+            box.add_css_class("eq-band-box-selected")
         else:
             effective = band_is_effective(band, solo_active)
-            self.band_fader_boxes[index].set_opacity(0.95 if effective else 0.55)
+            box.set_opacity(0.98 if effective else 0.62)
+            if not effective:
+                box.add_css_class("eq-band-box-muted")
 
     def schedule_curve_metadata_refresh(self) -> None:
         if getattr(self, "curve_metadata_refresh_source_id", 0) != 0:
@@ -157,10 +171,15 @@ class MiniEqWindowGraphMixin:
     def update_focus_summary(self) -> None:
         selected = self.controller.bands[self.selected_band_index]
         selected_filter_type = filter_type_label(selected.filter_type)
-        self.focus_label.set_text(
-            f"Band {self.selected_band_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
-        )
-        self.band_count_label.set_text(selected_filter_type)
+        route_enabled = self.route_switch.get_active()
+        if route_enabled:
+            self.focus_label.set_text(
+                f"Band {self.selected_band_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
+            )
+            self.band_count_label.set_text(selected_filter_type)
+        else:
+            self.focus_label.set_text("Shape the curve, then enable Audio Routing to hear it system-wide")
+            self.band_count_label.set_text(f"{self.visible_band_count} bands ready")
         self.inspector_summary_label.set_text(
             f"{selected_filter_type} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
         )
@@ -170,12 +189,20 @@ class MiniEqWindowGraphMixin:
         band_title = f"Band {self.selected_band_index + 1}"
         self.selected_band_label.set_text(band_title)
         filter_type = filter_type_label(selected.filter_type)
-        band_detail = f"{filter_type} • {selected.gain_db:+.1f} dB"
-        self.selected_band_gain_label.set_text(band_detail)
-        self.selected_band_gain_label.set_tooltip_text(f"{band_title} • {band_detail}")
+        full_summary = f"{band_title} • {filter_type} • {selected.frequency:.1f} Hz • Q {selected.q:.3f} • {selected.gain_db:+.1f} dB"
+        self.selected_band_label.set_tooltip_text(full_summary)
+        if hasattr(self, "compact_band_editor_title_label"):
+            self.compact_band_editor_title_label.set_text(band_title)
+        if hasattr(self, "compact_band_editor_detail_label"):
+            self.compact_band_editor_detail_label.set_text(
+                f"{filter_type} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
+            )
+        if hasattr(self, "compact_band_editor_launcher"):
+            self.compact_band_editor_launcher.set_tooltip_text(full_summary)
         self.selected_band_type_combo.set_selected(FILTER_TYPE_INDEX_BY_VALUE.get(selected.filter_type, 0))
         self.selected_band_frequency_spin.set_value(selected.frequency)
         self.selected_band_q_spin.set_value(selected.q)
+        self.selected_band_gain_spin.set_value(selected.gain_db)
         self.selected_band_mute_button.set_active(selected.mute)
         self.selected_band_solo_button.set_active(selected.solo)
 
@@ -217,7 +244,7 @@ class MiniEqWindowGraphMixin:
             self.preamp_scale.set_value(self.controller.preamp_db)
             self.preamp_label.set_text(f"{self.controller.preamp_db:.1f} dB")
             self.mode_combo.set_selected(MODE_INDEX_BY_VALUE[self.controller.eq_mode])
-            self.graph_title_label.set_text("Curve")
+            self.graph_title_label.set_text("Active Curve" if self.route_switch.get_active() else "Preview Curve")
             self.analyzer_mode_combo.set_selected(0)
             self.analyzer_smoothing_scale.set_value(self.analyzer_smoothing * 100.0)
             self.analyzer_display_gain_scale.set_value(self.analyzer_display_gain_db)
@@ -268,16 +295,30 @@ class MiniEqWindowGraphMixin:
     def on_band_card_pressed(
         self, gesture: Gtk.GestureClick, _press_count: int, _x: float, _y: float, index: int
     ) -> None:
-        if self.updating_ui or self.selected_band_index == index:
+        if self.updating_ui:
             return
 
-        self.select_band(index)
+        if self.selected_band_index != index:
+            self.select_band(index)
+            return
+
+        self.open_compact_band_editor()
 
     def on_custom_band_fader_selected(self, index: int) -> None:
         if self.updating_ui or self.selected_band_index == index:
             return
 
         self.select_band(index)
+
+    def on_custom_band_fader_activated(self, index: int) -> None:
+        if self.updating_ui:
+            return
+
+        if self.selected_band_index != index:
+            self.select_band(index)
+            return
+
+        self.open_compact_band_editor()
 
     def on_custom_band_fader_changed(self, index: int, gain_db: float) -> None:
         if self.updating_ui:
@@ -428,6 +469,12 @@ class MiniEqWindowGraphMixin:
             return
 
         self.on_custom_band_q_changed(self.selected_band_index, spin.get_value())
+
+    def on_selected_band_gain_changed(self, spin: Gtk.SpinButton) -> None:
+        if self.updating_ui:
+            return
+
+        self.on_custom_band_fader_changed(self.selected_band_index, spin.get_value())
 
     def on_selected_band_mute_changed(self, button: Gtk.ToggleButton, _param: object) -> None:
         if self.updating_ui:
@@ -665,9 +712,8 @@ class MiniEqWindowGraphMixin:
 
         self.draw_text(cr, "20 Hz", left, 18, (0.82, 0.85, 0.89), 11.5)
         self.draw_text(cr, "20 kHz", width_f - 58, 18, (0.82, 0.85, 0.89), 11.5)
-        analyzer_label = "Monitor" if self.analyzer_enabled else "Analyzer off"
-        analyzer_color = (0.50, 0.86, 0.98) if self.analyzer_enabled else (0.65, 0.70, 0.75)
-        self.draw_text(cr, analyzer_label, left + 10, top + 18, analyzer_color, 12.5)
+        if self.analyzer_enabled:
+            self.draw_text(cr, "Monitor", left + 10, top + 18, (0.50, 0.86, 0.98), 12.5)
 
     def graph_cached_response_surface(
         self,

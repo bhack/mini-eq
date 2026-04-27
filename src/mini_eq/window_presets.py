@@ -5,9 +5,10 @@ from pathlib import Path
 
 import gi
 
+gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from .core import (
     PRESET_FILE_SUFFIX,
@@ -52,6 +53,8 @@ class MiniEqWindowPresetMixin:
     def update_preset_state(self) -> None:
         current_signature = self.controller.state_signature()
         current_name = self.current_preset_name or "Current State"
+        self.main_preset_name_label.set_text(current_name)
+        self.main_preset_name_label.set_tooltip_text(current_name)
 
         self.preset_state_label.remove_css_class("preset-state-saved")
         self.preset_state_label.remove_css_class("preset-state-modified")
@@ -104,52 +107,69 @@ class MiniEqWindowPresetMixin:
         initial_text: str,
         callback: Callable[[str], None],
     ) -> None:
-        dialog = Gtk.Dialog(title=title, transient_for=self, modal=True)
-        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
-        dialog.add_button(accept_label, Gtk.ResponseType.ACCEPT)
-        dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+        dialog = Adw.Dialog()
+        dialog.set_title(title)
+        dialog.set_content_width(420)
+        dialog.set_follows_content_size(True)
 
-        accept_button = dialog.get_widget_for_response(Gtk.ResponseType.ACCEPT)
-        if accept_button is not None:
-            accept_button.add_css_class("suggested-action")
-
-        content = dialog.get_content_area()
-        content.set_spacing(8)
-        content.set_margin_top(12)
-        content.set_margin_bottom(12)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_margin_top(18)
+        content.set_margin_bottom(18)
+        content.set_margin_start(18)
+        content.set_margin_end(18)
 
         label = Gtk.Label(label="Preset name", xalign=0.0)
+        label.add_css_class("heading")
         content.append(label)
 
         entry = Gtk.Entry()
         entry.set_hexpand(True)
         entry.set_text(initial_text)
-        entry.connect("activate", lambda _entry: dialog.response(Gtk.ResponseType.ACCEPT))
         content.append(entry)
 
-        dialog.connect("response", self.on_preset_name_dialog_response, entry, callback)
-        dialog.present()
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_halign(Gtk.Align.END)
 
-    def on_preset_name_dialog_response(
+        cancel_button = Gtk.Button(label="Cancel")
+        cancel_button.set_can_shrink(True)
+        cancel_button.connect("clicked", lambda _button: dialog.close())
+        actions.append(cancel_button)
+
+        accept_button = Gtk.Button(label=accept_label)
+        accept_button.set_can_shrink(True)
+        accept_button.add_css_class("suggested-action")
+        accept_button.connect("clicked", self.on_preset_name_dialog_accept, dialog, entry, callback)
+        actions.append(accept_button)
+
+        entry.connect("activate", self.on_preset_name_dialog_accept, dialog, entry, callback)
+        content.append(actions)
+
+        dialog.set_child(content)
+        dialog.set_default_widget(accept_button)
+        dialog.set_focus(entry)
+        dialog.present(self)
+
+    def on_preset_name_dialog_accept(
         self,
-        dialog: Gtk.Dialog,
-        response_id: Gtk.ResponseType,
+        _widget: Gtk.Widget,
+        dialog: Adw.Dialog,
         entry: Gtk.Entry,
         callback: Callable[[str], None],
     ) -> None:
-        if response_id == Gtk.ResponseType.ACCEPT:
-            preset_name = sanitize_preset_name(entry.get_text())
-            if not preset_name:
-                self.set_status("Preset Name Is Empty")
-            else:
-                try:
-                    callback(preset_name)
-                except Exception as exc:
-                    self.set_status(str(exc))
+        preset_name = sanitize_preset_name(entry.get_text())
+        if not preset_name:
+            self.set_status("Preset Name Is Empty")
+            entry.grab_focus()
+            return
 
-        dialog.destroy()
+        try:
+            callback(preset_name)
+        except Exception as exc:
+            self.set_status(str(exc))
+            entry.grab_focus()
+            return
+
+        dialog.close()
 
     def on_preset_selected(self, combo: Gtk.DropDown, _param: object) -> None:
         if self.updating_preset_combo:
@@ -195,16 +215,40 @@ class MiniEqWindowPresetMixin:
             self.set_status("No Preset Selected")
             return
 
+        preset_name = self.current_preset_name
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("Delete preset?")
+        dialog.set_body(f"{preset_name} will be removed from your preset library.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.choose(self, None, lambda dialog, result: self.on_preset_delete_dialog_done(dialog, result, preset_name))
+
+    def on_preset_delete_dialog_done(
+        self,
+        dialog: Adw.AlertDialog,
+        result: Gio.AsyncResult,
+        preset_name: str,
+    ) -> None:
         try:
-            preset_path = preset_path_for_name(self.current_preset_name)
+            response = dialog.choose_finish(result)
+        except GLib.Error:
+            return
+
+        if response != "delete":
+            return
+
+        try:
+            preset_path = preset_path_for_name(preset_name)
             if preset_path.exists():
                 preset_path.unlink()
-            deleted_name = self.current_preset_name
             self.current_preset_name = None
             self.saved_preset_signature = self.controller.state_signature()
             self.refresh_preset_list()
             self.sync_ui_from_state()
-            self.set_status(f"Deleted Preset: {deleted_name}")
+            self.set_status(f"Deleted Preset: {preset_name}")
         except Exception as exc:
             self.set_status(str(exc))
 

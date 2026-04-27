@@ -45,6 +45,10 @@ class MiniEqApplication(Adw.Application):
         self.set_accels_for_action("app.close", ["<primary>w"])
 
     def on_quit_action(self, _action: Gio.SimpleAction, _parameter: GLib.Variant | None) -> None:
+        if self.window is not None and not self.window.ui_shutting_down:
+            self.window.close()
+            return
+
         self.quit()
 
     def on_close_action(self, _action: Gio.SimpleAction, _parameter: GLib.Variant | None) -> None:

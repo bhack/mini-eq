@@ -14,8 +14,8 @@ Status = Literal["ok", "missing", "warning"]
 
 PYGOBJECT_HINT = "Ubuntu/Debian: python3-gi; Fedora: python3-gobject; Arch: python-gobject"
 PYCAIRO_HINT = "Ubuntu/Debian: python3-cairo; Fedora: python3-cairo; Arch: python-cairo"
-GTK_HINT = "Ubuntu/Debian: gir1.2-gtk-4.0; Fedora: gtk4; Arch: gtk4"
-ADW_HINT = "Ubuntu/Debian: gir1.2-adw-1; Fedora: libadwaita; Arch: libadwaita. Requires Libadwaita 1.4+."
+GTK_HINT = "Ubuntu/Debian: gir1.2-gtk-4.0; Fedora: gtk4; Arch: gtk4. Requires GTK 4.12+."
+ADW_HINT = "Ubuntu/Debian: gir1.2-adw-1; Fedora: libadwaita; Arch: libadwaita. Requires Libadwaita 1.6+."
 WIREPLUMBER_GI_VERSIONS = ("0.5", "0.4")
 
 WP_HINT = "Ubuntu 24.04: gir1.2-wp-0.4 wireplumber; newer Debian/Ubuntu: gir1.2-wp-0.5 wireplumber; Fedora: wireplumber wireplumber-libs; Arch: wireplumber libwireplumber"
@@ -99,16 +99,21 @@ def check_gi_repository_attribute(
         return namespace_check
 
     module = importlib.import_module(f"gi.repository.{namespace}")
-    if hasattr(module, attribute_name):
-        return DependencyCheck(label, "ok", required, f"{namespace}.{attribute_name} is available", hint)
+    current = module
+    checked_path = namespace
+    for path_part in attribute_name.split("."):
+        checked_path = f"{checked_path}.{path_part}"
+        if not hasattr(current, path_part):
+            return DependencyCheck(
+                label,
+                "missing",
+                required,
+                f"GI namespace lacks {checked_path}",
+                hint,
+            )
+        current = getattr(current, path_part)
 
-    return DependencyCheck(
-        label,
-        "missing",
-        required,
-        f"GI namespace {namespace} lacks {attribute_name}",
-        hint,
-    )
+    return DependencyCheck(label, "ok", required, f"{checked_path} is available", hint)
 
 
 def check_first_available_gi_repository(
@@ -262,11 +267,11 @@ def collect_dependency_checks() -> list[DependencyCheck]:
         check_python_version(),
         check_python_import("gi", "PyGObject", True, PYGOBJECT_HINT),
         check_python_import("cairo", "pycairo", True, PYCAIRO_HINT),
-        check_gi_repository("Gtk", "4.0", "GTK 4 GI namespace", True, GTK_HINT),
+        check_gi_repository_attribute("Gtk", "4.0", "Button.set_can_shrink", "GTK 4.12+ GI namespace", True, GTK_HINT),
         check_gi_repository("Gdk", "4.0", "GDK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Gsk", "4.0", "GSK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Graphene", "1.0", "Graphene GI namespace", True, GTK_HINT),
-        check_gi_repository_attribute("Adw", "1", "ToolbarView", "Libadwaita 1.4+ GI namespace", True, ADW_HINT),
+        check_gi_repository_attribute("Adw", "1", "BottomSheet", "Libadwaita 1.6+ GI namespace", True, ADW_HINT),
         check_first_available_gi_repository("Wp", WIREPLUMBER_GI_VERSIONS, "WirePlumber GI namespace", True, WP_HINT),
         check_wireplumber_session(),
         check_pipewire_module(

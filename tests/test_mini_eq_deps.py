@@ -66,12 +66,16 @@ def test_gi_repository_attribute_requires_named_attribute(monkeypatch) -> None:
         return deps.DependencyCheck(label, "ok", required, f"GI namespace {namespace} {version}", hint)
 
     monkeypatch.setattr(deps, "check_gi_repository", fake_check)
-    monkeypatch.setattr(deps.importlib, "import_module", lambda _name: SimpleNamespace(ToolbarView=object()))
+    monkeypatch.setattr(
+        deps.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(Button=SimpleNamespace(set_can_shrink=object())),
+    )
 
-    check = deps.check_gi_repository_attribute("Adw", "1", "ToolbarView", "Libadwaita", True, "hint")
+    check = deps.check_gi_repository_attribute("Gtk", "4.0", "Button.set_can_shrink", "GTK", True, "hint")
 
     assert check.ok
-    assert check.detail == "Adw.ToolbarView is available"
+    assert check.detail == "Gtk.Button.set_can_shrink is available"
 
 
 def test_gi_repository_attribute_reports_missing_attribute(monkeypatch) -> None:
@@ -79,9 +83,9 @@ def test_gi_repository_attribute_reports_missing_attribute(monkeypatch) -> None:
         return deps.DependencyCheck(label, "ok", required, f"GI namespace {namespace} {version}", hint)
 
     monkeypatch.setattr(deps, "check_gi_repository", fake_check)
-    monkeypatch.setattr(deps.importlib, "import_module", lambda _name: SimpleNamespace())
+    monkeypatch.setattr(deps.importlib, "import_module", lambda _name: SimpleNamespace(Button=SimpleNamespace()))
 
-    check = deps.check_gi_repository_attribute("Adw", "1", "ToolbarView", "Libadwaita", True, "hint")
+    check = deps.check_gi_repository_attribute("Gtk", "4.0", "Button.set_can_shrink", "GTK", True, "hint")
 
     assert not check.ok
-    assert check.detail == "GI namespace Adw lacks ToolbarView"
+    assert check.detail == "GI namespace lacks Gtk.Button.set_can_shrink"

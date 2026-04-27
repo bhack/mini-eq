@@ -79,3 +79,13 @@ def test_quit_action_quits_application() -> None:
     app.MiniEqApplication.on_quit_action(application, None, None)
 
     assert application.quit_count == 1
+
+
+def test_quit_action_closes_active_window_before_quitting() -> None:
+    window = FakeWindow(ui_shutting_down=False)
+    application = FakeApplication(window=window)
+
+    app.MiniEqApplication.on_quit_action(application, None, None)
+
+    assert window.close_count == 1
+    assert application.quit_count == 0
