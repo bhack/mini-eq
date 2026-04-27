@@ -99,7 +99,9 @@ def render_social_preview(screenshot_path: Path, output_path: Path) -> None:
 
     frame = Image.new("RGBA", frame_size, "#0F1723")
     frame_draw = ImageDraw.Draw(frame)
-    frame_draw.rounded_rectangle((0, 0, frame.width - 1, frame.height - 1), radius=18, fill="#0F1723", outline="#253244")
+    frame_draw.rounded_rectangle(
+        (0, 0, frame.width - 1, frame.height - 1), radius=18, fill="#0F1723", outline="#253244"
+    )
 
     screenshot_mask = Image.new("L", screenshot.size, 0)
     mask_draw = ImageDraw.Draw(screenshot_mask)
