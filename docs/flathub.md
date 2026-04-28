@@ -56,7 +56,8 @@ release, then update the Flathub manifest to the new release archive.
 
 1. Finish the upstream release and confirm the GitHub release is not a draft.
 2. Confirm the release is suitable for Flathub stable, not a nightly snapshot.
-3. Build or download the release source archive and compute its SHA-256.
+3. Download the published release source archive and compute or confirm its
+   SHA-256.
 4. In the Flathub repository, update the `mini-eq` module source to the new
    release URL and hash.
 5. If the screenshot changed, update the MetaInfo screenshot URL to a release
@@ -80,6 +81,27 @@ release, then update the Flathub manifest to the new release archive.
 15. If quality fixes landed, use the listing quality panel to request a
     re-review.
 
+GitHub draft releases expose assets under temporary `untagged-*` URLs. Publish
+the upstream GitHub release first, then use the stable asset URL:
+
+```bash
+curl -fsSL \
+  https://github.com/bhack/mini-eq/releases/download/vX.Y.Z/mini_eq-X.Y.Z.tar.gz \
+  | sha256sum
+```
+
+The Flathub `master` branch is protected, so direct pushes are rejected. Push an
+update branch and open a PR:
+
+```bash
+git switch -c update-X.Y.Z
+git push -u origin update-X.Y.Z
+gh pr create --repo flathub/io.github.bhack.mini-eq \
+  --base master \
+  --head update-X.Y.Z \
+  --title 'Update mini-eq to X.Y.Z'
+```
+
 ## Validation
 
 Run upstream AppStream and desktop-file validation:
@@ -102,6 +124,21 @@ Build with Flathub tooling and run the app:
 flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak run --command=flathub-build org.flatpak.Builder --install io.github.bhack.mini-eq.yaml
 flatpak run io.github.bhack.mini-eq --check-deps
+```
+
+For a local source and full build check without installing the app:
+
+```bash
+flatpak run --command=flatpak-builder org.flatpak.Builder \
+  --force-clean \
+  --download-only \
+  --install-deps-from=flathub \
+  build-dir io.github.bhack.mini-eq.yaml
+flatpak run --command=flatpak-builder org.flatpak.Builder \
+  --force-clean \
+  --install-deps-from=flathub \
+  --repo=repo \
+  build-dir io.github.bhack.mini-eq.yaml
 ```
 
 If a `repo/` is produced, run:

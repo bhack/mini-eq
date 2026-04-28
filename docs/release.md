@@ -45,6 +45,39 @@ and attaches the built wheel and sdist. Keep `draft=true` for the first run,
 review the generated notes and assets on GitHub, then publish the draft
 manually.
 
+For a production GitHub release plus PyPI publish, dispatch with:
+
+```bash
+gh workflow run release.yml --repo bhack/mini-eq --ref main \
+  -f dry_run=false \
+  -f create_github_release=true \
+  -f tag_name=vX.Y.Z \
+  -f target=main \
+  -f draft=true \
+  -f prerelease=false \
+  -f publish_testpypi=false \
+  -f publish_pypi=true
+```
+
+If the `pypi` environment requires approval, the publish job will stay in
+`waiting` until the deployment is approved in GitHub Actions. The same approval
+can be done with `gh` when the logged-in account is allowed to approve:
+
+```bash
+run_id=<workflow run id>
+gh api "repos/bhack/mini-eq/actions/runs/${run_id}/pending_deployments"
+environment_id=1234567890
+gh api "repos/bhack/mini-eq/actions/runs/${run_id}/pending_deployments" \
+  -X POST \
+  -F environment_ids[]="$environment_id" \
+  -f state=approved \
+  -f comment='Publish vX.Y.Z to PyPI'
+```
+
+Draft GitHub release assets use temporary `untagged-*` download URLs. Publish
+the draft before using release asset URLs in the Flathub manifest or other
+public metadata.
+
 Set `publish_testpypi=true` only after the `testpypi` GitHub environment and
 TestPyPI trusted publisher are configured. The TestPyPI job uses
 `pypa/gh-action-pypi-publish` with OIDC and does not use API tokens. Keep PyPI
@@ -128,3 +161,14 @@ For production PyPI publishing, dispatch the workflow with `dry_run=false`,
 `create_github_release=true`, `tag_name=vX.Y.Z`, and `publish_pypi=true`.
 Use Trusted Publishing/OIDC and the separate `pypi` environment rather than
 long-lived API tokens.
+
+After the workflow completes:
+
+```bash
+gh release view vX.Y.Z --repo bhack/mini-eq --json tagName,isDraft,isPrerelease,assets,url
+curl -fsSL https://pypi.org/pypi/mini-eq/json | jq -r '.info.version'
+git ls-remote --tags origin vX.Y.Z
+```
+
+Publish the draft GitHub release after reviewing its notes and assets. Then use
+the published release tarball and SHA-256 for the Flathub repository update.
