@@ -8,7 +8,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gdk, GObject, Gtk, Pango
+from gi.repository import Adw, Gdk, Gtk, Pango
 
 from .band_fader import EqBandFader
 from .core import (
@@ -24,6 +24,34 @@ from .core import (
     MAX_BANDS,
     clamp,
 )
+
+ADAPTIVE_NARROW_BREAKPOINT_SP = 1320
+COMPACT_BREAKPOINT_SP = 1080
+COMPACT_SHEET_HEIGHT_THRESHOLD = 660
+
+DEFAULT_GRAPH_CONTENT_HEIGHT = 196
+COMPACT_GRAPH_CONTENT_HEIGHT = 156
+DEFAULT_FADER_SECTION_SPACING = 6
+COMPACT_FADER_SECTION_SPACING = 3
+DEFAULT_FADER_WIDGET_HEIGHT = 182
+COMPACT_FADER_WIDGET_HEIGHT = 154
+DEFAULT_FADER_SCROLLER_MIN_HEIGHT = 174
+COMPACT_FADER_SCROLLER_MIN_HEIGHT = 142
+
+# Extra vertical room helps graph readability more than fader usability.
+# Keep fader growth lower and capped so tall windows do not stretch controls.
+COMPACT_SURFACE_GROWTH_START = 660
+COMPACT_GRAPH_HEIGHT_LIMIT = 220
+COMPACT_FADER_WIDGET_HEIGHT_LIMIT = 204
+COMPACT_FADER_SCROLLER_HEIGHT_LIMIT = 188
+COMPACT_GRAPH_HEIGHT_GROWTH = 0.24
+COMPACT_FADER_HEIGHT_GROWTH = 0.18
+WIDE_SURFACE_GROWTH_START = 760
+WIDE_GRAPH_HEIGHT_LIMIT = 360
+WIDE_FADER_WIDGET_HEIGHT_LIMIT = 280
+WIDE_FADER_SCROLLER_HEIGHT_LIMIT = 268
+WIDE_GRAPH_HEIGHT_GROWTH = 0.44
+WIDE_FADER_HEIGHT_GROWTH = 0.28
 
 
 def set_accessible_label(widget: Gtk.Widget, label: str) -> None:
@@ -207,8 +235,8 @@ class MiniEqWindowLayoutMixin:
 
         right_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         right_column.set_size_request(288, -1)
-        right_column.set_vexpand(False)
-        right_column.set_valign(Gtk.Align.START)
+        right_column.set_vexpand(True)
+        right_column.set_valign(Gtk.Align.FILL)
         right_column.set_margin_top(4)
         right_column.set_margin_bottom(2)
         right_column.set_margin_start(12)
@@ -216,27 +244,9 @@ class MiniEqWindowLayoutMixin:
         right_column.add_css_class("utility-pane-shell")
         self.utility_pane_column = right_column
 
-        main_content_clamp = Adw.Clamp()
-        main_content_clamp.set_maximum_size(1040)
-        main_content_clamp.set_tightening_threshold(920)
-        main_content_clamp.set_hexpand(True)
-        main_content_clamp.set_vexpand(True)
-        main_content_clamp.set_valign(Gtk.Align.FILL)
-        main_content_clamp.set_child(left_column)
-
-        workspace_top_spacer = Gtk.Box()
-        workspace_top_spacer.set_vexpand(False)
-        workspace_top_spacer.set_visible(False)
-
-        workspace_bottom_spacer = Gtk.Box()
-        workspace_bottom_spacer.set_vexpand(True)
-        workspace_bottom_spacer.set_visible(False)
-
-        workspace.set_content(main_content_clamp)
+        workspace.set_content(left_column)
         workspace.set_sidebar(right_column)
-        root.append(workspace_top_spacer)
         root.append(workspace)
-        root.append(workspace_bottom_spacer)
 
         def on_utility_pane_toggled(button: Gtk.ToggleButton) -> None:
             if workspace.get_show_sidebar() != button.get_active():
@@ -267,7 +277,9 @@ class MiniEqWindowLayoutMixin:
         utility_pane_key_controller.connect("key-pressed", on_utility_pane_key_pressed)
         self.add_controller(utility_pane_key_controller)
 
-        adaptive_breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 1320sp"))
+        adaptive_breakpoint = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse(f"max-width: {ADAPTIVE_NARROW_BREAKPOINT_SP}sp")
+        )
         self.adaptive_narrow_breakpoint = adaptive_breakpoint
         self.add_breakpoint(adaptive_breakpoint)
         adaptive_breakpoint.add_setter(workspace, "collapsed", True)
@@ -610,8 +622,6 @@ class MiniEqWindowLayoutMixin:
 
         right_column.append(preamp_section)
 
-        default_graph_content_height = 196
-        compact_graph_content_height = 156
         graph_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         graph_shell.add_css_class("panel-card")
         graph_shell.add_css_class("graph-shell-panel")
@@ -645,7 +655,7 @@ class MiniEqWindowLayoutMixin:
 
         self.graph_area = Gtk.DrawingArea()
         self.graph_area.set_content_width(900)
-        self.graph_area.set_content_height(default_graph_content_height)
+        self.graph_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
         self.graph_area.set_hexpand(True)
         self.graph_area.set_vexpand(False)
         self.graph_area.set_accessible_role(Gtk.AccessibleRole.IMG)
@@ -659,7 +669,7 @@ class MiniEqWindowLayoutMixin:
 
         self.analyzer_area = Gtk.DrawingArea()
         self.analyzer_area.set_content_width(900)
-        self.analyzer_area.set_content_height(default_graph_content_height)
+        self.analyzer_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
         self.analyzer_area.set_hexpand(True)
         self.analyzer_area.set_vexpand(False)
         self.analyzer_area.set_halign(Gtk.Align.FILL)
@@ -671,7 +681,7 @@ class MiniEqWindowLayoutMixin:
 
         self.graph_response_area = Gtk.DrawingArea()
         self.graph_response_area.set_content_width(900)
-        self.graph_response_area.set_content_height(default_graph_content_height)
+        self.graph_response_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
         self.graph_response_area.set_hexpand(True)
         self.graph_response_area.set_vexpand(False)
         self.graph_response_area.set_halign(Gtk.Align.FILL)
@@ -697,13 +707,7 @@ class MiniEqWindowLayoutMixin:
         fader_shell.add_css_class("panel-card")
         fader_shell.add_css_class("quick-view-shell")
 
-        default_fader_section_spacing = 6
-        compact_fader_section_spacing = 3
-        default_fader_widget_height = 182
-        compact_fader_widget_height = 154
-        default_fader_scroller_min_height = 174
-        compact_fader_scroller_min_height = 142
-        fader_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=default_fader_section_spacing)
+        fader_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=DEFAULT_FADER_SECTION_SPACING)
         fader_section.set_margin_top(8)
         fader_section.set_margin_bottom(6)
         fader_section.set_margin_start(12)
@@ -717,7 +721,7 @@ class MiniEqWindowLayoutMixin:
         self.fader_scroller.set_hexpand(True)
         self.fader_scroller.set_vexpand(False)
         self.fader_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        self.fader_scroller.set_min_content_height(default_fader_scroller_min_height)
+        self.fader_scroller.set_min_content_height(DEFAULT_FADER_SCROLLER_MIN_HEIGHT)
         self.fader_scroller.add_css_class("fader-scroller")
 
         fader_grid = Gtk.Grid(column_spacing=7, row_spacing=0)
@@ -744,7 +748,7 @@ class MiniEqWindowLayoutMixin:
                 self.on_custom_band_fader_changed,
                 self.on_custom_band_fader_activated,
             )
-            fader.set_content_height(default_fader_widget_height)
+            fader.set_content_height(DEFAULT_FADER_WIDGET_HEIGHT)
             box.append(fader)
 
             self.band_fader_boxes.append(box)
@@ -935,7 +939,7 @@ class MiniEqWindowLayoutMixin:
         band_editor_wide_row.append(editor_spacer)
         self.band_editor_spacer = editor_spacer
 
-        compact_breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 1080sp"))
+        compact_breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(f"max-width: {COMPACT_BREAKPOINT_SP}sp"))
         self.add_breakpoint(compact_breakpoint)
         compact_breakpoint.add_setter(workspace, "collapsed", True)
         compact_breakpoint.add_setter(workspace, "pin-sidebar", False)
@@ -945,9 +949,6 @@ class MiniEqWindowLayoutMixin:
         compact_breakpoint.add_setter(self.analyzer_area, "content-width", 760)
         compact_breakpoint.add_setter(self.graph_response_area, "content-width", 760)
 
-        compact_sheet_window_height_threshold = 660
-        compact_balance_threshold = 900
-        wide_balance_threshold = 1040
         content_scroller: Gtk.ScrolledWindow | None = None
         compact_editor_spacer = Gtk.Box()
         compact_editor_spacer.set_hexpand(True)
@@ -957,26 +958,51 @@ class MiniEqWindowLayoutMixin:
                 return max(int(self.get_allocated_height()), 0)
             return int(content_scroller.get_vadjustment().get_page_size())
 
+        def scaled_surface_sizes(
+            page_size: int,
+            *,
+            graph_base: int,
+            fader_base: int,
+            scroller_base: int,
+            growth_start: int,
+            graph_limit: int,
+            fader_limit: int,
+            scroller_limit: int,
+            graph_growth: float,
+            fader_growth: float,
+        ) -> tuple[int, int, int]:
+            extra_height = max(page_size - growth_start, 0)
+            graph_height = min(graph_limit, graph_base + int(extra_height * graph_growth))
+            fader_height = min(fader_limit, fader_base + int(extra_height * fader_growth))
+            scroller_height = min(scroller_limit, scroller_base + int(extra_height * fader_growth))
+            return graph_height, fader_height, scroller_height
+
         def compact_surface_sizes(page_size: int) -> tuple[int, int, int]:
-            if page_size >= 920:
-                return 206, 198, 180
-            if page_size >= 800:
-                return 180, 174, 160
-            return (
-                compact_graph_content_height,
-                compact_fader_widget_height,
-                compact_fader_scroller_min_height,
+            return scaled_surface_sizes(
+                page_size,
+                graph_base=COMPACT_GRAPH_CONTENT_HEIGHT,
+                fader_base=COMPACT_FADER_WIDGET_HEIGHT,
+                scroller_base=COMPACT_FADER_SCROLLER_MIN_HEIGHT,
+                growth_start=COMPACT_SURFACE_GROWTH_START,
+                graph_limit=COMPACT_GRAPH_HEIGHT_LIMIT,
+                fader_limit=COMPACT_FADER_WIDGET_HEIGHT_LIMIT,
+                scroller_limit=COMPACT_FADER_SCROLLER_HEIGHT_LIMIT,
+                graph_growth=COMPACT_GRAPH_HEIGHT_GROWTH,
+                fader_growth=COMPACT_FADER_HEIGHT_GROWTH,
             )
 
         def wide_surface_sizes(page_size: int) -> tuple[int, int, int]:
-            if page_size >= 980:
-                return 208, 194, 186
-            if page_size >= 840:
-                return 204, 190, 182
-            return (
-                default_graph_content_height,
-                default_fader_widget_height,
-                default_fader_scroller_min_height,
+            return scaled_surface_sizes(
+                page_size,
+                graph_base=DEFAULT_GRAPH_CONTENT_HEIGHT,
+                fader_base=DEFAULT_FADER_WIDGET_HEIGHT,
+                scroller_base=DEFAULT_FADER_SCROLLER_MIN_HEIGHT,
+                growth_start=WIDE_SURFACE_GROWTH_START,
+                graph_limit=WIDE_GRAPH_HEIGHT_LIMIT,
+                fader_limit=WIDE_FADER_WIDGET_HEIGHT_LIMIT,
+                scroller_limit=WIDE_FADER_SCROLLER_HEIGHT_LIMIT,
+                graph_growth=WIDE_GRAPH_HEIGHT_GROWTH,
+                fader_growth=WIDE_FADER_HEIGHT_GROWTH,
             )
 
         def move_if_needed(child: Gtk.Widget, parent: Gtk.Box) -> None:
@@ -999,7 +1025,7 @@ class MiniEqWindowLayoutMixin:
             if page_size <= 1:
                 return False
 
-            return page_size < compact_sheet_window_height_threshold
+            return page_size < COMPACT_SHEET_HEIGHT_THRESHOLD
 
         def sync_compact_band_editor(
             _split_view: Adw.OverlaySplitView | None = None, _param: object | None = None
@@ -1014,7 +1040,7 @@ class MiniEqWindowLayoutMixin:
                 self.graph_area.set_content_height(graph_height)
                 self.analyzer_area.set_content_height(graph_height)
                 self.graph_response_area.set_content_height(graph_height)
-                fader_section.set_spacing(compact_fader_section_spacing)
+                fader_section.set_spacing(COMPACT_FADER_SECTION_SPACING)
                 fader_section.set_margin_top(4)
                 fader_section.set_margin_bottom(3)
                 self.fader_scroller.set_min_content_height(fader_scroller_height)
@@ -1097,7 +1123,7 @@ class MiniEqWindowLayoutMixin:
             self.graph_area.set_content_height(graph_height)
             self.analyzer_area.set_content_height(graph_height)
             self.graph_response_area.set_content_height(graph_height)
-            fader_section.set_spacing(default_fader_section_spacing)
+            fader_section.set_spacing(DEFAULT_FADER_SECTION_SPACING)
             fader_section.set_margin_top(8)
             fader_section.set_margin_bottom(6)
             self.fader_scroller.set_min_content_height(fader_scroller_height)
@@ -1147,56 +1173,16 @@ class MiniEqWindowLayoutMixin:
         fader_shell.append(fader_section)
         left_column.append(fader_shell)
 
-        content_clamp = Adw.Clamp()
-        content_clamp.set_maximum_size(1360)
-        content_clamp.set_tightening_threshold(1200)
-        content_clamp.set_hexpand(True)
-        content_clamp.set_vexpand(True)
-        content_clamp.set_valign(Gtk.Align.FILL)
-        content_clamp.set_child(root)
-
-        content_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        content_shell.set_hexpand(True)
-        content_top_spacer = Gtk.Box()
-        content_top_spacer.set_vexpand(True)
-        content_top_spacer.set_visible(False)
-        content_bottom_spacer = Gtk.Box()
-        content_bottom_spacer.set_vexpand(True)
-        content_bottom_spacer.set_visible(False)
-        content_shell.append(content_top_spacer)
-        content_shell.append(content_clamp)
-        content_shell.append(content_bottom_spacer)
-
         content_scroller = Gtk.ScrolledWindow()
         content_scroller.set_hexpand(True)
         content_scroller.set_vexpand(True)
         content_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        content_scroller.set_child(content_shell)
+        content_scroller.set_child(root)
 
         compact_band_editor_sheet.set_content(content_scroller)
         self.compact_band_editor_sheet = compact_band_editor_sheet
 
-        def sync_compact_vertical_balance(_object: GObject.Object | None = None, _param: object | None = None) -> None:
-            page_size = current_page_size()
-            compact = workspace.get_collapsed()
-            use_sheet = compact_band_editor_sheet.get_can_open()
-            balance_workspace = not use_sheet and (
-                (compact and page_size >= compact_balance_threshold)
-                or (not compact and page_size >= wide_balance_threshold)
-            )
-            top_offset = 24 if compact else 32
-            workspace.set_vexpand(not balance_workspace)
-            workspace_top_spacer.set_size_request(-1, top_offset if balance_workspace else 0)
-            workspace_top_spacer.set_visible(balance_workspace)
-            workspace_bottom_spacer.set_visible(balance_workspace)
-            content_top_spacer.set_visible(False)
-            content_bottom_spacer.set_visible(False)
-
         content_scroller.get_vadjustment().connect("notify::page-size", sync_compact_band_editor)
-        workspace.connect("notify::collapsed", sync_compact_vertical_balance)
-        compact_band_editor_sheet.connect("notify::can-open", sync_compact_vertical_balance)
-        content_scroller.get_vadjustment().connect("notify::page-size", sync_compact_vertical_balance)
-        sync_compact_vertical_balance()
 
         self.toast_overlay = Adw.ToastOverlay()
         self.toast_overlay.set_child(compact_band_editor_sheet)
