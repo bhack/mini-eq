@@ -1,28 +1,36 @@
-# Flathub Preparation
+# Flathub Maintenance
 
-Use this note when preparing a Flathub submission for Mini EQ.
+Use this note when maintaining the Mini EQ Flathub package.
 
 ## Current Status
 
-- The upstream local Flatpak manifest is `io.github.bhack.mini-eq.yaml`.
+- Mini EQ is accepted on Flathub as `io.github.bhack.mini-eq`.
+- The app ID is verified through the GitHub login provider for `bhack`.
+- The Flathub publishing repository is
+  `https://github.com/flathub/io.github.bhack.mini-eq`.
+- The upstream local Flatpak manifest is `io.github.bhack.mini-eq.yaml`. It is
+  for local development and CI.
 - Python Flatpak dependencies are generated in `python3-dependencies.yaml`
   with `flatpak-pip-generator`.
 - The manifest builds in project CI and installs the desktop file, AppStream
   metadata, icons, licenses, PipeWire filter-chain module, WirePlumber
   introspection, JACK client bindings, and NumPy.
 - `flatpak-builder-lint manifest io.github.bhack.mini-eq.yaml` passes locally.
-- The GitHub `v0.1.1` release is published, and PyPI has `mini-eq==0.1.1`.
 
-## Submission Constraints
+## Repository Split
 
-Do not open or automate the Flathub submission pull request from Codex or other
-AI tooling. Flathub's author requirements prohibit AI-generated or automated
-submission pull requests and warn that excessive AI-generated content may close
-a review without normal review.
+Keep the Flatpak packaging in both repositories, but keep the roles separate:
 
-Flathub submissions should contain only the manifest and required packaging
-files. Do not include Mini EQ source code or generated build artifacts in the
-Flathub submission repository.
+- In this upstream repository, `io.github.bhack.mini-eq.yaml` is a development
+  and CI manifest. It builds the checked-out source tree directly.
+- In the Flathub repository, `io.github.bhack.mini-eq.yaml` is the publishing
+  manifest. It must point at an immutable public release archive and include
+  the archive SHA-256.
+- `python3-dependencies.yaml` and `flatpak/patches/` should normally stay in
+  sync between the two repositories.
+- The Flathub repository's `master` branch is the source for the published
+  `stable` Flatpak ref. Use pull requests for changes to protected publishing
+  branches.
 
 The upstream manifest uses:
 
@@ -31,33 +39,64 @@ The upstream manifest uses:
   path: .
 ```
 
-That is correct for local CI, but the Flathub submission copy should point at a
-public source release instead, for example a `v0.1.1` GitHub archive with its
-SHA-256 hash.
+That is correct for local CI. The Flathub manifest should use a release source
+instead:
 
-Mini EQ also needs a clear review note because it is a graphical desktop audio
-application with host PipeWire/WirePlumber integration. Flathub policy calls out
-system utilities and host-dependent applications as review risks. The submission
-should explain that Mini EQ is a user-facing GTK equalizer, why PipeWire access
-is required, and which functionality is expected to work inside the sandbox.
+```yaml
+- type: archive
+  url: https://github.com/bhack/mini-eq/releases/download/vX.Y.Z/mini_eq-X.Y.Z.tar.gz
+  sha256: <release archive sha256>
+```
 
-## Pre-Submission Checklist
+Do not hand-edit bundled application source files in the Flathub repository.
+Fix application metadata, desktop files, icons, and source code upstream, cut a
+release, then update the Flathub manifest to the new release archive.
 
-1. Confirm the latest GitHub release is not marked as a draft.
+## Release Update Checklist
+
+1. Finish the upstream release and confirm the GitHub release is not a draft.
 2. Confirm the release is suitable for Flathub stable, not a nightly snapshot.
-3. Prepare a Flathub submission manifest from `io.github.bhack.mini-eq.yaml`.
-4. Replace the `mini-eq` module source with the public release archive and hash.
-5. Include `flatpak/patches/wireplumber-0.5.14-tools-disabled-po.patch` in the
-   submission, preserving the manifest's patch path or adjusting it consistently.
-6. Run:
+3. Build or download the release source archive and compute its SHA-256.
+4. In the Flathub repository, update the `mini-eq` module source to the new
+   release URL and hash.
+5. If the screenshot changed, update the MetaInfo screenshot URL to a release
+   tag or commit URL before publishing.
+6. Keep `python3-dependencies.yaml` unchanged unless Python dependencies
+   changed. If dependencies changed, regenerate it and update both repositories.
+7. Keep `flatpak/patches/wireplumber-0.5.14-tools-disabled-po.patch` available
+   in the Flathub repository when the manifest references it.
+8. Run the validation commands below.
+9. Open a pull request against the Flathub repository's `master` branch.
+10. Install and test the temporary PR build posted by Flathub when practical.
+11. Merge only after the Flathub PR build and checks pass.
+12. Watch the official build. Successful official builds are published
+    automatically, but publication can lag depending on Flathub's backlog.
+13. If the official build is held for moderation, answer the bot issue or
+    moderator questions. Permission changes and critical AppStream field changes
+    can trigger moderation.
+14. Recheck the public listing and banner preview:
+   - `https://flathub.org/en/apps/io.github.bhack.mini-eq`
+   - `https://flathub.org/en/apps/io.github.bhack.mini-eq/bannerpreview`
+15. If quality fixes landed, use the listing quality panel to request a
+    re-review.
+
+## Validation
+
+Run upstream AppStream and desktop-file validation:
 
 ```bash
 appstreamcli validate --no-net data/io.github.bhack.mini-eq.metainfo.xml
 desktop-file-validate data/io.github.bhack.mini-eq.desktop
+flatpak run --command=flatpak-builder-lint org.flatpak.Builder appstream data/io.github.bhack.mini-eq.metainfo.xml
+```
+
+Run manifest lint in whichever repository you are changing:
+
+```bash
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder manifest io.github.bhack.mini-eq.yaml
 ```
 
-7. Build with Flathub tooling and run the app:
+Build with Flathub tooling and run the app:
 
 ```bash
 flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -65,17 +104,16 @@ flatpak run --command=flathub-build org.flatpak.Builder --install io.github.bhac
 flatpak run io.github.bhack.mini-eq --check-deps
 ```
 
-8. If a `repo/` is produced, run:
+If a `repo/` is produced, run:
 
 ```bash
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo
 ```
 
-## Review Notes To Include
+## Packaging Notes
 
 - Mini EQ is an upstream-maintained GTK/Libadwaita graphical application.
-- The app ID `io.github.bhack.mini-eq` matches the GitHub repository ownership
-  and can use Flathub's GitHub verification flow.
+- The app ID `io.github.bhack.mini-eq` matches the GitHub repository ownership.
 - The app requires `xdg-run/pipewire-0` to create and use PipeWire audio nodes.
 - The Flatpak bundles only the PipeWire filter-chain module and SPA builtin
   filter graph plugin needed inside the app process; it does not bundle or run

@@ -68,6 +68,17 @@ are unavailable.
 - Do not add generated build outputs, local config, cache directories, or
   machine-specific files.
 
+## Flatpak And Flathub
+
+- Keep the upstream Flatpak manifest as a local development and CI manifest
+  using the checked-out source tree. The sibling Flathub repository uses a
+  release archive URL and SHA-256 for publishing.
+- Put user-facing Flatpak install information in `README.md`; keep Flathub
+  release workflow and repository split notes in `docs/flathub.md`.
+- Do not hand-edit bundled Mini EQ source files in the Flathub repository. Fix
+  application code, metadata, desktop files, icons, and screenshots upstream,
+  then update the Flathub manifest to a new release archive.
+
 ## Screenshot Rules
 
 The README should show the public screenshot, not instructions for generating

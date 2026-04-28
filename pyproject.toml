@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mini-eq"
-version = "0.1.1"
+version = "0.1.2"
 description = "Compact PipeWire system-wide parametric equalizer for Linux desktops."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -51,7 +51,7 @@ Changelog = "https://github.com/bhack/mini-eq/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
-dev = ["build>=1.2", "packaging>=24.2", "pytest>=8", "ruff>=0.12", "twine>=6.2"]
+dev = ["build>=1.2", "packaging>=24.2", "Pillow>=10", "pytest>=8", "ruff>=0.12", "twine>=6.2"]
 
 [project.scripts]
 mini-eq = "mini_eq.__main__:console_main"

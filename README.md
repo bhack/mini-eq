@@ -5,6 +5,8 @@
 [![GitHub release](https://img.shields.io/github/v/release/bhack/mini-eq?sort=semver)](https://github.com/bhack/mini-eq/releases)
 [![License](https://img.shields.io/github/license/bhack/mini-eq.svg)](https://github.com/bhack/mini-eq/blob/main/LICENSE)
 
+<a href="https://flathub.org/apps/io.github.bhack.mini-eq"><img width="240" alt="Get it on Flathub" src="https://flathub.org/api/badge?locale=en"/></a>
+
 Mini EQ is a small system-wide parametric equalizer for PipeWire desktops.
 It uses GTK/Libadwaita for the UI, WirePlumber for routing/default-output
 control, PipeWire filter-chain with builtin biquad filters for the equalizer,
@@ -25,9 +27,16 @@ and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer.
 
 Recommended install paths:
 
-1. Flathub once accepted. This will be the preferred desktop install path.
+1. Flathub, the preferred desktop install path.
 2. PyPI, after the system desktop/audio dependencies below are installed.
 3. Source checkout, for development or testing unreleased changes.
+
+Install from Flathub:
+
+```bash
+flatpak install flathub io.github.bhack.mini-eq
+flatpak run io.github.bhack.mini-eq
+```
 
 Mini EQ depends on system desktop/audio packages that are not installed by
 Python packaging: GTK 4.12+ and Libadwaita 1.6+ GI bindings, WirePlumber

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2 - 2026-04-28
+
+- Refine the main workspace layout, graph sizing, and compact adaptive behavior.
+- Polish the compact selected-band editor and bottom-sheet workflow.
+- Improve band fader rendering, selected-band editor stability, and graph presentation.
+- Improve dependency diagnostics and add coverage for app startup, dependency checks, and window behavior.
+- Switch the local Flatpak manifest to YAML and add generated Flatpak Python dependencies.
+- Add Flathub maintenance notes, the Flathub install badge, and updated install guidance.
+- Improve PyPI and GitHub discoverability metadata.
+- Refresh the public screenshot and add a generated social preview image.
+- Tighten CI scope detection so unchanged jobs can skip their heavy work.
+
 ## 0.1.1 - 2026-04-27
 
 - Fix PyPI classifier metadata for package-index publishing.

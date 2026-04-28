@@ -2,13 +2,17 @@
 <component type="desktop-application">
   <id>io.github.bhack.mini-eq</id>
   <name>Mini EQ</name>
-  <summary>Compact PipeWire system-wide equalizer</summary>
+  <summary>Tune all desktop audio</summary>
   <developer id="io.github.bhack">
     <name>bhack</name>
   </developer>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <launchable type="desktop-id">io.github.bhack.mini-eq.desktop</launchable>
+  <branding>
+    <color type="primary" scheme_preference="light">#7fd5e8</color>
+    <color type="primary" scheme_preference="dark">#2f6678</color>
+  </branding>
   <categories>
     <category>AudioVideo</category>
     <category>Audio</category>
@@ -33,6 +37,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.1.2" date="2026-04-28">
+      <description>
+        <ul>
+          <li>Refine the main workspace layout, graph sizing, and compact editor behavior.</li>
+          <li>Improve Flatpak packaging metadata and update install guidance for the Flathub release.</li>
+          <li>Refresh the public screenshot and social preview assets.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-04-27">
       <description>
         <p>Fix package metadata for PyPI publishing.</p>
