@@ -39,7 +39,7 @@ from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positi
 
 TOAST_TIMEOUT_SECONDS = 2
 MIN_WINDOW_WIDTH = 980
-MIN_WINDOW_HEIGHT = 660
+MIN_WINDOW_HEIGHT = 628
 ROUTING_CLOSE_SETTLE_MS = 300
 TOAST_IGNORED_PREFIXES = (
     "filter-chain PipeWire EQ ready:",
@@ -110,7 +110,6 @@ class MiniEqWindow(
         self.warning_banner = Gtk.Label(xalign=0.0)
         self.warning_banner.set_wrap(True)
         self.warning_banner.set_visible(False)
-        self.status_card_frames: dict[str, Gtk.Widget] = {}
         self.system_state_label = Gtk.Label(xalign=0.5)
 
         self.output_combo = Gtk.DropDown(model=self.output_sink_model)
@@ -146,18 +145,7 @@ class MiniEqWindow(
         self.inspector_summary_label = Gtk.Label(xalign=1.0)
         self.graph_title_label = Gtk.Label(xalign=0.0)
         self.graph_title_label.set_wrap(True)
-        self.info_label = Gtk.Label(xalign=0.0)
-        self.path_virtual_chip = Gtk.Label(xalign=0.0)
-        self.path_output_chip = Gtk.Label(xalign=0.0)
-        self.path_detail_label = Gtk.Label(xalign=0.0)
-        self.route_value_label = Gtk.Label(xalign=0.0)
-        self.route_detail_label = Gtk.Label(xalign=0.0)
-        self.output_value_label = Gtk.Label(xalign=0.0)
-        self.output_detail_label = Gtk.Label(xalign=0.0)
-        self.profile_value_label = Gtk.Label(xalign=0.0)
-        self.profile_detail_label = Gtk.Label(xalign=0.0)
         self.preset_state_label = Gtk.Label(xalign=1.0)
-        self.main_preset_name_label = Gtk.Label(xalign=0.0)
         self.headroom_peak_db: float | None = None
         self.headroom_state_kind = "bypass"
 
@@ -461,23 +449,7 @@ class MiniEqWindow(
         sink = self.output_sink_info()
         route_enabled = self.route_switch.get_active()
 
-        route_detail = f"Apps -> {self.controller.virtual_sink_name}."
-        if not route_enabled:
-            route_detail = "System audio is not routed through Mini EQ yet."
-        if self.controller.follow_default_output:
-            route_detail += " Automatic output selection."
-        else:
-            route_detail += " Manual output override."
-        self.set_card_state("route", "Routing live" if route_enabled else "Standby", route_detail)
-
-        if sink is None:
-            self.set_card_state("output", "Output unavailable", self.controller.output_sink, warning=True)
-        else:
-            output_detail = self.format_sample_spec(sink)
-            self.set_card_state("output", self.output_display_name(sink), output_detail)
-
-        profile_value, profile_detail, profile_warning, warnings = self.profile_summary(sink)
-        self.set_card_state("profile", profile_value, profile_detail, warning=profile_warning)
+        warnings = self.profile_summary(sink)[3]
 
         if not self.controller.eq_enabled:
             self.set_headroom_state(
@@ -574,18 +546,7 @@ class MiniEqWindow(
         self.update_status_summary()
 
     def update_info_label(self) -> None:
-        sink = self.output_sink_info()
-        output_name = self.output_display_name(sink)
-        default_sink_name = self.controller.get_default_output_sink_name()
-        default_sink = self.controller.get_sink(default_sink_name)
-        default_output_name = self.output_display_name(default_sink)
-        follow_text = "Automatic" if self.controller.follow_default_output else "Manual override"
-        eq_text = "EQ live" if self.controller.eq_enabled else "EQ bypassed"
-        self.path_virtual_chip.set_text(self.controller.virtual_sink_name)
-        self.path_output_chip.set_text(output_name)
-        path_detail = f"System default: {default_output_name} | Target: {follow_text} | {eq_text}"
-        self.path_detail_label.set_text(path_detail)
-        self.info_label.set_text(f"Path: {self.controller.virtual_sink_name} -> {output_name} | {path_detail}")
+        return
 
     def on_import_apo_clicked(self, button: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Import APO Preset")

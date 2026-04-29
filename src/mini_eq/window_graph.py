@@ -77,14 +77,6 @@ class MiniEqWindowGraphMixin:
             self.set_visible_band_count(self.selected_band_index + 1)
         self.sync_ui_from_state()
 
-    def open_compact_band_editor(self) -> None:
-        split_view = getattr(self, "utility_split_view", None)
-        sheet = getattr(self, "compact_band_editor_sheet", None)
-        if split_view is None or sheet is None:
-            return
-        if split_view.get_collapsed() and sheet.get_can_open():
-            sheet.set_open(True)
-
     def update_quick_fader_strip(self) -> None:
         solo_active = bands_have_solo(self.controller.bands)
         for index in range(len(self.band_fader_widgets)):
@@ -191,14 +183,6 @@ class MiniEqWindowGraphMixin:
         filter_type = filter_type_label(selected.filter_type)
         full_summary = f"{band_title} • {filter_type} • {selected.frequency:.1f} Hz • Q {selected.q:.3f} • {selected.gain_db:+.1f} dB"
         self.selected_band_label.set_tooltip_text(full_summary)
-        if hasattr(self, "compact_band_editor_title_label"):
-            self.compact_band_editor_title_label.set_text(band_title)
-        if hasattr(self, "compact_band_editor_detail_label"):
-            self.compact_band_editor_detail_label.set_text(
-                f"{filter_type} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
-            )
-        if hasattr(self, "compact_band_editor_launcher"):
-            self.compact_band_editor_launcher.set_tooltip_text(full_summary)
         self.selected_band_type_combo.set_selected(FILTER_TYPE_INDEX_BY_VALUE.get(selected.filter_type, 0))
         self.selected_band_frequency_spin.set_value(selected.frequency)
         self.selected_band_q_spin.set_value(selected.q)
@@ -302,7 +286,7 @@ class MiniEqWindowGraphMixin:
             self.select_band(index)
             return
 
-        self.open_compact_band_editor()
+        return
 
     def on_custom_band_fader_selected(self, index: int) -> None:
         if self.updating_ui or self.selected_band_index == index:
@@ -318,7 +302,7 @@ class MiniEqWindowGraphMixin:
             self.select_band(index)
             return
 
-        self.open_compact_band_editor()
+        return
 
     def on_custom_band_fader_changed(self, index: int, gain_db: float) -> None:
         if self.updating_ui:

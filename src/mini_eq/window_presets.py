@@ -54,8 +54,6 @@ class MiniEqWindowPresetMixin:
     def update_preset_state(self) -> None:
         current_signature = self.controller.state_signature()
         current_name = self.current_preset_name or "Current State"
-        self.main_preset_name_label.set_text(current_name)
-        self.main_preset_name_label.set_tooltip_text(current_name)
 
         self.preset_state_label.remove_css_class("preset-state-saved")
         self.preset_state_label.remove_css_class("preset-state-modified")

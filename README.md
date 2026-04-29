@@ -39,7 +39,7 @@ flatpak run io.github.bhack.mini-eq
 ```
 
 Mini EQ depends on system desktop/audio packages that are not installed by
-Python packaging: GTK 4.12+ and Libadwaita 1.6+ GI bindings, WirePlumber
+Python packaging: GTK 4.12+ and Libadwaita GI bindings, WirePlumber
 introspection, PipeWire, and PipeWire JACK compatibility.
 
 If your distro ships older GTK or Libadwaita builds, prefer the Flatpak build.

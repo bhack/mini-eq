@@ -27,16 +27,14 @@ from .core import (
 
 ADAPTIVE_NARROW_BREAKPOINT_SP = 1320
 COMPACT_BREAKPOINT_SP = 1080
-COMPACT_SHEET_HEIGHT_THRESHOLD = 660
-
 DEFAULT_GRAPH_CONTENT_HEIGHT = 196
-COMPACT_GRAPH_CONTENT_HEIGHT = 156
+COMPACT_GRAPH_CONTENT_HEIGHT = 142
 DEFAULT_FADER_SECTION_SPACING = 6
 COMPACT_FADER_SECTION_SPACING = 3
 DEFAULT_FADER_WIDGET_HEIGHT = 182
-COMPACT_FADER_WIDGET_HEIGHT = 154
+COMPACT_FADER_WIDGET_HEIGHT = 146
 DEFAULT_FADER_SCROLLER_MIN_HEIGHT = 174
-COMPACT_FADER_SCROLLER_MIN_HEIGHT = 142
+COMPACT_FADER_SCROLLER_MIN_HEIGHT = 132
 
 # Extra vertical room helps graph readability more than fader usability.
 # Keep fader growth lower and capped so tall windows do not stretch controls.
@@ -88,9 +86,7 @@ class MiniEqWindowLayoutMixin:
         root.set_vexpand(True)
         root.set_valign(Gtk.Align.FILL)
 
-        default_toolbar_stack_spacing = 6
-        compact_toolbar_stack_spacing = 2
-        toolbar_stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=default_toolbar_stack_spacing)
+        toolbar_stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         toolbar_stack.set_hexpand(True)
         toolbar_stack.set_valign(Gtk.Align.START)
 
@@ -104,30 +100,15 @@ class MiniEqWindowLayoutMixin:
         primary_tools.set_halign(Gtk.Align.START)
 
         output_inline = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        output_inline.append(Gtk.Label(label="Output", xalign=0.0))
+        output_label = Gtk.Label(label="Output", xalign=0.0)
+        output_inline.append(output_label)
         self.output_combo.set_hexpand(False)
         self.output_combo.set_size_request(300, -1)
         self.output_combo.add_css_class("toolbar-select")
         set_accessible_label(self.output_combo, "Output")
         output_inline.append(self.output_combo)
         primary_tools.append(output_inline)
-
-        preset_inline = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        preset_inline.add_css_class("main-preset-inline")
-        preset_inline.set_hexpand(False)
-        preset_label = Gtk.Label(label="Preset", xalign=0.0)
-        preset_inline.append(preset_label)
-        self.main_preset_name_label.add_css_class("main-preset-name")
-        self.main_preset_name_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.main_preset_name_label.set_single_line_mode(True)
-        self.main_preset_name_label.set_max_width_chars(18)
-        preset_inline.append(self.main_preset_name_label)
-        primary_tools.append(preset_inline)
         toolbar.append(primary_tools)
-
-        wide_spacer = Gtk.Box()
-        wide_spacer.set_hexpand(True)
-        toolbar.append(wide_spacer)
 
         tools_popover = Gtk.Popover()
         tools_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -203,16 +184,7 @@ class MiniEqWindowLayoutMixin:
         secondary_tools.append(utility_pane_button)
         toolbar.append(secondary_tools)
 
-        compact_toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        compact_toolbar.add_css_class("toolbar-row")
-        compact_toolbar.set_hexpand(True)
-        compact_toolbar.set_visible(False)
-
-        compact_spacer = Gtk.Box()
-        compact_spacer.set_hexpand(True)
-
         toolbar_stack.append(toolbar)
-        toolbar_stack.append(compact_toolbar)
         root.append(toolbar_stack)
 
         workspace = Adw.OverlaySplitView()
@@ -295,49 +267,19 @@ class MiniEqWindowLayoutMixin:
                 root.set_spacing(compact_root_spacing)
                 root.set_margin_top(3)
                 root.set_margin_bottom(3)
-                toolbar_stack.set_spacing(compact_toolbar_stack_spacing)
-                preset_label.set_visible(False)
+                output_label.set_visible(False)
+                self.output_combo.set_size_request(240, -1)
                 bypass_title_label.set_visible(False)
                 secondary_tools.add_css_class("toolbar-compact-actions")
-                if preset_inline.get_parent() is primary_tools:
-                    primary_tools.remove(preset_inline)
-                if secondary_tools.get_parent() is toolbar:
-                    toolbar.remove(secondary_tools)
-                if wide_spacer.get_parent() is toolbar:
-                    toolbar.remove(wide_spacer)
-
-                if preset_inline.get_parent() is not compact_toolbar:
-                    compact_toolbar.append(preset_inline)
-                if compact_spacer.get_parent() is not compact_toolbar:
-                    compact_toolbar.append(compact_spacer)
-                if secondary_tools.get_parent() is not compact_toolbar:
-                    compact_toolbar.append(secondary_tools)
-
-                compact_toolbar.set_visible(True)
                 return
-
-            if preset_inline.get_parent() is compact_toolbar:
-                compact_toolbar.remove(preset_inline)
-            if compact_spacer.get_parent() is compact_toolbar:
-                compact_toolbar.remove(compact_spacer)
-            if secondary_tools.get_parent() is compact_toolbar:
-                compact_toolbar.remove(secondary_tools)
 
             root.set_spacing(default_root_spacing)
             root.set_margin_top(6)
             root.set_margin_bottom(6)
-            toolbar_stack.set_spacing(default_toolbar_stack_spacing)
-            preset_label.set_visible(True)
+            output_label.set_visible(True)
+            self.output_combo.set_size_request(300, -1)
             bypass_title_label.set_visible(True)
             secondary_tools.remove_css_class("toolbar-compact-actions")
-            if preset_inline.get_parent() is not primary_tools:
-                primary_tools.append(preset_inline)
-            if wide_spacer.get_parent() is not toolbar:
-                toolbar.append(wide_spacer)
-            if secondary_tools.get_parent() is not toolbar:
-                toolbar.append(secondary_tools)
-
-            compact_toolbar.set_visible(False)
 
         workspace.connect("notify::collapsed", sync_compact_toolbar)
         sync_compact_toolbar()
@@ -439,84 +381,15 @@ class MiniEqWindowLayoutMixin:
         system_header_spacer = Gtk.Box()
         system_header_spacer.set_hexpand(True)
         system_header.append(system_header_spacer)
-        system_header_suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-
-        system_details_popover = Gtk.Popover()
-        system_details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        system_details_box.set_margin_top(10)
-        system_details_box.set_margin_bottom(10)
-        system_details_box.set_margin_start(12)
-        system_details_box.set_margin_end(12)
-        system_details_popover.set_child(system_details_box)
-        system_details_button = Gtk.MenuButton(label="Details")
-        system_details_button.set_can_shrink(True)
-        system_details_button.add_css_class("toolbar-button")
-        set_accessible_label(system_details_button, "System Details")
-        system_details_button.set_popover(system_details_popover)
-        system_header_suffix.append(system_details_button)
-
         self.system_state_label.add_css_class("system-state-chip")
         self.system_state_label.set_width_chars(10)
+        system_header_suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         system_header_suffix.append(self.system_state_label)
         system_header.append(system_header_suffix)
         system_section.append(system_header)
 
-        route_row, self.route_value_label, self.route_detail_label = self.make_status_row("route", "Routing")
-        output_row, self.output_value_label, self.output_detail_label = self.make_status_row("output", "Output")
-        profile_row, self.profile_value_label, self.profile_detail_label = self.make_status_row("profile", "Profile")
         headroom_panel = self.make_headroom_panel()
-        self.status_card_frames = {
-            "route": route_row,
-            "output": output_row,
-            "profile": profile_row,
-        }
-
         system_section.append(headroom_panel)
-
-        signal_path_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        signal_path_box.add_css_class("system-path")
-
-        signal_path_title = Gtk.Label(label="Signal Path", xalign=0.0)
-        signal_path_title.add_css_class("metric-title")
-        signal_path_box.append(signal_path_title)
-
-        chip_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        chip_row.add_css_class("signal-chip-row")
-
-        apps_chip = Gtk.Label(label="Apps", xalign=0.0)
-        apps_chip.add_css_class("signal-chip")
-        chip_row.append(apps_chip)
-
-        arrow_a = Gtk.Label(label="->", xalign=0.5)
-        arrow_a.add_css_class("signal-arrow")
-        chip_row.append(arrow_a)
-
-        self.path_virtual_chip.add_css_class("signal-chip")
-        self.path_virtual_chip.set_hexpand(True)
-        self.path_virtual_chip.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        self.path_virtual_chip.set_max_width_chars(12)
-        chip_row.append(self.path_virtual_chip)
-
-        arrow_b = Gtk.Label(label="->", xalign=0.5)
-        arrow_b.add_css_class("signal-arrow")
-        chip_row.append(arrow_b)
-
-        self.path_output_chip.add_css_class("signal-chip")
-        self.path_output_chip.set_hexpand(True)
-        self.path_output_chip.set_ellipsize(Pango.EllipsizeMode.END)
-        self.path_output_chip.set_max_width_chars(14)
-        chip_row.append(self.path_output_chip)
-
-        signal_path_box.append(chip_row)
-
-        self.path_detail_label.add_css_class("path-strip-detail")
-        self.path_detail_label.add_css_class("dim-label")
-        self.path_detail_label.set_wrap(True)
-        signal_path_box.append(self.path_detail_label)
-        system_details_box.append(route_row)
-        system_details_box.append(output_row)
-        system_details_box.append(profile_row)
-        system_details_box.append(signal_path_box)
 
         right_column.append(system_section)
 
@@ -706,8 +579,12 @@ class MiniEqWindowLayoutMixin:
         fader_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         fader_shell.add_css_class("panel-card")
         fader_shell.add_css_class("quick-view-shell")
+        fader_shell.set_vexpand(True)
+        fader_shell.set_valign(Gtk.Align.FILL)
 
         fader_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=DEFAULT_FADER_SECTION_SPACING)
+        fader_section.set_vexpand(True)
+        fader_section.set_valign(Gtk.Align.FILL)
         fader_section.set_margin_top(8)
         fader_section.set_margin_bottom(6)
         fader_section.set_margin_start(12)
@@ -719,7 +596,8 @@ class MiniEqWindowLayoutMixin:
 
         self.fader_scroller = Gtk.ScrolledWindow()
         self.fader_scroller.set_hexpand(True)
-        self.fader_scroller.set_vexpand(False)
+        self.fader_scroller.set_vexpand(True)
+        self.fader_scroller.set_valign(Gtk.Align.FILL)
         self.fader_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         self.fader_scroller.set_min_content_height(DEFAULT_FADER_SCROLLER_MIN_HEIGHT)
         self.fader_scroller.add_css_class("fader-scroller")
@@ -769,56 +647,6 @@ class MiniEqWindowLayoutMixin:
 
         self.fader_scroller.set_child(fader_center_shell)
         fader_section.append(self.fader_scroller)
-
-        self.compact_band_editor_launcher = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        self.compact_band_editor_launcher.add_css_class("compact-band-editor-launcher")
-        self.compact_band_editor_launcher.set_hexpand(True)
-        self.compact_band_editor_launcher.set_tooltip_text("Edit Selected Band")
-        set_accessible_label(self.compact_band_editor_launcher, "Edit Selected Band")
-
-        compact_band_editor_bottom_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        compact_band_editor_bottom_bar.set_hexpand(True)
-        compact_band_editor_bottom_bar.set_margin_top(6)
-        compact_band_editor_bottom_bar.set_margin_bottom(6)
-        compact_band_editor_bottom_bar.set_margin_start(10)
-        compact_band_editor_bottom_bar.set_margin_end(10)
-        compact_band_editor_bottom_bar.add_css_class("compact-band-editor-bottom-bar")
-
-        compact_band_editor_launcher_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        compact_band_editor_launcher_box.set_hexpand(True)
-        compact_band_editor_launcher_box.add_css_class("compact-band-editor-launcher-row")
-
-        self.compact_band_editor_title_label = Gtk.Label(label="Band 1", xalign=0.0)
-        self.compact_band_editor_title_label.add_css_class("band-editor-title")
-        compact_band_editor_launcher_box.append(self.compact_band_editor_title_label)
-
-        self.compact_band_editor_detail_label = Gtk.Label(xalign=0.0)
-        self.compact_band_editor_detail_label.add_css_class("compact-band-editor-detail")
-        self.compact_band_editor_detail_label.set_hexpand(True)
-        self.compact_band_editor_detail_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.compact_band_editor_detail_label.set_single_line_mode(True)
-        compact_band_editor_launcher_box.append(self.compact_band_editor_detail_label)
-
-        compact_band_editor_affordance = Gtk.Label(label="Edit", xalign=1.0)
-        compact_band_editor_affordance.add_css_class("compact-band-editor-affordance")
-        compact_band_editor_launcher_box.append(compact_band_editor_affordance)
-
-        self.compact_band_editor_launcher.append(compact_band_editor_launcher_box)
-        compact_band_editor_bottom_bar.append(self.compact_band_editor_launcher)
-
-        compact_band_editor_sheet_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        compact_band_editor_sheet_body.add_css_class("compact-band-editor-sheet")
-
-        compact_band_editor_sheet = Adw.BottomSheet()
-        compact_band_editor_sheet.set_can_open(False)
-        compact_band_editor_sheet.set_can_close(True)
-        compact_band_editor_sheet.set_modal(False)
-        compact_band_editor_sheet.set_show_drag_handle(True)
-        compact_band_editor_sheet.set_full_width(True)
-        compact_band_editor_sheet.set_sheet(compact_band_editor_sheet_body)
-        compact_band_editor_sheet.set_bottom_bar(compact_band_editor_bottom_bar)
-        compact_band_editor_sheet.set_reveal_bottom_bar(False)
-        compact_band_editor_sheet.set_open(False)
 
         band_editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         band_editor.add_css_class("band-editor")
@@ -950,9 +778,6 @@ class MiniEqWindowLayoutMixin:
         compact_breakpoint.add_setter(self.graph_response_area, "content-width", 760)
 
         content_scroller: Gtk.ScrolledWindow | None = None
-        compact_editor_spacer = Gtk.Box()
-        compact_editor_spacer.set_hexpand(True)
-
         def current_page_size() -> int:
             if content_scroller is None:
                 return max(int(self.get_allocated_height()), 0)
@@ -1017,21 +842,10 @@ class MiniEqWindowLayoutMixin:
             for child in children:
                 move_if_needed(child, parent)
 
-        def use_compact_band_editor_sheet() -> bool:
-            if not workspace.get_collapsed():
-                return False
-
-            page_size = current_page_size()
-            if page_size <= 1:
-                return False
-
-            return page_size < COMPACT_SHEET_HEIGHT_THRESHOLD
-
         def sync_compact_band_editor(
             _split_view: Adw.OverlaySplitView | None = None, _param: object | None = None
         ) -> None:
             compact = workspace.get_collapsed()
-            use_sheet = use_compact_band_editor_sheet()
             page_size = current_page_size()
 
             if compact:
@@ -1061,65 +875,24 @@ class MiniEqWindowLayoutMixin:
                 q_box.set_spacing(4)
                 gain_box.set_spacing(4)
 
-                if use_sheet:
-                    band_editor.set_spacing(2)
-                    band_editor_compact_box.set_spacing(2)
-                    band_editor_compact_top_row.set_spacing(6)
-                    band_editor_compact_bottom_row.set_spacing(4)
-                    self.selected_band_type_combo.set_size_request(104, -1)
-                    self.selected_band_frequency_spin.set_size_request(96, -1)
-                    self.selected_band_q_spin.set_size_request(74, -1)
-                    self.selected_band_gain_spin.set_size_request(88, -1)
-                    reorder_children(
-                        band_editor_compact_top_row,
-                        (selected_band_box, type_box, state_box),
-                    )
-                    reorder_children(
-                        band_editor_compact_bottom_row,
-                        (frequency_box, q_box, gain_box),
-                    )
-                    if compact_editor_spacer.get_parent() is not None and isinstance(
-                        compact_editor_spacer.get_parent(), Gtk.Box
-                    ):
-                        compact_editor_spacer.get_parent().remove(compact_editor_spacer)
-                    if editor_spacer.get_parent() is not None and isinstance(editor_spacer.get_parent(), Gtk.Box):
-                        editor_spacer.get_parent().remove(editor_spacer)
-                    compact_band_editor_sheet.set_can_open(True)
-                    compact_band_editor_sheet.set_reveal_bottom_bar(True)
-                    band_editor.add_css_class("band-editor-sheet")
-                    band_editor_wide_row.set_visible(False)
-                    band_editor_compact_box.set_visible(True)
-                    move_if_needed(band_editor, compact_band_editor_sheet_body)
-                else:
-                    band_editor.set_spacing(2)
-                    band_editor_wide_row.set_spacing(6)
-                    self.selected_band_type_combo.set_size_request(96, -1)
-                    self.selected_band_frequency_spin.set_size_request(88, -1)
-                    self.selected_band_q_spin.set_size_request(68, -1)
-                    self.selected_band_gain_spin.set_size_request(80, -1)
-                    reorder_children(
-                        band_editor_wide_row,
-                        (selected_band_box, type_box, frequency_box, q_box, gain_box, editor_spacer, state_box),
-                    )
-                    if compact_editor_spacer.get_parent() is not None and isinstance(
-                        compact_editor_spacer.get_parent(), Gtk.Box
-                    ):
-                        compact_editor_spacer.get_parent().remove(compact_editor_spacer)
-                    compact_band_editor_sheet.set_can_open(False)
-                    compact_band_editor_sheet.set_reveal_bottom_bar(False)
-                    compact_band_editor_sheet.set_open(False)
-                    band_editor.remove_css_class("band-editor-sheet")
-                    band_editor.add_css_class("band-editor-inline-compact")
-                    band_editor_compact_box.set_visible(False)
-                    band_editor_wide_row.set_visible(True)
-                    move_if_needed(band_editor, fader_section)
+                band_editor.set_spacing(2)
+                band_editor_wide_row.set_spacing(6)
+                self.selected_band_type_combo.set_size_request(96, -1)
+                self.selected_band_frequency_spin.set_size_request(88, -1)
+                self.selected_band_q_spin.set_size_request(68, -1)
+                self.selected_band_gain_spin.set_size_request(80, -1)
+                reorder_children(
+                    band_editor_wide_row,
+                    (selected_band_box, type_box, frequency_box, q_box, gain_box, editor_spacer, state_box),
+                )
+                band_editor.add_css_class("band-editor-inline-compact")
+                band_editor_compact_box.set_visible(False)
+                band_editor_wide_row.set_visible(True)
+                move_if_needed(band_editor, fader_section)
                 return
 
             graph_height, fader_height, fader_scroller_height = wide_surface_sizes(page_size)
             graph_shell.set_spacing(6)
-            compact_band_editor_sheet.set_can_open(False)
-            compact_band_editor_sheet.set_reveal_bottom_bar(False)
-            compact_band_editor_sheet.set_open(False)
             self.graph_area.set_content_height(graph_height)
             self.analyzer_area.set_content_height(graph_height)
             self.graph_response_area.set_content_height(graph_height)
@@ -1133,7 +906,6 @@ class MiniEqWindowLayoutMixin:
             band_editor.set_spacing(6)
             band_editor.remove_css_class("band-editor-compact-active")
             band_editor.remove_css_class("band-editor-inline-compact")
-            band_editor.remove_css_class("band-editor-sheet")
             band_editor_wide_row.set_spacing(8)
             band_editor_compact_box.set_spacing(6)
             band_editor_compact_top_row.set_spacing(8)
@@ -1158,10 +930,6 @@ class MiniEqWindowLayoutMixin:
                 band_editor_wide_row,
                 (selected_band_box, state_box, type_box, frequency_box, q_box, gain_box, editor_spacer),
             )
-            if compact_editor_spacer.get_parent() is not None and isinstance(
-                compact_editor_spacer.get_parent(), Gtk.Box
-            ):
-                compact_editor_spacer.get_parent().remove(compact_editor_spacer)
             band_editor_compact_box.set_visible(False)
             band_editor_wide_row.set_visible(True)
 
@@ -1173,19 +941,8 @@ class MiniEqWindowLayoutMixin:
         fader_shell.append(fader_section)
         left_column.append(fader_shell)
 
-        content_scroller = Gtk.ScrolledWindow()
-        content_scroller.set_hexpand(True)
-        content_scroller.set_vexpand(True)
-        content_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        content_scroller.set_child(root)
-
-        compact_band_editor_sheet.set_content(content_scroller)
-        self.compact_band_editor_sheet = compact_band_editor_sheet
-
-        content_scroller.get_vadjustment().connect("notify::page-size", sync_compact_band_editor)
-
         self.toast_overlay = Adw.ToastOverlay()
-        self.toast_overlay.set_child(compact_band_editor_sheet)
+        self.toast_overlay.set_child(root)
         toolbar_view.set_content(self.toast_overlay)
         self.set_content(toolbar_view)
 
@@ -1209,35 +966,6 @@ class MiniEqWindowLayoutMixin:
         self.refresh_output_sinks()
         self.refresh_preset_list()
         self.sync_ui_from_state()
-
-    def make_status_row(self, key: str, title: str) -> tuple[Gtk.Box, Gtk.Label, Gtk.Label]:
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        row.add_css_class("system-row")
-
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        text_box.set_hexpand(True)
-
-        title_label = Gtk.Label(label=title, xalign=0.0)
-        title_label.add_css_class("metric-title")
-
-        detail_label = Gtk.Label(xalign=0.0)
-        detail_label.add_css_class("metric-detail")
-        detail_label.add_css_class("dim-label")
-        detail_label.set_wrap(True)
-        detail_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-
-        value_label = Gtk.Label(xalign=1.0)
-        value_label.set_halign(Gtk.Align.END)
-        value_label.set_valign(Gtk.Align.CENTER)
-        value_label.add_css_class("metric-value")
-        value_label.set_ellipsize(Pango.EllipsizeMode.END)
-        value_label.set_max_width_chars(15)
-
-        text_box.append(title_label)
-        text_box.append(detail_label)
-        row.append(text_box)
-        row.append(value_label)
-        return row, value_label, detail_label
 
     def make_headroom_panel(self) -> Gtk.Box:
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
@@ -1282,30 +1010,6 @@ class MiniEqWindowLayoutMixin:
         panel.append(self.headroom_detail_label)
 
         return panel
-
-    def set_card_state(self, key: str, value: str, detail: str, warning: bool = False) -> None:
-        labels = {
-            "route": (self.route_value_label, self.route_detail_label),
-            "output": (self.output_value_label, self.output_detail_label),
-            "profile": (self.profile_value_label, self.profile_detail_label),
-        }
-
-        pair = labels.get(key)
-        if pair is None:
-            return
-
-        value_label, detail_label = pair
-        value_label.set_text(value)
-        detail_label.set_text(detail)
-
-        row = self.status_card_frames.get(key)
-        if row is None:
-            return
-
-        if warning:
-            row.add_css_class("system-row-warning")
-        else:
-            row.remove_css_class("system-row-warning")
 
     def set_headroom_state(
         self,
