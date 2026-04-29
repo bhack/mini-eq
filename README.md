@@ -21,7 +21,18 @@ and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer.
 - WirePlumber routing and default-output tracking.
 - PipeWire filter-chain DSP using builtin biquad filters.
 - Optional spectrum analyzer through the PipeWire JACK compatibility layer.
-- Equalizer APO preset import from the UI or `--import-apo`.
+- Equalizer APO preset import from the UI or `--import-apo`, including
+  compatible presets exported by [AutoEq](https://autoeq.app/).
+
+## AutoEq And APO Presets
+
+Mini EQ can import Equalizer APO-style parametric EQ text presets. This makes it
+usable with headphone correction presets exported by
+[AutoEq](https://autoeq.app/): export an Equalizer APO/parametric EQ preset from
+AutoEq, then use **Import Equalizer APO...** in Mini EQ or start the app with
+`mini-eq --import-apo path/to/ParametricEQ.txt`. The
+[AutoEq project](https://github.com/jaakkopasanen/AutoEq) provides the source,
+headphone measurement data, targets, and optimizer behind the web app.
 
 ## Install
 
