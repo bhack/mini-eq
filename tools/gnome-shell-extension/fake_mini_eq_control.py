@@ -50,8 +50,8 @@ class FakeMiniEqControl:
     def __init__(self) -> None:
         self.eq_enabled = True
         self.routed = True
-        self.preset_name = "HIFIMAN Ananda Nano"
-        self.presets = ["HIFIMAN Ananda Nano", "Flat", "Late Night"]
+        self.preset_name = "Studio Reference"
+        self.presets = ["Studio Reference", "Flat", "Voice Focus"]
         self.analyzer_levels = [0.0] * 10
         self.animation_step = 0
         self.loop = GLib.MainLoop()
@@ -67,7 +67,7 @@ class FakeMiniEqControl:
             "eq_enabled": GLib.Variant("b", self.eq_enabled),
             "routed": GLib.Variant("b", self.routed),
             "preset_name": GLib.Variant("s", self.preset_name),
-            "output_sink": GLib.Variant("s", "devkit-output"),
+            "output_sink": GLib.Variant("s", "Demo Output"),
             "analyzer_levels": GLib.Variant(
                 "ad", self.analyzer_levels if self.eq_enabled and self.routed else [0.0] * 10
             ),
