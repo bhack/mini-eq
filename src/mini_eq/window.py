@@ -516,18 +516,10 @@ class MiniEqWindow(
                 )
 
         self.warning_banner.remove_css_class("warning-banner-alert")
-        self.warning_banner.remove_css_class("warning-banner-info")
 
         if warnings:
             self.warning_banner.set_text("  ".join(warnings))
             self.warning_banner.add_css_class("warning-banner-alert")
-            self.warning_banner.set_visible(True)
-        elif not route_enabled:
-            self.warning_banner.set_text(
-                "Enable Audio Routing when you want desktop audio to pass through Mini EQ. "
-                "You can shape the curve first and switch routing on when ready."
-            )
-            self.warning_banner.add_css_class("warning-banner-info")
             self.warning_banner.set_visible(True)
         else:
             self.warning_banner.set_visible(False)

@@ -282,12 +282,6 @@
     color: #ffd2d0;
 }
 
-.warning-banner-info {
-    border: 1px solid alpha(var(--accent-bg-color), 0.30);
-    background-color: alpha(var(--accent-bg-color), 0.12);
-    color: var(--window-fg-color);
-}
-
 .panel-card {
     border-radius: 20px;
     border: 1px solid var(--mini-border-soft);
