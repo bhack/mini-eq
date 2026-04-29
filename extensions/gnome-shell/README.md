@@ -65,6 +65,19 @@ tools/pack_gnome_shell_extension.sh
 The generated zip is written under `dist/gnome-shell-extension/`, which is
 ignored by Git.
 
+Capture a privacy-safe screenshot for extensions.gnome.org from the nested
+development Shell when EGO asks for one:
+
+```bash
+tools/run_gnome_extension_dev_shell.sh --fake-control
+```
+
+In the nested Shell window, open the Mini EQ indicator menu, use the normal GNOME
+screenshot UI, crop to the nested Shell panel/menu only, and save the image under
+`dist/gnome-shell-extension/`. Keep the screenshot free of personal device names,
+accounts, usernames, hostnames, local paths, and real desktop content. The fake
+control service supplies deterministic demo state for this purpose.
+
 Before uploading to extensions.gnome.org:
 
 - Test on every GNOME Shell version listed in `metadata.json`.

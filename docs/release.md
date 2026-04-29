@@ -69,6 +69,10 @@ Only upload the generated extension zip after testing every GNOME Shell version
 listed in `extensions/gnome-shell/mini-eq@bhack.github.io/metadata.json`. Do
 not list future Shell versions.
 
+If extensions.gnome.org asks for an extension screenshot, capture it from the
+nested fake-control Shell documented in `extensions/gnome-shell/README.md` so no
+real desktop, device, account, or path details are exposed.
+
 ## Build
 
 ```bash
