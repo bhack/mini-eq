@@ -28,15 +28,23 @@ tag=v$version
 Update every version-bearing file before building artifacts:
 
 - `pyproject.toml`
-- `src/mini_eq/__init__.py`
 - `CHANGELOG.md`
 - `data/io.github.bhack.mini-eq.metainfo.xml`
+
+`mini_eq.__version__` is derived from release metadata and should not be bumped
+manually.
 
 If the public screenshot changed, make the AppStream screenshot URL point at the
 same release tag. Then run the version metadata test:
 
 ```bash
 python3 -m pytest tests/test_version_metadata.py -q
+```
+
+For the full local release preflight, run:
+
+```bash
+python3 tools/release_preflight.py
 ```
 
 ## Check Locally
@@ -154,7 +162,8 @@ leak_pattern='(/home/|/Users/|secret|token|api[_-]?key|github_pat|BEGIN (RSA|OPE
 git grep -n -I -E "$leak_pattern" HEAD -- . \
   ':(exclude)*.png' \
   ':(exclude)AGENTS.md' \
-  ':(exclude)docs/release.md'
+  ':(exclude)docs/release.md' \
+  ':(exclude)tools/release_preflight.py'
 ```
 
 After changing repository visibility to public, enable these GitHub security

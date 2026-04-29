@@ -107,8 +107,9 @@ Use `docs/release.md` as the release checklist. Before publishing release
 artifacts or changing repository/package visibility, verify the rendered README,
 package URLs, issue tracker, license, screenshots, and AppStream metadata.
 During release preparation, verify that version-bearing files agree:
-`pyproject.toml`, `src/mini_eq/__init__.py`, `CHANGELOG.md`, and the AppStream
-release entry and screenshot URL.
+`pyproject.toml`, `CHANGELOG.md`, and the AppStream release entry and screenshot
+URL. The package `__version__` is derived from release metadata and should not
+be hardcoded separately.
 
 Before publishing artifacts or changing repository visibility, run a focused
 leak scan:
@@ -121,7 +122,8 @@ leak_pattern='(/home/|/Users/|secret|token|api[_-]?key|github_pat|BEGIN (RSA|OPE
 git grep -n -I -E "$leak_pattern" HEAD -- . \
   ':(exclude)*.png' \
   ':(exclude)AGENTS.md' \
-  ':(exclude)docs/release.md'
+  ':(exclude)docs/release.md' \
+  ':(exclude)tools/release_preflight.py'
 ```
 
 Do not push local scratch branches or local safety tags.
