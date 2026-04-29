@@ -313,6 +313,22 @@ def preset_path_for_name(name: str) -> Path:
     return ensure_preset_storage_dir() / f"{preset_name}{PRESET_FILE_SUFFIX}"
 
 
+def delete_preset_file(name: str) -> None:
+    preset_name = sanitize_preset_name(name)
+    if not preset_name:
+        raise ValueError("preset name is empty")
+
+    storage_dir = ensure_preset_storage_dir()
+    dir_fd = os.open(storage_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        try:
+            os.unlink(f"{preset_name}{PRESET_FILE_SUFFIX}", dir_fd=dir_fd)
+        except FileNotFoundError:
+            return
+    finally:
+        os.close(dir_fd)
+
+
 def list_preset_names() -> list[str]:
     names = [
         path.stem

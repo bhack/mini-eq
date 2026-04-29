@@ -13,6 +13,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from .core import (
     PRESET_FILE_SUFFIX,
     PRESET_VERSION,
+    delete_preset_file,
     ensure_json_suffix,
     fader_band_count_for_profile,
     list_preset_names,
@@ -241,9 +242,7 @@ class MiniEqWindowPresetMixin:
             return
 
         try:
-            preset_path = preset_path_for_name(preset_name)
-            if preset_path.exists():
-                preset_path.unlink()
+            delete_preset_file(preset_name)
             self.current_preset_name = None
             self.saved_preset_signature = self.controller.state_signature()
             self.refresh_preset_list()

@@ -59,6 +59,46 @@ def test_preset_roundtrip_and_listing_uses_storage_dir(monkeypatch: pytest.Monke
     assert core.load_mini_eq_preset_file(core.preset_path_for_name("beta")) == beta_payload
 
 
+def test_delete_preset_file_removes_only_named_storage_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    storage_dir = tmp_path / "mini-eq-presets"
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", storage_dir)
+    payload = {"version": core.PRESET_VERSION, "name": "Alpha", "bands": []}
+
+    preset_path = core.preset_path_for_name("Alpha")
+    core.write_mini_eq_preset_file(preset_path, payload)
+
+    core.delete_preset_file("Alpha")
+
+    assert not preset_path.exists()
+
+
+def test_delete_preset_file_ignores_missing_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "mini-eq-presets")
+
+    core.delete_preset_file("Missing")
+
+
+def test_delete_preset_file_rejects_empty_name(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "mini-eq-presets")
+
+    with pytest.raises(ValueError, match="preset name is empty"):
+        core.delete_preset_file("../")
+
+
+def test_delete_preset_file_uses_sanitized_basename(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    storage_dir = tmp_path / "mini-eq-presets"
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", storage_dir)
+    outside_path = tmp_path / "outside.json"
+    sanitized_path = storage_dir / "outside.json"
+    outside_path.write_text("outside", encoding="utf-8")
+    core.write_mini_eq_preset_file(sanitized_path, {"version": core.PRESET_VERSION, "name": "outside", "bands": []})
+
+    core.delete_preset_file("../outside")
+
+    assert outside_path.read_text(encoding="utf-8") == "outside"
+    assert not sanitized_path.exists()
+
+
 def test_load_mini_eq_preset_file_rejects_invalid_shape(tmp_path) -> None:
     preset_path = tmp_path / "broken.json"
     preset_path.write_text('{"version": 1, "bands": "nope"}', encoding="utf-8")
