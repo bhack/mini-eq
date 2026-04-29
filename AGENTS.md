@@ -73,6 +73,9 @@ are unavailable.
 - Keep the upstream Flatpak manifest as a local development and CI manifest
   using the checked-out source tree. The sibling Flathub repository uses a
   release archive URL and SHA-256 for publishing.
+- Before opening a Flathub PR, compare the upstream and sibling Flathub
+  manifests. The only expected manifest difference is the Mini EQ source block:
+  local `type: dir` upstream, release archive URL and SHA-256 in Flathub.
 - Put user-facing Flatpak install information in `README.md`; keep Flathub
   release workflow and repository split notes in `docs/flathub.md`.
 - Do not hand-edit bundled Mini EQ source files in the Flathub repository. Fix
@@ -103,6 +106,9 @@ only the Mini EQ window from deterministic demo data.
 Use `docs/release.md` as the release checklist. Before publishing release
 artifacts or changing repository/package visibility, verify the rendered README,
 package URLs, issue tracker, license, screenshots, and AppStream metadata.
+During release preparation, verify that version-bearing files agree:
+`pyproject.toml`, `src/mini_eq/__init__.py`, `CHANGELOG.md`, and the AppStream
+release entry and screenshot URL.
 
 Before publishing artifacts or changing repository visibility, run a focused
 leak scan:

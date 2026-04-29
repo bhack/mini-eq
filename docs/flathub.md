@@ -90,6 +90,17 @@ curl -fsSL \
   | sha256sum
 ```
 
+Before opening the PR, compare the upstream and Flathub manifests from the
+upstream checkout:
+
+```bash
+python3 tools/check_flathub_manifest_drift.py
+```
+
+The command should report that the manifests match outside the Mini EQ source
+stanza. Any other difference should be intentional and usually belongs in both
+repositories.
+
 The Flathub `master` branch is protected, so direct pushes are rejected. Push an
 update branch and open a PR:
 

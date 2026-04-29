@@ -2,6 +2,9 @@
 
 Use this checklist before publishing a public release.
 
+Use the repository virtualenv when it exists. The examples use `python3`, but
+substitute `.venv/bin/python` in the local checkout when available.
+
 ## Verify Metadata
 
 Confirm the repository URLs in `pyproject.toml` match the actual GitHub repository.
@@ -11,6 +14,29 @@ metadata points at GitHub URLs that should not be public yet.
 ```bash
 git remote -v
 gh auth status
+```
+
+## Prepare Version Metadata
+
+Set the release version once for the shell session:
+
+```bash
+version=X.Y.Z
+tag=v$version
+```
+
+Update every version-bearing file before building artifacts:
+
+- `pyproject.toml`
+- `src/mini_eq/__init__.py`
+- `CHANGELOG.md`
+- `data/io.github.bhack.mini-eq.metainfo.xml`
+
+If the public screenshot changed, make the AppStream screenshot URL point at the
+same release tag. Then run the version metadata test:
+
+```bash
+python3 -m pytest tests/test_version_metadata.py -q
 ```
 
 ## Check Locally
@@ -74,9 +100,18 @@ gh api "repos/bhack/mini-eq/actions/runs/${run_id}/pending_deployments" \
   -f comment='Publish vX.Y.Z to PyPI'
 ```
 
+After dispatching the release workflow, watch it to completion:
+
+```bash
+gh run watch "$run_id" --repo bhack/mini-eq --exit-status
+```
+
 Draft GitHub release assets use temporary `untagged-*` download URLs. Publish
 the draft before using release asset URLs in the Flathub manifest or other
 public metadata.
+
+Generated GitHub release notes can be sparse for direct release commits. Review
+and edit the draft notes before publishing the GitHub release.
 
 Set `publish_testpypi=true` only after the `testpypi` GitHub environment and
 TestPyPI trusted publisher are configured. The TestPyPI job uses
@@ -172,3 +207,25 @@ git ls-remote --tags origin vX.Y.Z
 
 Publish the draft GitHub release after reviewing its notes and assets. Then use
 the published release tarball and SHA-256 for the Flathub repository update.
+The source archive SHA-256 used by Flathub should match the published release
+asset digest.
+
+## Flathub Handoff
+
+Keep the detailed Flathub packaging procedure in `docs/flathub.md` and in the
+Flathub packaging repository. From this upstream repository, the release handoff
+is:
+
+1. Confirm the GitHub release is published, not draft.
+2. Compute or verify the release source archive SHA-256.
+3. Update the sibling Flathub repository manifest to the published release URL
+   and SHA-256.
+4. Run Flathub manifest lint and a download-only build in the Flathub
+   repository.
+5. Compare the two manifests for unintended drift:
+
+   ```bash
+   python3 tools/check_flathub_manifest_drift.py
+   ```
+
+6. Open a Flathub PR against `flathub/io.github.bhack.mini-eq`.
