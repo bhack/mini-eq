@@ -1,7 +1,7 @@
 {
   "uuid": "mini-eq@bhack.github.io",
   "name": "Mini EQ Controls",
-  "description": "Panel controls for Mini EQ system-wide audio equalization.",
+  "description": "Control Mini EQ from the panel: open the app, toggle system-wide routing and EQ, view analyzer activity, and switch saved presets.",
   "shell-version": ["50"],
   "url": "https://github.com/bhack/mini-eq"
 }
