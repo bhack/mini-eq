@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4 - 2026-04-30
+
+- Add the Mini EQ Controls GNOME Shell extension for panel routing, EQ, preset, and analyzer controls.
+- Add the Mini EQ D-Bus control API used by the companion GNOME Shell extension.
+- Improve system-wide EQ compare controls and refresh the public screenshot and social preview assets.
+- Add release checks and packaging helpers for the GNOME Shell extension bundle.
+
 ## 0.1.3 - 2026-04-29
 
 - Redesign the signal inspector with compact headroom, preamp, and monitor controls.
