@@ -20,6 +20,7 @@ ANALYZER_REDRAW_INTERVAL_S = 1.0 / 30.0
 ANALYZER_PREVIEW_INTERVAL_MS = 33
 ANALYZER_ATTACK_SMOOTHING_MAX = 0.25
 ANALYZER_PIXEL_REDRAW_THRESHOLD = 1.0
+CONTROL_STATE_EMIT_INTERVAL_SECONDS = 0.10
 
 
 class MiniEqWindowAnalyzerMixin:
@@ -195,6 +196,7 @@ class MiniEqWindowAnalyzerMixin:
         now = GLib.get_monotonic_time() / 1_000_000.0
         self.analyzer_last_frame_time = now
         self.queue_analyzer_draw()
+        self.maybe_emit_control_state_changed(now)
         return False
 
     def on_analyzer_preview_tick(self) -> bool:
@@ -221,6 +223,7 @@ class MiniEqWindowAnalyzerMixin:
 
         if still_visible:
             self.queue_analyzer_draw()
+            self.maybe_emit_control_state_changed(now)
 
         return True
 
@@ -236,6 +239,7 @@ class MiniEqWindowAnalyzerMixin:
             self.analyzer_levels = [0.0] * len(self.analyzer_levels)
             self.queue_analyzer_draw(force=True)
         self.sync_ui_from_state()
+        self.emit_control_state_changed()
 
     def update_analyzer_summary_label(self) -> None:
         smoothing = int(round(self.analyzer_smoothing * 100.0))
@@ -260,6 +264,7 @@ class MiniEqWindowAnalyzerMixin:
 
         self.analyzer_frozen = switch.get_active()
         self.sync_ui_from_state()
+        self.emit_control_state_changed()
 
     def on_analyzer_smoothing_changed(self, scale: Gtk.Scale) -> None:
         self.analyzer_smoothing = clamp(scale.get_value() / 100.0, 0.15, 0.95)
@@ -286,3 +291,16 @@ class MiniEqWindowAnalyzerMixin:
         self.invalidate_graph_background_cache()
         self.queue_graph_draw()
         self.queue_analyzer_draw(force=True)
+
+    def maybe_emit_control_state_changed(self, now: float) -> None:
+        last_emit = getattr(self, "control_state_last_emit_time", 0.0)
+        if now - last_emit < CONTROL_STATE_EMIT_INTERVAL_SECONDS:
+            return
+
+        self.control_state_last_emit_time = now
+        self.emit_control_state_changed()
+
+    def emit_control_state_changed(self) -> None:
+        application = self.get_application()
+        if hasattr(application, "emit_control_state_changed"):
+            application.emit_control_state_changed()

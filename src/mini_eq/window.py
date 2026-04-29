@@ -96,6 +96,7 @@ class MiniEqWindow(
         self.analyzer_db_floor = ANALYZER_DB_FLOOR
         self.analyzer_display_gain_db = ANALYZER_DISPLAY_GAIN_DEFAULT
         self.analyzer_last_redraw_time = 0.0
+        self.control_state_last_emit_time = 0.0
         self.curve_metadata_refresh_source_id = 0
         self.engine_control_refresh_source_id = 0
         self.pending_engine_band_indexes: set[int] = set()
@@ -192,8 +193,10 @@ class MiniEqWindow(
             except Exception as exc:
                 self.set_status(str(exc))
             else:
+                self.update_eq_power_indicator()
                 self.update_info_label()
                 self.update_status_summary()
+                self.update_focus_summary()
 
         if not self.ui_shutting_down:
             self.present()
@@ -282,6 +285,18 @@ class MiniEqWindow(
             return ""
 
         return message[:1].upper() + message[1:]
+
+    def notify_control_state_changed(self) -> None:
+        app = self.get_application()
+        callback = getattr(app, "emit_control_state_changed", None)
+        if callback is not None:
+            callback()
+
+    def notify_control_presets_changed(self) -> None:
+        app = self.get_application()
+        callback = getattr(app, "emit_control_presets_changed", None)
+        if callback is not None:
+            callback()
 
     def start_preset_monitoring(self) -> None:
         if self.preset_monitor is not None:
@@ -460,7 +475,7 @@ class MiniEqWindow(
 
         if not self.controller.eq_enabled:
             self.set_headroom_state(
-                state="Bypassed",
+                state="EQ off",
                 peak_text="EQ off",
                 detail="Curve is loaded but not applied.",
                 peak_db=None,
@@ -508,14 +523,17 @@ class MiniEqWindow(
         self.system_state_label.remove_css_class("system-state-bypass")
         self.system_state_label.remove_css_class("system-state-idle")
 
-        if not self.controller.eq_enabled:
-            self.system_state_label.set_text("Bypassed")
+        if not route_enabled:
+            self.system_state_label.set_text("Not Applied")
+            self.system_state_label.add_css_class("system-state-idle")
+        elif not self.controller.eq_enabled:
+            self.system_state_label.set_text("Original")
             self.system_state_label.add_css_class("system-state-bypass")
         elif warnings or headroom_needs_attention:
             self.system_state_label.set_text("Check")
             self.system_state_label.add_css_class("system-state-warning")
         elif route_enabled:
-            self.system_state_label.set_text("Active")
+            self.system_state_label.set_text("Applied")
             self.system_state_label.add_css_class("system-state-live")
         else:
             self.system_state_label.set_text("Standby")
@@ -632,30 +650,53 @@ class MiniEqWindow(
         if self.updating_ui:
             return
 
+        enabled = switch.get_active()
+        eq_was_enabled = self.controller.eq_enabled
+        route_changed = False
+
         try:
-            self.controller.route_system_audio(switch.get_active())
+            if not self.controller.eq_enabled:
+                self.controller.set_eq_enabled(True)
+                self.updating_ui = True
+                try:
+                    self.bypass_switch.set_active(True)
+                finally:
+                    self.updating_ui = False
+
+            self.controller.route_system_audio(enabled)
+            route_changed = True
         except Exception as exc:
             self.set_status(str(exc))
         finally:
+            self.update_eq_power_indicator()
             self.update_info_label()
             self.update_status_summary()
+            self.update_focus_summary()
+            if not eq_was_enabled and self.controller.eq_enabled:
+                self.invalidate_graph_response_cache()
+                self.queue_graph_draw()
+                self.update_preset_state()
+            if route_changed:
+                self.set_status("System-wide EQ On" if enabled else "System-wide EQ Off")
+            self.notify_control_state_changed()
 
     def on_bypass_changed(self, switch: Gtk.Switch, _param: object) -> None:
-        bypassed = switch.get_active()
+        enabled = switch.get_active()
 
         if self.updating_ui:
             self.update_eq_power_indicator()
             return
 
         try:
-            self.controller.set_eq_enabled(not bypassed)
+            self.controller.set_eq_enabled(enabled)
             self.update_eq_power_indicator()
             self.update_info_label()
             self.update_status_summary()
             self.invalidate_graph_response_cache()
             self.queue_graph_draw()
             self.update_preset_state()
-            self.set_status("EQ Bypass Enabled" if bypassed else "EQ Processing Restored")
+            self.set_status("Equalizer On" if enabled else "Equalizer Off")
+            self.notify_control_state_changed()
         except Exception as exc:
             self.update_eq_power_indicator()
             self.set_status(str(exc))

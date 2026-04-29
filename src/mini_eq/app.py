@@ -11,6 +11,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, GLibUnix
 
 from .cli import parse_args
+from .dbus_control import MiniEqDbusControl
 from .desktop_integration import APP_ICON_NAME, APP_ID, install_app_icon, install_desktop_integration
 from .glib_utils import destroy_glib_source
 from .instance import MiniEqAlreadyRunningError, MiniEqInstanceGuard
@@ -24,6 +25,7 @@ class MiniEqApplication(Adw.Application):
         self.args = args
         self.controller: SystemWideEqController | None = None
         self.window: MiniEqWindow | None = None
+        self.dbus_control: MiniEqDbusControl | None = None
         self.signal_source_ids: list[int] = []
         self.window_present_source_id = 0
 
@@ -31,6 +33,8 @@ class MiniEqApplication(Adw.Application):
         Adw.Application.do_startup(self)
         install_app_icon()
         self.install_standard_actions()
+        self.dbus_control = MiniEqDbusControl(self)
+        self.dbus_control.register()
         self.signal_source_ids = install_unix_signal_handlers(self.quit)
 
     def install_standard_actions(self) -> None:
@@ -97,6 +101,14 @@ class MiniEqApplication(Adw.Application):
         self.window.present()
         return False
 
+    def emit_control_state_changed(self) -> None:
+        if self.dbus_control is not None:
+            self.dbus_control.emit_state_changed()
+
+    def emit_control_presets_changed(self) -> None:
+        if self.dbus_control is not None:
+            self.dbus_control.emit_presets_changed()
+
     def do_shutdown(self) -> None:
         for source_id in self.signal_source_ids:
             destroy_glib_source(source_id)
@@ -110,6 +122,10 @@ class MiniEqApplication(Adw.Application):
 
         if self.controller is not None:
             self.controller.shutdown()
+
+        if self.dbus_control is not None:
+            self.dbus_control.unregister()
+            self.dbus_control = None
 
         Adw.Application.do_shutdown(self)
 

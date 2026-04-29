@@ -118,10 +118,11 @@ def run_flathub_drift_check(python: Path) -> None:
 
 def main() -> int:
     python = Path(sys.executable)
-    require_tools("appstreamcli", "desktop-file-validate", "git")
+    require_tools("appstreamcli", "desktop-file-validate", "git", "gnome-extensions")
 
     run(["git", "diff", "--check"])
     run([python, "-m", "pytest", "tests/test_version_metadata.py", "-q"])
+    run([python, ROOT / "tools/check_gnome_shell_extension.py"])
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])
     run([python, "-m", "pytest", "-q"])

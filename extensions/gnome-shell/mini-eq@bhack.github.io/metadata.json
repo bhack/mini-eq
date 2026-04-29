@@ -1,0 +1,7 @@
+{
+  "uuid": "mini-eq@bhack.github.io",
+  "name": "Mini EQ Controls",
+  "description": "Panel controls for Mini EQ system-wide audio equalization.",
+  "shell-version": ["50"],
+  "url": "https://github.com/bhack/mini-eq"
+}

@@ -57,6 +57,18 @@ python3 -m pytest -q
 python3 -m mini_eq --check-deps
 ```
 
+If the GNOME Shell extension changed, check the app/extension D-Bus contract
+and build the review/upload bundle:
+
+```bash
+python3 tools/check_gnome_shell_extension.py
+tools/pack_gnome_shell_extension.sh
+```
+
+Only upload the generated extension zip after testing every GNOME Shell version
+listed in `extensions/gnome-shell/mini-eq@bhack.github.io/metadata.json`. Do
+not list future Shell versions.
+
 ## Build
 
 ```bash

@@ -80,7 +80,10 @@ jobs:
                 wp04=true
                 flatpak=true
                 ;;
-              README.md|pyproject.toml|MANIFEST.in|src/*|tests/*|data/*)
+              README.md|pyproject.toml|MANIFEST.in|src/*|tests/*|data/*|extensions/*)
+                test=true
+                ;;
+              tools/check_gnome_shell_extension.py|tools/pack_gnome_shell_extension.sh)
                 test=true
                 ;;
             esac

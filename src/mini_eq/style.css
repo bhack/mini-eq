@@ -41,10 +41,10 @@
 }
 
 .toolbar-compact-actions {
-    padding: 2px 5px;
-    border-radius: 999px;
-    border: 1px solid var(--mini-border-subtle);
-    background-color: alpha(var(--window-fg-color), 0.028);
+    padding: 0;
+    border-radius: 0;
+    border: 0;
+    background-color: transparent;
 }
 
 .toolbar-compact-actions .route-box {
@@ -95,6 +95,37 @@
     padding: 8px 9px;
     border-radius: 8px;
     background-color: var(--mini-quiet-bg);
+}
+
+.compare-row {
+    padding: 8px 9px;
+    border-radius: 8px;
+    background-color: var(--mini-quiet-bg);
+}
+
+.compare-state-chip {
+    min-width: 74px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background-color: rgba(127, 145, 165, 0.10);
+    color: alpha(var(--window-fg-color), 0.88);
+    font-size: 9pt;
+    font-weight: 800;
+}
+
+.compare-state-equalized {
+    background-color: rgba(78, 184, 109, 0.14);
+    color: #75e493;
+}
+
+.compare-state-original {
+    background-color: rgba(127, 145, 165, 0.12);
+    color: alpha(var(--window-fg-color), 0.88);
+}
+
+.compare-state-ready {
+    background-color: alpha(var(--window-fg-color), 0.09);
+    color: alpha(var(--window-fg-color), 0.82);
 }
 
 .preset-row {

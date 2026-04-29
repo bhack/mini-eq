@@ -86,6 +86,8 @@ class MiniEqWindowPresetMixin:
         self.refresh_preset_list()
         self.sync_ui_from_state()
         self.set_status(f"Saved Preset: {preset_name}")
+        self.notify_control_presets_changed()
+        self.notify_control_state_changed()
 
     def load_library_preset(self, name: str) -> None:
         preset_name = sanitize_preset_name(name)
@@ -98,6 +100,7 @@ class MiniEqWindowPresetMixin:
         self.refresh_preset_list()
         self.sync_ui_from_state()
         self.set_status(f"Loaded Preset: {preset_name}")
+        self.notify_control_state_changed()
 
     def prompt_for_preset_name(
         self,
@@ -246,6 +249,8 @@ class MiniEqWindowPresetMixin:
             self.refresh_preset_list()
             self.sync_ui_from_state()
             self.set_status(f"Deleted Preset: {preset_name}")
+            self.notify_control_presets_changed()
+            self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
 
@@ -289,6 +294,8 @@ class MiniEqWindowPresetMixin:
             self.refresh_preset_list()
             self.sync_ui_from_state()
             self.set_status(f"Imported Preset: {preset_name}")
+            self.notify_control_presets_changed()
+            self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
 

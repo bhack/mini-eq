@@ -26,6 +26,9 @@ using the app, and keep maintainer-only process notes in this file or under
 - `src/mini_eq/screenshot.py` and `tools/render_demo_screenshot.py`: maintainer
   screenshot tooling, not user-facing CLI.
 - `data/`: desktop and AppStream metadata.
+- `extensions/gnome-shell/mini-eq@bhack.github.io/`: companion GNOME Shell
+  extension source. Keep this publishable and reviewable as an extension
+  bundle; keep helper scripts under `tools/`.
 - `io.github.bhack.mini-eq.yaml`: local Flatpak manifest.
 - `python3-dependencies.yaml`: generated Flatpak Python dependencies.
 - `tests/`: pytest suite for core behavior and non-visual integration seams.
@@ -38,6 +41,7 @@ Use the repo virtualenv when it exists:
 .venv/bin/python -m ruff check .
 .venv/bin/python -m ruff format --check .
 .venv/bin/python -m pytest -q
+.venv/bin/python tools/check_gnome_shell_extension.py --no-package
 ```
 
 For release/package checks:
@@ -45,6 +49,7 @@ For release/package checks:
 ```bash
 appstreamcli validate --no-net data/io.github.bhack.mini-eq.metainfo.xml
 desktop-file-validate data/io.github.bhack.mini-eq.desktop
+.venv/bin/python tools/check_gnome_shell_extension.py
 .venv/bin/python -m build
 .venv/bin/python -m twine check dist/*
 ```
@@ -63,6 +68,9 @@ are unavailable.
   without checking the compatibility layer and tests.
 - Keep the `mini-eq` CLI user-oriented. Maintainer automation belongs in
   `tools/`, `docs/`, or this file.
+- Keep the GNOME Shell extension source in `extensions/gnome-shell/`; do not
+  move development helpers or fake services into the publishable UUID
+  directory.
 - If you add packaged files, update `MANIFEST.in` when they must appear in the
   source distribution.
 - Do not add generated build outputs, local config, cache directories, or

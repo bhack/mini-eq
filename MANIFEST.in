@@ -14,5 +14,9 @@ include docs/social-preview.png
 include docs/screenshots/README.md
 include docs/screenshots/*.png
 include docker/*.Dockerfile
+include extensions/gnome-shell/README.md
+recursive-include extensions/gnome-shell/mini-eq@bhack.github.io *
 include flatpak/patches/*.patch
 include tools/*.py
+include tools/*.sh
+recursive-include tools/gnome-shell-extension *.py

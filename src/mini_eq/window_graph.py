@@ -171,7 +171,7 @@ class MiniEqWindowGraphMixin:
             self.band_count_label.set_text(selected_filter_type)
             self.band_count_label.set_visible(True)
         else:
-            self.focus_label.set_text("Shape the curve, then enable Audio Routing to hear it system-wide")
+            self.focus_label.set_text("EQ curve is not applied to system audio")
             self.band_count_label.set_visible(False)
         self.inspector_summary_label.set_text(
             f"{selected_filter_type} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
@@ -192,23 +192,33 @@ class MiniEqWindowGraphMixin:
         self.selected_band_solo_button.set_active(selected.solo)
 
     def update_eq_power_indicator(self) -> None:
-        self.bypass_state_label.remove_css_class("toolbar-inline-state-live")
-        self.bypass_state_label.remove_css_class("toolbar-inline-state-bypass")
+        self.bypass_state_label.remove_css_class("compare-state-equalized")
+        self.bypass_state_label.remove_css_class("compare-state-original")
+        self.bypass_state_label.remove_css_class("compare-state-ready")
+
+        route_enabled = self.route_switch.get_active()
+        self.bypass_switch.set_sensitive(route_enabled)
+
+        if not route_enabled:
+            self.bypass_state_label.add_css_class("compare-state-ready")
+            self.bypass_state_label.set_tooltip_text("Turn on System-wide EQ to compare")
+            self.bypass_state_label.set_text("Not Applied")
+            return
 
         if self.controller.eq_enabled:
-            self.bypass_state_label.add_css_class("toolbar-inline-state-live")
-            self.bypass_state_label.set_tooltip_text("EQ Is Processing")
-            self.bypass_state_label.set_text("Live")
+            self.bypass_state_label.add_css_class("compare-state-equalized")
+            self.bypass_state_label.set_tooltip_text("EQ curve is applied")
+            self.bypass_state_label.set_text("Equalized")
         else:
-            self.bypass_state_label.add_css_class("toolbar-inline-state-bypass")
-            self.bypass_state_label.set_tooltip_text("EQ Is Bypassed")
-            self.bypass_state_label.set_text("Bypassed")
+            self.bypass_state_label.add_css_class("compare-state-original")
+            self.bypass_state_label.set_tooltip_text("Original audio is playing")
+            self.bypass_state_label.set_text("Original")
 
     def sync_ui_from_state(self) -> None:
         self.updating_ui = True
 
         try:
-            self.bypass_switch.set_active(not self.controller.eq_enabled)
+            self.bypass_switch.set_active(self.controller.eq_enabled)
             self.update_eq_power_indicator()
             self.analyzer_switch.set_active(self.analyzer_enabled)
             self.analyzer_freeze_switch.set_active(self.analyzer_frozen)
@@ -223,7 +233,7 @@ class MiniEqWindowGraphMixin:
             self.preamp_scale.set_value(self.controller.preamp_db)
             self.preamp_label.set_text(f"{self.controller.preamp_db:.1f} dB")
             self.mode_combo.set_selected(MODE_INDEX_BY_VALUE[self.controller.eq_mode])
-            self.graph_title_label.set_text("Active Curve" if self.route_switch.get_active() else "Preview Curve")
+            self.graph_title_label.set_text("EQ Curve")
             self.analyzer_mode_combo.set_selected(0)
             self.analyzer_smoothing_scale.set_value(self.analyzer_smoothing * 100.0)
             self.analyzer_display_gain_scale.set_value(self.analyzer_display_gain_db)
@@ -849,9 +859,6 @@ class MiniEqWindowGraphMixin:
                 cr.set_source_rgba(*FOCUS_BLUE, 0.24)
                 cr.arc(x, y, 12.0, 0.0, math.tau)
                 cr.fill()
-
-        if not self.controller.eq_enabled:
-            self.draw_text(cr, "Bypassed", width_f - 104, top + 18, (0.96, 0.77, 0.44), 12.0)
 
     def on_graph_draw(self, area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
         if width <= 0 or height <= 0:
