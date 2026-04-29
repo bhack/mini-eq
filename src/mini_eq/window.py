@@ -39,7 +39,8 @@ from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positi
 
 TOAST_TIMEOUT_SECONDS = 2
 MIN_WINDOW_WIDTH = 980
-MIN_WINDOW_HEIGHT = 628
+MIN_WINDOW_HEIGHT = 696
+WIDE_MIN_WINDOW_HEIGHT = 752
 ROUTING_CLOSE_SETTLE_MS = 300
 TOAST_IGNORED_PREFIXES = (
     "filter-chain PipeWire EQ ready:",
@@ -65,8 +66,11 @@ class MiniEqWindow(
         self.post_present_source_id = 0
         self.post_present_ready = False
         self.toast_overlay: Adw.ToastOverlay | None = None
-        self.set_default_size(1360, 700)
-        self.set_size_request(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+        self.min_window_width = MIN_WINDOW_WIDTH
+        self.compact_min_window_height = MIN_WINDOW_HEIGHT
+        self.wide_min_window_height = WIDE_MIN_WINDOW_HEIGHT
+        self.set_default_size(1360, self.wide_min_window_height)
+        self.set_size_request(self.min_window_width, self.compact_min_window_height)
         self.updating_ui = False
         self.selected_band_index = 0
         self.visible_band_count = DEFAULT_ACTIVE_BANDS
