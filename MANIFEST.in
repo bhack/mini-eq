@@ -4,6 +4,7 @@ include SECURITY.md
 include io.github.bhack.mini-eq.yaml
 include python3-dependencies.yaml
 include src/mini_eq/style.css
+include src/mini_eq/assets/icons/hicolor/scalable/actions/*.svg
 include data/*.desktop
 include data/*.metainfo.xml
 include docs/flathub.md

@@ -13,7 +13,7 @@ from demo_runtime import DEMO_PRESET_NAME, DemoController, demo_analyzer_levels
 from gi.repository import Adw, GLib
 
 from mini_eq import core
-from mini_eq.desktop_integration import APP_ID
+from mini_eq.desktop_integration import APP_ID, install_app_icon
 from mini_eq.screenshot import capture_widget_to_png
 from mini_eq.window import MiniEqWindow
 
@@ -61,6 +61,7 @@ class DemoScreenshotApplication(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
+        install_app_icon()
 
     def do_activate(self) -> None:
         core.PRESET_STORAGE_DIR = self.config_dir / "mini-eq" / "output"

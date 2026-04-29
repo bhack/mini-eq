@@ -7,7 +7,7 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, GObject, Gtk
 
 from .analyzer import (
     ANALYZER_BIN_COUNT,
@@ -109,11 +109,13 @@ class MiniEqWindow(
         self.adaptive_narrow_breakpoint = None
         self.utility_pane_button: Gtk.ToggleButton | None = None
         self.utility_pane_column: Gtk.Box | None = None
+        self.utility_pane_binding: GObject.Binding | None = None
+        self.headroom_panel: Gtk.Box | None = None
+        self.headroom_fix_button: Gtk.Button | None = None
         self.close_finish_source_id = 0
 
-        self.warning_banner = Gtk.Label(xalign=0.0)
-        self.warning_banner.set_wrap(True)
-        self.warning_banner.set_visible(False)
+        self.warning_banner = Adw.Banner()
+        self.warning_banner.set_revealed(False)
         self.system_state_label = Gtk.Label(xalign=0.5)
 
         self.output_combo = Gtk.DropDown(model=self.output_sink_model)
@@ -454,39 +456,40 @@ class MiniEqWindow(
         route_enabled = self.route_switch.get_active()
 
         warnings = self.profile_summary(sink)[3]
+        headroom_needs_attention = False
 
         if not self.controller.eq_enabled:
             self.set_headroom_state(
                 state="Bypassed",
                 peak_text="EQ off",
-                detail="Curve is loaded but not currently applied.",
+                detail="Curve is loaded but not applied.",
                 peak_db=None,
                 kind="bypass",
             )
         else:
             peak = self.estimate_curve_peak_db()
             if peak > 0.5:
+                headroom_needs_attention = True
                 self.set_headroom_state(
-                    state=f"{peak:+.1f} dB peak",
-                    peak_text=f"Peak {peak:+.1f} dB",
-                    detail=f"Lower preamp by about {peak:.1f} dB.",
+                    state="Clipping risk",
+                    peak_text=f"{peak:+.1f} dB",
+                    detail=f"Lower preamp by {peak + 1.0:.1f} dB.",
                     peak_db=peak,
                     kind="risk",
                 )
-                warnings.append(f"Current EQ curve can clip by about {peak:.1f} dB. Reduce preamp accordingly.")
             elif peak > -0.5:
                 self.set_headroom_state(
-                    state="Near unity",
-                    peak_text=f"Peak {peak:+.1f} dB",
-                    detail="Headroom is tight; lower preamp if boosts increase.",
+                    state="Tight",
+                    peak_text=f"{peak:+.1f} dB",
+                    detail="Small boosts may clip.",
                     peak_db=peak,
                     kind="tight",
                 )
             else:
                 self.set_headroom_state(
-                    state=f"{abs(peak):.1f} dB margin",
-                    peak_text=f"Peak {peak:+.1f} dB",
-                    detail="Useful headroom remains.",
+                    state="Safe margin",
+                    peak_text=f"{abs(peak):.1f} dB",
+                    detail="Curve stays below 0 dBFS.",
                     peak_db=peak,
                     kind="safe",
                 )
@@ -494,11 +497,11 @@ class MiniEqWindow(
         self.warning_banner.remove_css_class("warning-banner-alert")
 
         if warnings:
-            self.warning_banner.set_text("  ".join(warnings))
+            self.warning_banner.set_title("  ".join(warnings))
             self.warning_banner.add_css_class("warning-banner-alert")
-            self.warning_banner.set_visible(True)
+            self.warning_banner.set_revealed(True)
         else:
-            self.warning_banner.set_visible(False)
+            self.warning_banner.set_revealed(False)
 
         self.system_state_label.remove_css_class("system-state-live")
         self.system_state_label.remove_css_class("system-state-warning")
@@ -508,11 +511,11 @@ class MiniEqWindow(
         if not self.controller.eq_enabled:
             self.system_state_label.set_text("Bypassed")
             self.system_state_label.add_css_class("system-state-bypass")
-        elif warnings:
+        elif warnings or headroom_needs_attention:
             self.system_state_label.set_text("Check")
             self.system_state_label.add_css_class("system-state-warning")
         elif route_enabled:
-            self.system_state_label.set_text("Processing")
+            self.system_state_label.set_text("Active")
             self.system_state_label.add_css_class("system-state-live")
         else:
             self.system_state_label.set_text("Standby")

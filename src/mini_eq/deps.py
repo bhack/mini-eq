@@ -15,7 +15,7 @@ Status = Literal["ok", "missing", "warning"]
 PYGOBJECT_HINT = "Ubuntu/Debian: python3-gi; Fedora: python3-gobject; Arch: python-gobject"
 PYCAIRO_HINT = "Ubuntu/Debian: python3-cairo; Fedora: python3-cairo; Arch: python-cairo"
 GTK_HINT = "Ubuntu/Debian: gir1.2-gtk-4.0; Fedora: gtk4; Arch: gtk4. Requires GTK 4.12+."
-ADW_HINT = "Ubuntu/Debian: gir1.2-adw-1; Fedora: libadwaita; Arch: libadwaita."
+ADW_HINT = "Ubuntu/Debian: gir1.2-adw-1; Fedora: libadwaita; Arch: libadwaita. Requires Libadwaita 1.7+."
 WIREPLUMBER_GI_VERSIONS = ("0.5", "0.4")
 
 WP_HINT = "Ubuntu 24.04: gir1.2-wp-0.4 wireplumber; newer Debian/Ubuntu: gir1.2-wp-0.5 wireplumber; Fedora: wireplumber wireplumber-libs; Arch: wireplumber libwireplumber"
@@ -271,7 +271,7 @@ def collect_dependency_checks() -> list[DependencyCheck]:
         check_gi_repository("Gdk", "4.0", "GDK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Gsk", "4.0", "GSK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Graphene", "1.0", "Graphene GI namespace", True, GTK_HINT),
-        check_gi_repository("Adw", "1", "Libadwaita GI namespace", True, ADW_HINT),
+        check_gi_repository_attribute("Adw", "1", "WrapBox", "Libadwaita 1.7+ GI namespace", True, ADW_HINT),
         check_first_available_gi_repository("Wp", WIREPLUMBER_GI_VERSIONS, "WirePlumber GI namespace", True, WP_HINT),
         check_wireplumber_session(),
         check_pipewire_module(

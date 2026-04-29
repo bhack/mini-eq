@@ -33,7 +33,7 @@ class MiniEqWindowAnalyzerMixin:
         try:
             started = self.controller.set_analyzer_enabled(True)
         except Exception as exc:
-            self.set_status(f"Analyzer Unavailable: {exc}")
+            self.set_status(f"Monitor Unavailable: {exc}")
             started = False
 
         if not started:
@@ -237,6 +237,23 @@ class MiniEqWindowAnalyzerMixin:
             self.queue_analyzer_draw(force=True)
         self.sync_ui_from_state()
 
+    def update_analyzer_summary_label(self) -> None:
+        smoothing = int(round(self.analyzer_smoothing * 100.0))
+        display_gain = f"{self.analyzer_display_gain_db:+.0f} dB"
+
+        if not self.analyzer_enabled:
+            analyzer_summary = "Off"
+            analyzer_tooltip = "Monitor is off"
+        elif self.analyzer_frozen:
+            analyzer_summary = f"Frozen · {smoothing}% smooth · {display_gain}"
+            analyzer_tooltip = f"Monitor frozen; {smoothing}% smoothing; {display_gain} display gain"
+        else:
+            analyzer_summary = f"On · {smoothing}% smooth · {display_gain}"
+            analyzer_tooltip = f"Monitor on; {smoothing}% smoothing; {display_gain} display gain"
+
+        self.analyzer_summary_label.set_text(analyzer_summary)
+        self.analyzer_summary_label.set_tooltip_text(analyzer_tooltip)
+
     def on_analyzer_freeze_changed(self, switch: Gtk.Switch, _param: object) -> None:
         if self.updating_ui:
             return
@@ -247,6 +264,7 @@ class MiniEqWindowAnalyzerMixin:
     def on_analyzer_smoothing_changed(self, scale: Gtk.Scale) -> None:
         self.analyzer_smoothing = clamp(scale.get_value() / 100.0, 0.15, 0.95)
         self.analyzer_smoothing_label.set_text(f"{int(round(self.analyzer_smoothing * 100.0))}%")
+        self.update_analyzer_summary_label()
 
         if self.updating_ui:
             return
@@ -260,6 +278,7 @@ class MiniEqWindowAnalyzerMixin:
             ANALYZER_DISPLAY_GAIN_MAX,
         )
         self.analyzer_display_gain_label.set_text(f"{self.analyzer_display_gain_db:+.0f} dB")
+        self.update_analyzer_summary_label()
 
         if self.updating_ui:
             return

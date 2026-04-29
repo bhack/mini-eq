@@ -8,7 +8,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gdk, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GObject, Gtk, Pango
 
 from .band_fader import EqBandFader
 from .core import (
@@ -95,38 +95,30 @@ class MiniEqWindowLayoutMixin:
         primary_tools.append(output_inline)
         toolbar.append(primary_tools)
 
-        tools_popover = Gtk.Popover()
-        tools_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        tools_box.set_margin_top(8)
-        tools_box.set_margin_bottom(8)
-        tools_box.set_margin_start(8)
-        tools_box.set_margin_end(8)
-
-        def connect_tool_action(button: Gtk.Button, callback) -> None:
-            def on_clicked(clicked_button: Gtk.Button) -> None:
-                tools_popover.popdown()
-                callback(clicked_button)
-
-            button.connect("clicked", on_clicked)
-
-        import_button = Gtk.Button(label="Import Equalizer APO…")
-        import_button.add_css_class("popover-action")
-        connect_tool_action(import_button, self.on_import_apo_clicked)
-        tools_box.append(import_button)
-
-        clear_button = Gtk.Button(label="Reset EQ")
-        clear_button.add_css_class("popover-action")
-        connect_tool_action(clear_button, self.on_clear_clicked)
-        tools_box.append(clear_button)
-
-        tools_popover.set_child(tools_box)
         tools_button = Gtk.MenuButton()
         tools_button.set_can_shrink(True)
         tools_button.set_icon_name("open-menu-symbolic")
         tools_button.add_css_class("toolbar-icon-button")
         tools_button.set_tooltip_text("App Menu")
         set_accessible_label(tools_button, "App Menu")
-        tools_button.set_popover(tools_popover)
+
+        def add_window_action(action_name: str, callback) -> None:
+            action = Gio.SimpleAction.new(action_name, None)
+            action.connect("activate", lambda _action, _parameter: callback())
+            self.add_action(action)
+
+        add_window_action("import-apo", lambda: self.on_import_apo_clicked(tools_button))
+        add_window_action("reset-eq", lambda: self.on_clear_clicked(tools_button))
+
+        tools_menu = Gio.Menu()
+        tools_menu.append("Import Equalizer APO…", "win.import-apo")
+        tools_menu.append("Reset EQ", "win.reset-eq")
+
+        app_menu = Gio.Menu()
+        app_menu.append("Quit", "app.quit")
+        tools_menu.append_section(None, app_menu)
+
+        tools_button.set_menu_model(tools_menu)
         header_bar.pack_start(tools_button)
 
         route_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -141,8 +133,8 @@ class MiniEqWindowLayoutMixin:
         utility_pane_button.set_can_shrink(True)
         utility_pane_button.set_icon_name("sidebar-show-right-symbolic")
         utility_pane_button.add_css_class("toolbar-icon-button")
-        utility_pane_button.set_tooltip_text("Utility Pane")
-        set_accessible_label(utility_pane_button, "Utility Pane")
+        utility_pane_button.set_tooltip_text("Inspector Pane")
+        set_accessible_label(utility_pane_button, "Inspector Pane")
         utility_pane_button.set_active(False)
         utility_pane_button.set_visible(False)
         self.utility_pane_button = utility_pane_button
@@ -191,12 +183,12 @@ class MiniEqWindowLayoutMixin:
         left_column.set_vexpand(True)
 
         right_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        right_column.set_size_request(288, -1)
+        right_column.set_size_request(286, -1)
         right_column.set_vexpand(True)
         right_column.set_valign(Gtk.Align.FILL)
         right_column.set_margin_top(4)
         right_column.set_margin_bottom(2)
-        right_column.set_margin_start(12)
+        right_column.set_margin_start(8)
         right_column.set_margin_end(6)
         right_column.add_css_class("utility-pane-shell")
         self.utility_pane_column = right_column
@@ -205,17 +197,12 @@ class MiniEqWindowLayoutMixin:
         workspace.set_sidebar(right_column)
         root.append(workspace)
 
-        def on_utility_pane_toggled(button: Gtk.ToggleButton) -> None:
-            if workspace.get_show_sidebar() != button.get_active():
-                workspace.set_show_sidebar(button.get_active())
-
-        def on_utility_pane_visibility_changed(_split_view: Adw.OverlaySplitView, _param: object) -> None:
-            visible = workspace.get_show_sidebar()
-            if utility_pane_button.get_active() != visible:
-                utility_pane_button.set_active(visible)
-
-        utility_pane_button.connect("toggled", on_utility_pane_toggled)
-        workspace.connect("notify::show-sidebar", on_utility_pane_visibility_changed)
+        self.utility_pane_binding = workspace.bind_property(
+            "show-sidebar",
+            utility_pane_button,
+            "active",
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+        )
 
         utility_pane_key_controller = Gtk.EventControllerKey()
 
@@ -362,14 +349,15 @@ class MiniEqWindowLayoutMixin:
         system_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         system_section.add_css_class("utility-section")
         system_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        system_title = Gtk.Label(label="Status", xalign=0.0)
+        system_title = Gtk.Label(label="Signal", xalign=0.0)
         system_title.add_css_class("heading")
         system_header.append(system_title)
         system_header_spacer = Gtk.Box()
         system_header_spacer.set_hexpand(True)
         system_header.append(system_header_spacer)
         self.system_state_label.add_css_class("system-state-chip")
-        self.system_state_label.set_width_chars(10)
+        self.system_state_label.set_width_chars(8)
+        set_accessible_label(self.system_state_label, "Signal State")
         system_header_suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         system_header_suffix.append(self.system_state_label)
         system_header.append(system_header_suffix)
@@ -378,109 +366,78 @@ class MiniEqWindowLayoutMixin:
         headroom_panel = self.make_headroom_panel()
         system_section.append(headroom_panel)
 
+        analyzer_settings_popover = Gtk.Popover()
+        analyzer_settings_group = Adw.PreferencesGroup()
+        analyzer_settings_group.set_margin_top(8)
+        analyzer_settings_group.set_margin_bottom(8)
+        analyzer_settings_group.set_margin_start(8)
+        analyzer_settings_group.set_margin_end(8)
+        analyzer_settings_popover.set_child(analyzer_settings_group)
+        analyzer_settings_button = Gtk.MenuButton()
+        analyzer_settings_button.set_can_shrink(True)
+        analyzer_settings_button.set_icon_name("mini-eq-monitor-settings-symbolic")
+        analyzer_settings_button.set_tooltip_text("Monitor Settings")
+        set_accessible_label(analyzer_settings_button, "Monitor Settings")
+        analyzer_settings_button.set_valign(Gtk.Align.CENTER)
+        analyzer_settings_button.add_css_class("toolbar-icon-button")
+        analyzer_settings_button.add_css_class("monitor-settings-button")
+        analyzer_settings_button.set_popover(analyzer_settings_popover)
+
+        monitor_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        monitor_panel.add_css_class("monitor-strip")
+        monitor_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        monitor_title = Gtk.Label(label="Monitor", xalign=0.0)
+        monitor_title.add_css_class("metric-title")
+        monitor_header.append(monitor_title)
+        monitor_header_spacer = Gtk.Box()
+        monitor_header_spacer.set_hexpand(True)
+        monitor_header.append(monitor_header_spacer)
+
+        self.analyzer_switch.set_valign(Gtk.Align.CENTER)
+        set_accessible_label(self.analyzer_switch, "Monitor")
+        monitor_header.append(self.analyzer_switch)
+        monitor_panel.append(monitor_header)
+
+        monitor_detail_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        monitor_detail_row.add_css_class("monitor-detail-row")
+
+        self.analyzer_summary_label.add_css_class("dim-label")
+        self.analyzer_summary_label.add_css_class("numeric")
+        self.analyzer_summary_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.analyzer_summary_label.set_hexpand(True)
+        monitor_detail_row.append(self.analyzer_summary_label)
+        monitor_detail_row.append(analyzer_settings_button)
+        monitor_panel.append(monitor_detail_row)
+
+        system_section.append(monitor_panel)
+
+        smoothing_row = Adw.ActionRow(title="Smoothing")
+        set_accessible_label(self.analyzer_smoothing_scale, "Monitor Smoothing")
+        self.analyzer_smoothing_scale.set_size_request(116, -1)
+        smoothing_row.add_suffix(self.analyzer_smoothing_scale)
+        self.analyzer_smoothing_label.add_css_class("dim-label")
+        smoothing_row.add_suffix(self.analyzer_smoothing_label)
+        analyzer_settings_group.add(smoothing_row)
+
+        display_gain_row = Adw.ActionRow(title="Display Gain")
+        display_gain_row.set_tooltip_text("Visual Gain for Monitor Bars")
+        set_accessible_label(self.analyzer_display_gain_scale, "Monitor Display Gain")
+        self.analyzer_display_gain_scale.set_size_request(116, -1)
+        display_gain_row.add_suffix(self.analyzer_display_gain_scale)
+        self.analyzer_display_gain_label.add_css_class("dim-label")
+        display_gain_row.add_suffix(self.analyzer_display_gain_label)
+        analyzer_settings_group.add(display_gain_row)
+
+        freeze_row = Adw.ActionRow(title="Freeze")
+        self.analyzer_freeze_switch.set_valign(Gtk.Align.CENTER)
+        set_accessible_label(self.analyzer_freeze_switch, "Freeze Monitor")
+        freeze_row.add_suffix(self.analyzer_freeze_switch)
+        analyzer_settings_group.add(freeze_row)
+
         right_column.append(system_section)
 
         self.warning_banner.add_css_class("warning-banner")
         right_column.append(self.warning_banner)
-
-        analyzer_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-        analyzer_section.add_css_class("utility-section")
-        analyzer_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        analyzer_title = Gtk.Label(label="Monitor", xalign=0.0)
-        analyzer_title.add_css_class("heading")
-        analyzer_header.append(analyzer_title)
-        analyzer_header_spacer = Gtk.Box()
-        analyzer_header_spacer.set_hexpand(True)
-        analyzer_header.append(analyzer_header_spacer)
-        analyzer_header_suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-
-        analyzer_settings_popover = Gtk.Popover()
-        analyzer_settings_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
-        analyzer_settings_box.set_margin_top(10)
-        analyzer_settings_box.set_margin_bottom(10)
-        analyzer_settings_box.set_margin_start(12)
-        analyzer_settings_box.set_margin_end(12)
-        analyzer_settings_popover.set_child(analyzer_settings_box)
-        analyzer_settings_button = Gtk.MenuButton()
-        analyzer_settings_button.set_can_shrink(True)
-        analyzer_settings_button.set_icon_name("preferences-system-symbolic")
-        analyzer_settings_button.set_tooltip_text("Analyzer Settings")
-        set_accessible_label(analyzer_settings_button, "Analyzer Settings")
-        analyzer_settings_button.set_valign(Gtk.Align.CENTER)
-        analyzer_settings_button.add_css_class("toolbar-icon-button")
-        analyzer_settings_button.set_popover(analyzer_settings_popover)
-        analyzer_header_suffix.append(analyzer_settings_button)
-
-        self.analyzer_switch.set_valign(Gtk.Align.CENTER)
-        set_accessible_label(self.analyzer_switch, "Monitor")
-        analyzer_header_suffix.append(self.analyzer_switch)
-        analyzer_header.append(analyzer_header_suffix)
-        analyzer_section.append(analyzer_header)
-
-        self.analyzer_summary_label.add_css_class("dim-label")
-        self.analyzer_summary_label.add_css_class("numeric")
-        analyzer_section.append(self.analyzer_summary_label)
-
-        smoothing_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        smoothing_box.append(Gtk.Label(label="Smoothing", xalign=0.0))
-        set_accessible_label(self.analyzer_smoothing_scale, "Analyzer Smoothing")
-        self.analyzer_smoothing_scale.set_size_request(116, -1)
-        smoothing_box.append(self.analyzer_smoothing_scale)
-        self.analyzer_smoothing_label.add_css_class("dim-label")
-        smoothing_box.append(self.analyzer_smoothing_label)
-        analyzer_settings_box.append(smoothing_box)
-
-        display_gain_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        display_gain_label = Gtk.Label(label="Display gain", xalign=0.0)
-        display_gain_label.set_tooltip_text("Visual Gain for Analyzer Bars")
-        display_gain_box.append(display_gain_label)
-        set_accessible_label(self.analyzer_display_gain_scale, "Analyzer Display Gain")
-        self.analyzer_display_gain_scale.set_size_request(116, -1)
-        display_gain_box.append(self.analyzer_display_gain_scale)
-        self.analyzer_display_gain_label.add_css_class("dim-label")
-        display_gain_box.append(self.analyzer_display_gain_label)
-        analyzer_settings_box.append(display_gain_box)
-
-        freeze_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        freeze_box.append(Gtk.Label(label="Freeze", xalign=0.0))
-        freeze_spacer = Gtk.Box()
-        freeze_spacer.set_hexpand(True)
-        freeze_box.append(freeze_spacer)
-        self.analyzer_freeze_switch.set_valign(Gtk.Align.CENTER)
-        set_accessible_label(self.analyzer_freeze_switch, "Freeze Analyzer")
-        freeze_box.append(self.analyzer_freeze_switch)
-        analyzer_settings_box.append(freeze_box)
-
-        right_column.append(analyzer_section)
-
-        preamp_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        preamp_section.add_css_class("utility-section")
-        preamp_title = Gtk.Label(label="Preamp", xalign=0.0)
-        preamp_title.add_css_class("heading")
-        preamp_section.append(preamp_title)
-
-        preamp_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        preamp_box.add_css_class("utility-row")
-        preamp_box.add_css_class("preamp-row")
-        preamp_box.set_valign(Gtk.Align.CENTER)
-        preamp_box.set_hexpand(True)
-
-        self.preamp_scale = Gtk.Scale.new_with_range(
-            Gtk.Orientation.HORIZONTAL,
-            EQ_PREAMP_MIN_DB,
-            EQ_PREAMP_MAX_DB,
-            0.5,
-        )
-        self.preamp_scale.set_draw_value(False)
-        self.preamp_scale.set_hexpand(True)
-        set_accessible_label(self.preamp_scale, "Preamp")
-        self.preamp_scale.connect("value-changed", self.on_preamp_changed)
-        preamp_box.append(self.preamp_scale)
-        self.preamp_label.add_css_class("numeric")
-        preamp_box.append(self.preamp_label)
-        preamp_section.append(preamp_box)
-
-        right_column.append(preamp_section)
 
         graph_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         graph_shell.add_css_class("panel-card")
@@ -524,7 +481,7 @@ class MiniEqWindowLayoutMixin:
         self.graph_area.set_valign(Gtk.Align.FILL)
         self.graph_area.set_accessible_role(Gtk.AccessibleRole.IMG)
         set_accessible_label(self.graph_area, "Curve")
-        set_accessible_description(self.graph_area, "Frequency response curve with optional analyzer levels")
+        set_accessible_description(self.graph_area, "Frequency response curve with optional monitor levels")
         self.graph_area.set_draw_func(self.on_graph_draw)
         graph_click = Gtk.GestureClick()
         graph_click.connect("pressed", self.on_graph_pressed)
@@ -647,31 +604,15 @@ class MiniEqWindowLayoutMixin:
         self.fader_scroller.set_child(fader_center_shell)
         fader_section.append(self.fader_scroller)
 
-        band_editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        band_editor = Adw.WrapBox()
         band_editor.add_css_class("band-editor")
         band_editor.set_hexpand(True)
         band_editor.set_valign(Gtk.Align.START)
+        band_editor.set_child_spacing(8)
+        band_editor.set_line_spacing(6)
+        band_editor.set_natural_line_length(820)
+        band_editor.set_wrap_policy(Adw.WrapPolicy.NATURAL)
         self.band_editor = band_editor
-
-        band_editor_wide_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        band_editor_wide_row.add_css_class("band-editor-row")
-        band_editor_wide_row.set_hexpand(True)
-        band_editor.append(band_editor_wide_row)
-
-        band_editor_compact_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        band_editor_compact_box.add_css_class("band-editor-compact")
-        band_editor_compact_box.set_visible(False)
-        band_editor.append(band_editor_compact_box)
-
-        band_editor_compact_top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        band_editor_compact_top_row.add_css_class("band-editor-row")
-        band_editor_compact_top_row.set_hexpand(True)
-        band_editor_compact_box.append(band_editor_compact_top_row)
-
-        band_editor_compact_bottom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        band_editor_compact_bottom_row.add_css_class("band-editor-row")
-        band_editor_compact_bottom_row.set_hexpand(True)
-        band_editor_compact_box.append(band_editor_compact_bottom_row)
 
         selected_band_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         selected_band_box.add_css_class("band-editor-selected")
@@ -682,7 +623,7 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_label.add_css_class("band-editor-title")
         selected_band_box.append(self.selected_band_label)
 
-        band_editor_wide_row.append(selected_band_box)
+        band_editor.append(selected_band_box)
 
         state_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         state_box.add_css_class("band-editor-state")
@@ -700,7 +641,7 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_solo_button.set_tooltip_text("Solo Selected Band")
         set_accessible_label(self.selected_band_solo_button, "Solo Selected Band")
         state_box.append(self.selected_band_solo_button)
-        band_editor_wide_row.append(state_box)
+        band_editor.append(state_box)
 
         type_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         type_box.add_css_class("band-editor-field")
@@ -714,7 +655,7 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_type_combo.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_type_combo, "Selected Band Filter Type")
         type_box.append(self.selected_band_type_combo)
-        band_editor_wide_row.append(type_box)
+        band_editor.append(type_box)
 
         frequency_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         frequency_box.add_css_class("band-editor-field")
@@ -732,7 +673,7 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_frequency_spin.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_frequency_spin, "Selected Band Frequency")
         frequency_box.append(self.selected_band_frequency_spin)
-        band_editor_wide_row.append(frequency_box)
+        band_editor.append(frequency_box)
 
         q_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         q_box.add_css_class("band-editor-field")
@@ -746,7 +687,7 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_q_spin.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_q_spin, "Selected Band Q")
         q_box.append(self.selected_band_q_spin)
-        band_editor_wide_row.append(q_box)
+        band_editor.append(q_box)
 
         gain_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         gain_box.add_css_class("band-editor-field")
@@ -759,12 +700,7 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_gain_spin.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_gain_spin, "Selected Band Gain")
         gain_box.append(self.selected_band_gain_spin)
-        band_editor_wide_row.append(gain_box)
-
-        editor_spacer = Gtk.Box()
-        editor_spacer.set_hexpand(True)
-        band_editor_wide_row.append(editor_spacer)
-        self.band_editor_spacer = editor_spacer
+        band_editor.append(gain_box)
 
         compact_breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(f"max-width: {COMPACT_BREAKPOINT_SP}sp"))
         self.add_breakpoint(compact_breakpoint)
@@ -783,10 +719,6 @@ class MiniEqWindowLayoutMixin:
             if isinstance(current_parent, Gtk.Box):
                 current_parent.remove(child)
             parent.append(child)
-
-        def reorder_children(parent: Gtk.Box, children: tuple[Gtk.Widget, ...]) -> None:
-            for child in children:
-                move_if_needed(child, parent)
 
         def sync_compact_band_editor(
             _split_view: Adw.OverlaySplitView | None = None, _param: object | None = None
@@ -818,8 +750,9 @@ class MiniEqWindowLayoutMixin:
                 q_box.set_spacing(4)
                 gain_box.set_spacing(4)
 
-                band_editor.set_spacing(2)
-                band_editor_wide_row.set_spacing(6)
+                band_editor.set_child_spacing(6)
+                band_editor.set_line_spacing(4)
+                band_editor.set_natural_line_length(720)
                 self.selected_band_type_combo.set_size_request(96, -1)
                 self.selected_band_frequency_spin.set_size_request(88, -1)
                 self.selected_band_q_spin.set_size_request(68, -1)
@@ -829,13 +762,7 @@ class MiniEqWindowLayoutMixin:
                     fader.set_size_request(-1, -1)
                     fader.queue_resize()
                 self.fader_scroller.queue_resize()
-                reorder_children(
-                    band_editor_wide_row,
-                    (selected_band_box, type_box, frequency_box, q_box, gain_box, editor_spacer, state_box),
-                )
                 band_editor.add_css_class("band-editor-inline-compact")
-                band_editor_compact_box.set_visible(False)
-                band_editor_wide_row.set_visible(True)
                 move_if_needed(band_editor, fader_section)
                 return
 
@@ -854,13 +781,11 @@ class MiniEqWindowLayoutMixin:
             self.fader_scroller.remove_css_class("fader-scroller-compact")
             fader_grid.set_margin_top(4)
             fader_grid.set_margin_bottom(4)
-            band_editor.set_spacing(6)
             band_editor.remove_css_class("band-editor-compact-active")
             band_editor.remove_css_class("band-editor-inline-compact")
-            band_editor_wide_row.set_spacing(8)
-            band_editor_compact_box.set_spacing(6)
-            band_editor_compact_top_row.set_spacing(8)
-            band_editor_compact_bottom_row.set_spacing(8)
+            band_editor.set_child_spacing(8)
+            band_editor.set_line_spacing(6)
+            band_editor.set_natural_line_length(820)
             for fader in self.band_fader_widgets:
                 fader.set_content_height(DEFAULT_FADER_WIDGET_HEIGHT)
                 fader.set_size_request(-1, -1)
@@ -877,12 +802,6 @@ class MiniEqWindowLayoutMixin:
             self.selected_band_q_spin.set_size_request(82, -1)
             self.selected_band_gain_spin.set_size_request(96, -1)
             move_if_needed(band_editor, fader_section)
-            reorder_children(
-                band_editor_wide_row,
-                (selected_band_box, state_box, type_box, frequency_box, q_box, gain_box, editor_spacer),
-            )
-            band_editor_compact_box.set_visible(False)
-            band_editor_wide_row.set_visible(True)
 
         workspace.connect("notify::collapsed", sync_compact_band_editor)
         sync_compact_band_editor()
@@ -921,6 +840,7 @@ class MiniEqWindowLayoutMixin:
     def make_headroom_panel(self) -> Gtk.Box:
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         panel.add_css_class("headroom-panel")
+        self.headroom_panel = panel
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         title = Gtk.Label(label="Headroom", xalign=0.0)
@@ -930,6 +850,13 @@ class MiniEqWindowLayoutMixin:
         header_spacer = Gtk.Box()
         header_spacer.set_hexpand(True)
         header.append(header_spacer)
+
+        self.headroom_fix_button = Gtk.Button(label="Set Safe")
+        self.headroom_fix_button.add_css_class("headroom-fix-button")
+        self.headroom_fix_button.set_tooltip_text("Lower Preamp to Restore Headroom")
+        self.headroom_fix_button.set_visible(False)
+        self.headroom_fix_button.connect("clicked", self.on_set_safe_preamp_clicked)
+        header.append(self.headroom_fix_button)
 
         self.headroom_peak_label = Gtk.Label(label="Peak --", xalign=1.0)
         self.headroom_peak_label.add_css_class("headroom-peak-chip")
@@ -960,6 +887,28 @@ class MiniEqWindowLayoutMixin:
         self.headroom_detail_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         panel.append(self.headroom_detail_label)
 
+        preamp_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        preamp_row.add_css_class("headroom-preamp-row")
+        preamp_title = Gtk.Label(label="Preamp", xalign=0.0)
+        preamp_title.add_css_class("metric-title")
+        preamp_row.append(preamp_title)
+
+        self.preamp_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL,
+            EQ_PREAMP_MIN_DB,
+            EQ_PREAMP_MAX_DB,
+            0.5,
+        )
+        self.preamp_scale.set_draw_value(False)
+        self.preamp_scale.set_hexpand(True)
+        set_accessible_label(self.preamp_scale, "Preamp")
+        self.preamp_scale.connect("value-changed", self.on_preamp_changed)
+        preamp_row.append(self.preamp_scale)
+
+        self.preamp_label.add_css_class("numeric")
+        preamp_row.append(self.preamp_label)
+        panel.append(preamp_row)
+
         return panel
 
     def set_headroom_state(
@@ -984,7 +933,30 @@ class MiniEqWindowLayoutMixin:
         state_class = f"headroom-{kind}"
         self.headroom_state_label.add_css_class(state_class)
         self.headroom_peak_label.add_css_class(state_class)
+
+        if self.headroom_panel is not None:
+            for css_class in (
+                "headroom-panel-safe",
+                "headroom-panel-tight",
+                "headroom-panel-risk",
+                "headroom-panel-bypass",
+            ):
+                self.headroom_panel.remove_css_class(css_class)
+            self.headroom_panel.add_css_class(f"headroom-panel-{kind}")
+
+        if self.headroom_fix_button is not None:
+            self.headroom_fix_button.set_visible(kind == "risk")
+
         self.headroom_meter_area.queue_draw()
+
+    def on_set_safe_preamp_clicked(self, _button: Gtk.Button) -> None:
+        peak = self.estimate_curve_peak_db()
+        if peak <= 0.5:
+            return
+
+        target_preamp = self.controller.preamp_db - peak - 1.0
+        self.preamp_scale.set_value(target_preamp)
+        self.set_status("Preamp Lowered for Safe Headroom")
 
     def on_headroom_meter_draw(self, _area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
         width_f = float(max(width, 1))

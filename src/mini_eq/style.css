@@ -151,9 +151,13 @@
 }
 
 .headroom-panel {
-    padding: 8px 9px 9px 9px;
+    padding: 8px 9px 8px 9px;
     border-radius: 8px;
     background-color: var(--mini-quiet-bg);
+}
+
+.headroom-panel-risk {
+    background-color: rgba(255, 92, 80, 0.055);
 }
 
 .headroom-state {
@@ -174,6 +178,45 @@
 .headroom-detail {
     font-size: 9.5pt;
     color: var(--mini-text-muted);
+}
+
+.headroom-fix-button {
+    min-height: 24px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 9pt;
+    font-weight: 700;
+    border: 1px solid rgba(255, 92, 80, 0.26);
+    background-color: rgba(255, 92, 80, 0.13);
+    color: #ffd2d0;
+}
+
+.headroom-fix-button:hover {
+    background-color: rgba(255, 92, 80, 0.20);
+}
+
+.headroom-preamp-row {
+    margin-top: 1px;
+}
+
+.headroom-preamp-row scale trough {
+    min-height: 4px;
+}
+
+.monitor-strip {
+    margin-top: 3px;
+    padding-top: 7px;
+    border-top: 1px solid var(--mini-border-subtle);
+}
+
+.monitor-detail-row {
+    min-height: 28px;
+}
+
+.monitor-settings-button {
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 8px;
 }
 
 .headroom-state.headroom-safe {
@@ -210,11 +253,6 @@
 .headroom-peak-chip.headroom-bypass {
     background-color: rgba(127, 145, 165, 0.14);
     color: alpha(var(--window-fg-color), 0.86);
-}
-
-.preamp-row {
-    padding-top: 7px;
-    padding-bottom: 7px;
 }
 
 .metric-title {
@@ -315,10 +353,6 @@
     border: 1px solid var(--mini-border-subtle);
 }
 
-.band-editor-row {
-    min-height: 0;
-}
-
 .band-editor-title {
     color: var(--window-fg-color);
     font-size: 9.5pt;
@@ -335,14 +369,6 @@
 
 .band-editor-field {
     margin-left: 2px;
-}
-
-.band-editor-compact .band-editor-field {
-    margin-left: 0;
-}
-
-.band-editor-compact .band-editor-selected {
-    min-width: 72px;
 }
 
 .band-editor-compact-active .metric-title {

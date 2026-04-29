@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 - 2026-04-29
+
+- Redesign the signal inspector with compact headroom, preamp, and monitor controls.
+- Replace the large peak warning with inline headroom status and a quick safe-preamp action.
+- Add a local symbolic monitor settings icon and refresh public screenshots.
+- Require Libadwaita 1.7+ for the updated adaptive layout.
+
 ## 0.1.2 - 2026-04-28
 
 - Refine the main workspace layout, graph sizing, and compact adaptive behavior.

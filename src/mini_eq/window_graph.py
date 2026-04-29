@@ -169,9 +169,10 @@ class MiniEqWindowGraphMixin:
                 f"Band {self.selected_band_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
             )
             self.band_count_label.set_text(selected_filter_type)
+            self.band_count_label.set_visible(True)
         else:
             self.focus_label.set_text("Shape the curve, then enable Audio Routing to hear it system-wide")
-            self.band_count_label.set_text(f"{self.visible_band_count} bands ready")
+            self.band_count_label.set_visible(False)
         self.inspector_summary_label.set_text(
             f"{selected_filter_type} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
         )
@@ -216,15 +217,9 @@ class MiniEqWindowGraphMixin:
                 if self.analyzer_frozen and self.analyzer_enabled
                 else ("Live" if self.analyzer_enabled else "Off")
             )
-            if not self.analyzer_enabled:
-                analyzer_summary = "Monitor off"
-            elif self.analyzer_frozen:
-                analyzer_summary = f"Monitor • Frozen • {int(round(self.analyzer_smoothing * 100.0))}% smooth"
-            else:
-                analyzer_summary = f"Monitor • {int(round(self.analyzer_smoothing * 100.0))}% smooth"
-            self.analyzer_summary_label.set_text(analyzer_summary)
             self.analyzer_smoothing_label.set_text(f"{int(round(self.analyzer_smoothing * 100.0))}%")
             self.analyzer_display_gain_label.set_text(f"{self.analyzer_display_gain_db:+.0f} dB")
+            self.update_analyzer_summary_label()
             self.preamp_scale.set_value(self.controller.preamp_db)
             self.preamp_label.set_text(f"{self.controller.preamp_db:.1f} dB")
             self.mode_combo.set_selected(MODE_INDEX_BY_VALUE[self.controller.eq_mode])
