@@ -121,6 +121,14 @@ names, usernames, hostnames, local paths, or private preset names. Prefer
 `tools/render_demo_screenshot.py` over desktop screenshots because it renders
 only the Mini EQ window from deterministic demo data.
 
+For visual or adaptive-layout changes, inspect deterministic screenshot
+matrices before considering the work done. Cover the minimum, default, narrow,
+wide, short, tall, and breakpoint-adjacent sizes that the change can affect.
+Check the actual PNG dimensions as well as the rendered image, because GTK can
+raise a requested size to the current minimum. Pay particular attention to
+collapsed/expanded transitions, clipped controls, wasted space, and whether the
+graph, analyzer, faders, and utility pane still share space deliberately.
+
 ## Release And Security
 
 Use `docs/release.md` as the release checklist. Before publishing release

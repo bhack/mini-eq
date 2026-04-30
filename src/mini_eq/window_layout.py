@@ -28,11 +28,15 @@ from .core import (
 from .window_graph import GRAPH_PLOT_BOTTOM, GRAPH_PLOT_LEFT, GRAPH_PLOT_RIGHT, GRAPH_PLOT_TOP
 
 ADAPTIVE_NARROW_BREAKPOINT_SP = 1320
+RESPONSIVE_COMFORTABLE_HEIGHT = 720
+RESPONSIVE_ROOMY_HEIGHT = 960
 COMPACT_BREAKPOINT_SP = 1080
 DEFAULT_GRAPH_CONTENT_WIDTH = 900
 COMPACT_GRAPH_CONTENT_WIDTH = 760
 DEFAULT_GRAPH_CONTENT_HEIGHT = 196
-COMPACT_GRAPH_CONTENT_HEIGHT = 142
+COMPACT_GRAPH_CONTENT_HEIGHT = 156
+ROOMY_GRAPH_CONTENT_HEIGHT = 280
+WORKSPACE_MAX_WIDTH = 1760
 GRAPH_PLOT_HORIZONTAL_MARGINS = int(GRAPH_PLOT_LEFT + GRAPH_PLOT_RIGHT)
 GRAPH_PLOT_VERTICAL_MARGINS = int(GRAPH_PLOT_TOP + GRAPH_PLOT_BOTTOM)
 DEFAULT_ANALYZER_CONTENT_WIDTH = max(1, DEFAULT_GRAPH_CONTENT_WIDTH - GRAPH_PLOT_HORIZONTAL_MARGINS)
@@ -41,10 +45,12 @@ DEFAULT_ANALYZER_CONTENT_HEIGHT = max(1, DEFAULT_GRAPH_CONTENT_HEIGHT - GRAPH_PL
 COMPACT_ANALYZER_CONTENT_HEIGHT = max(1, COMPACT_GRAPH_CONTENT_HEIGHT - GRAPH_PLOT_VERTICAL_MARGINS)
 DEFAULT_FADER_SECTION_SPACING = 6
 COMPACT_FADER_SECTION_SPACING = 3
-DEFAULT_FADER_WIDGET_HEIGHT = 182
-COMPACT_FADER_WIDGET_HEIGHT = 146
-DEFAULT_FADER_SCROLLER_MIN_HEIGHT = 174
-COMPACT_FADER_SCROLLER_MIN_HEIGHT = 132
+DEFAULT_FADER_WIDGET_HEIGHT = 208
+COMPACT_FADER_WIDGET_HEIGHT = 164
+ROOMY_FADER_WIDGET_HEIGHT = 300
+DEFAULT_FADER_SCROLLER_MIN_HEIGHT = 200
+COMPACT_FADER_SCROLLER_MIN_HEIGHT = 150
+ROOMY_FADER_SCROLLER_MIN_HEIGHT = 290
 
 
 def set_accessible_label(widget: Gtk.Widget, label: str) -> None:
@@ -80,6 +86,14 @@ class MiniEqWindowLayoutMixin:
         root.set_margin_end(10)
         root.set_vexpand(True)
         root.set_valign(Gtk.Align.FILL)
+
+        content_clamp = Adw.Clamp()
+        content_clamp.set_orientation(Gtk.Orientation.HORIZONTAL)
+        content_clamp.set_maximum_size(WORKSPACE_MAX_WIDTH)
+        content_clamp.set_tightening_threshold(WORKSPACE_MAX_WIDTH)
+        content_clamp.set_hexpand(True)
+        content_clamp.set_vexpand(True)
+        content_clamp.set_valign(Gtk.Align.FILL)
 
         toolbar_stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         toolbar_stack.set_hexpand(True)
@@ -176,18 +190,32 @@ class MiniEqWindowLayoutMixin:
         left_column.set_hexpand(True)
         left_column.set_vexpand(True)
 
+        left_scroller = Gtk.ScrolledWindow()
+        left_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        left_scroller.set_propagate_natural_height(False)
+        left_scroller.set_hexpand(True)
+        left_scroller.set_vexpand(True)
+        left_scroller.set_child(left_column)
+
         right_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         right_column.set_size_request(286, -1)
-        right_column.set_vexpand(True)
-        right_column.set_valign(Gtk.Align.FILL)
+        right_column.set_vexpand(False)
+        right_column.set_valign(Gtk.Align.START)
         right_column.set_margin_top(4)
         right_column.set_margin_bottom(2)
         right_column.set_margin_start(8)
         right_column.set_margin_end(6)
         right_column.add_css_class("utility-pane-shell")
 
-        workspace.set_content(left_column)
-        workspace.set_sidebar(right_column)
+        right_scroller = Gtk.ScrolledWindow()
+        right_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        right_scroller.set_propagate_natural_height(False)
+        right_scroller.set_size_request(286, -1)
+        right_scroller.set_vexpand(True)
+        right_scroller.set_child(right_column)
+
+        workspace.set_content(left_scroller)
+        workspace.set_sidebar(right_scroller)
         root.append(workspace)
 
         self.utility_pane_binding = workspace.bind_property(
@@ -224,7 +252,7 @@ class MiniEqWindowLayoutMixin:
         adaptive_breakpoint.add_setter(utility_pane_button, "visible", True)
         adaptive_breakpoint.add_setter(secondary_tools, "halign", Gtk.Align.END)
 
-        def sync_compact_toolbar(_split_view: Adw.OverlaySplitView | None = None, _param: object | None = None) -> None:
+        def sync_compact_toolbar(_widget: Gtk.Widget | None = None, _param: object | None = None) -> None:
             compact = workspace.get_collapsed()
 
             if compact:
@@ -243,9 +271,10 @@ class MiniEqWindowLayoutMixin:
             output_label.set_visible(True)
             self.output_combo.set_size_request(300, -1)
             secondary_tools.remove_css_class("toolbar-compact-actions")
-            self.set_size_request(self.min_window_width, self.wide_min_window_height)
+            self.set_size_request(self.min_window_width, self.default_min_window_height)
 
         workspace.connect("notify::collapsed", sync_compact_toolbar)
+        self.connect("notify::current-breakpoint", sync_compact_toolbar)
         sync_compact_toolbar()
 
         preset_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -452,8 +481,8 @@ class MiniEqWindowLayoutMixin:
         graph_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         graph_shell.add_css_class("panel-card")
         graph_shell.add_css_class("graph-shell-panel")
-        graph_shell.set_vexpand(True)
-        graph_shell.set_valign(Gtk.Align.FILL)
+        graph_shell.set_vexpand(False)
+        graph_shell.set_valign(Gtk.Align.START)
         graph_shell.set_margin_top(2)
         graph_shell.set_margin_bottom(0)
         graph_shell.set_margin_start(0)
@@ -474,21 +503,21 @@ class MiniEqWindowLayoutMixin:
 
         graph_frame = Gtk.Frame()
         graph_frame.set_hexpand(True)
-        graph_frame.set_vexpand(True)
-        graph_frame.set_valign(Gtk.Align.FILL)
+        graph_frame.set_vexpand(False)
+        graph_frame.set_valign(Gtk.Align.START)
         graph_frame.add_css_class("graph-stage")
 
         graph_overlay = Gtk.Overlay()
         graph_overlay.set_hexpand(True)
-        graph_overlay.set_vexpand(True)
-        graph_overlay.set_valign(Gtk.Align.FILL)
+        graph_overlay.set_vexpand(False)
+        graph_overlay.set_valign(Gtk.Align.START)
 
         self.graph_area = Gtk.DrawingArea()
         self.graph_area.set_content_width(DEFAULT_GRAPH_CONTENT_WIDTH)
         self.graph_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
         self.graph_area.set_hexpand(True)
-        self.graph_area.set_vexpand(True)
-        self.graph_area.set_valign(Gtk.Align.FILL)
+        self.graph_area.set_vexpand(False)
+        self.graph_area.set_valign(Gtk.Align.START)
         self.graph_area.set_accessible_role(Gtk.AccessibleRole.IMG)
         set_accessible_label(self.graph_area, "Curve")
         set_accessible_description(self.graph_area, "Frequency response curve with optional monitor levels")
@@ -502,9 +531,9 @@ class MiniEqWindowLayoutMixin:
         self.analyzer_area.set_content_width(DEFAULT_ANALYZER_CONTENT_WIDTH)
         self.analyzer_area.set_content_height(DEFAULT_ANALYZER_CONTENT_HEIGHT)
         self.analyzer_area.set_hexpand(True)
-        self.analyzer_area.set_vexpand(True)
+        self.analyzer_area.set_vexpand(False)
         self.analyzer_area.set_halign(Gtk.Align.FILL)
-        self.analyzer_area.set_valign(Gtk.Align.FILL)
+        self.analyzer_area.set_valign(Gtk.Align.START)
         self.analyzer_area.set_margin_start(int(GRAPH_PLOT_LEFT))
         self.analyzer_area.set_margin_end(int(GRAPH_PLOT_RIGHT))
         self.analyzer_area.set_margin_top(int(GRAPH_PLOT_TOP))
@@ -517,9 +546,9 @@ class MiniEqWindowLayoutMixin:
         self.graph_response_area.set_content_width(DEFAULT_GRAPH_CONTENT_WIDTH)
         self.graph_response_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
         self.graph_response_area.set_hexpand(True)
-        self.graph_response_area.set_vexpand(True)
+        self.graph_response_area.set_vexpand(False)
         self.graph_response_area.set_halign(Gtk.Align.FILL)
-        self.graph_response_area.set_valign(Gtk.Align.FILL)
+        self.graph_response_area.set_valign(Gtk.Align.START)
         self.graph_response_area.set_can_target(False)
         self.graph_response_area.set_accessible_role(Gtk.AccessibleRole.PRESENTATION)
         self.graph_response_area.set_draw_func(self.on_graph_response_draw)
@@ -732,24 +761,62 @@ class MiniEqWindowLayoutMixin:
                 current_parent.remove(child)
             parent.append(child)
 
-        def sync_compact_band_editor(
-            _split_view: Adw.OverlaySplitView | None = None, _param: object | None = None
-        ) -> None:
+        def responsive_value(dense_value: int, roomy_value: int, height: int) -> int:
+            dense_height = self.compact_min_window_height
+            progress = clamp(
+                (height - dense_height) / max(RESPONSIVE_ROOMY_HEIGHT - dense_height, 1),
+                0.0,
+                1.0,
+            )
+            return round(dense_value + ((roomy_value - dense_value) * progress))
+
+        def sync_visual_layout(height: int | None = None) -> None:
             compact = workspace.get_collapsed()
+            layout_height = height if height is not None and height > 0 else self.get_allocated_height()
+
+            graph_height = responsive_value(
+                COMPACT_GRAPH_CONTENT_HEIGHT,
+                ROOMY_GRAPH_CONTENT_HEIGHT,
+                layout_height,
+            )
+            analyzer_height = max(1, graph_height - GRAPH_PLOT_VERTICAL_MARGINS)
+            fader_height = responsive_value(
+                COMPACT_FADER_WIDGET_HEIGHT,
+                ROOMY_FADER_WIDGET_HEIGHT,
+                layout_height,
+            )
+            fader_scroller_height = responsive_value(
+                COMPACT_FADER_SCROLLER_MIN_HEIGHT,
+                ROOMY_FADER_SCROLLER_MIN_HEIGHT,
+                layout_height,
+            )
+            dense = layout_height < RESPONSIVE_COMFORTABLE_HEIGHT
+            right_column.set_spacing(8 if dense else 12)
+            right_column.set_margin_top(2 if dense else 4)
+            right_column.set_margin_bottom(0 if dense else 2)
+            preset_section.set_spacing(6 if dense else 8)
+            system_section.set_spacing(6 if dense else 8)
+            self.headroom_panel.set_spacing(4 if dense else 7)
+            self.headroom_meter_area.set_content_height(10 if dense else 14)
+            monitor_panel.set_spacing(2 if dense else 4)
+            if dense:
+                right_column.add_css_class("utility-pane-dense")
+            else:
+                right_column.remove_css_class("utility-pane-dense")
 
             if compact:
-                graph_shell.set_spacing(2)
-                self.graph_area.set_content_height(COMPACT_GRAPH_CONTENT_HEIGHT)
-                self.analyzer_area.set_content_height(COMPACT_ANALYZER_CONTENT_HEIGHT)
-                self.graph_response_area.set_content_height(COMPACT_GRAPH_CONTENT_HEIGHT)
+                graph_shell.set_spacing(4 if not dense else 2)
+                self.graph_area.set_content_height(graph_height)
+                self.analyzer_area.set_content_height(analyzer_height)
+                self.graph_response_area.set_content_height(graph_height)
                 fader_section.set_spacing(COMPACT_FADER_SECTION_SPACING)
                 fader_section.set_vexpand(False)
                 fader_section.set_valign(Gtk.Align.START)
-                fader_section.set_margin_top(4)
-                fader_section.set_margin_bottom(3)
+                fader_section.set_margin_top(6 if not dense else 4)
+                fader_section.set_margin_bottom(4 if not dense else 3)
                 self.fader_scroller.set_vexpand(False)
                 self.fader_scroller.set_valign(Gtk.Align.START)
-                self.fader_scroller.set_min_content_height(COMPACT_FADER_SCROLLER_MIN_HEIGHT)
+                self.fader_scroller.set_min_content_height(fader_scroller_height)
                 self.fader_scroller.add_css_class("fader-scroller-compact")
                 fader_grid.set_margin_top(2)
                 fader_grid.set_margin_bottom(2)
@@ -770,7 +837,7 @@ class MiniEqWindowLayoutMixin:
                 self.selected_band_q_spin.set_size_request(68, -1)
                 self.selected_band_gain_spin.set_size_request(80, -1)
                 for fader in self.band_fader_widgets:
-                    fader.set_content_height(COMPACT_FADER_WIDGET_HEIGHT)
+                    fader.set_content_height(fader_height)
                     fader.set_size_request(-1, -1)
                     fader.queue_resize()
                 self.fader_scroller.queue_resize()
@@ -778,28 +845,28 @@ class MiniEqWindowLayoutMixin:
                 move_if_needed(band_editor, fader_section)
                 return
 
-            graph_shell.set_spacing(6)
-            self.graph_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
-            self.analyzer_area.set_content_height(DEFAULT_ANALYZER_CONTENT_HEIGHT)
-            self.graph_response_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
-            fader_section.set_spacing(DEFAULT_FADER_SECTION_SPACING)
+            graph_shell.set_spacing(2 if dense else 6)
+            self.graph_area.set_content_height(graph_height)
+            self.analyzer_area.set_content_height(analyzer_height)
+            self.graph_response_area.set_content_height(graph_height)
+            fader_section.set_spacing(COMPACT_FADER_SECTION_SPACING if dense else DEFAULT_FADER_SECTION_SPACING)
             fader_section.set_vexpand(False)
             fader_section.set_valign(Gtk.Align.START)
-            fader_section.set_margin_top(8)
-            fader_section.set_margin_bottom(6)
+            fader_section.set_margin_top(4 if dense else 8)
+            fader_section.set_margin_bottom(3 if dense else 6)
             self.fader_scroller.set_vexpand(False)
             self.fader_scroller.set_valign(Gtk.Align.START)
-            self.fader_scroller.set_min_content_height(DEFAULT_FADER_SCROLLER_MIN_HEIGHT)
+            self.fader_scroller.set_min_content_height(fader_scroller_height)
             self.fader_scroller.remove_css_class("fader-scroller-compact")
-            fader_grid.set_margin_top(4)
-            fader_grid.set_margin_bottom(4)
+            fader_grid.set_margin_top(2 if dense else 4)
+            fader_grid.set_margin_bottom(2 if dense else 4)
             band_editor.remove_css_class("band-editor-compact-active")
             band_editor.remove_css_class("band-editor-inline-compact")
             band_editor.set_child_spacing(8)
             band_editor.set_line_spacing(6)
             band_editor.set_natural_line_length(820)
             for fader in self.band_fader_widgets:
-                fader.set_content_height(DEFAULT_FADER_WIDGET_HEIGHT)
+                fader.set_content_height(fader_height)
                 fader.set_size_request(-1, -1)
                 fader.queue_resize()
             self.fader_scroller.queue_resize()
@@ -815,7 +882,13 @@ class MiniEqWindowLayoutMixin:
             self.selected_band_gain_spin.set_size_request(96, -1)
             move_if_needed(band_editor, fader_section)
 
+        def sync_compact_band_editor(_widget: Gtk.Widget | None = None, _param: object | None = None) -> None:
+            sync_visual_layout()
+
+        self.sync_responsive_layout_for_size = lambda _width, height: sync_visual_layout(height)
+
         workspace.connect("notify::collapsed", sync_compact_band_editor)
+        self.connect("notify::current-breakpoint", sync_compact_band_editor)
         sync_compact_band_editor()
 
         if band_editor.get_parent() is None:
@@ -824,7 +897,8 @@ class MiniEqWindowLayoutMixin:
         left_column.append(fader_shell)
 
         self.toast_overlay = Adw.ToastOverlay()
-        self.toast_overlay.set_child(root)
+        content_clamp.set_child(root)
+        self.toast_overlay.set_child(content_clamp)
         toolbar_view.set_content(self.toast_overlay)
         self.set_content(toolbar_view)
 
@@ -884,6 +958,7 @@ class MiniEqWindowLayoutMixin:
         panel.append(self.headroom_state_label)
 
         self.headroom_meter_area = Gtk.DrawingArea()
+        self.headroom_meter_area.add_css_class("headroom-meter-area")
         self.headroom_meter_area.set_content_width(260)
         self.headroom_meter_area.set_content_height(14)
         self.headroom_meter_area.set_hexpand(True)

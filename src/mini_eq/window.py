@@ -39,8 +39,8 @@ from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positi
 
 TOAST_TIMEOUT_SECONDS = 2
 MIN_WINDOW_WIDTH = 980
-MIN_WINDOW_HEIGHT = 696
-WIDE_MIN_WINDOW_HEIGHT = 752
+MIN_WINDOW_HEIGHT = 600
+DEFAULT_WINDOW_HEIGHT = 720
 ROUTING_CLOSE_SETTLE_MS = 300
 TOAST_IGNORED_PREFIXES = (
     "filter-chain PipeWire EQ ready:",
@@ -65,11 +65,13 @@ class MiniEqWindow(
         self.auto_route_on_startup = auto_route
         self.post_present_source_id = 0
         self.post_present_ready = False
+        self.responsive_layout_source_id = 0
+        self.responsive_layout_size = (0, 0)
         self.toast_overlay: Adw.ToastOverlay | None = None
         self.min_window_width = MIN_WINDOW_WIDTH
         self.compact_min_window_height = MIN_WINDOW_HEIGHT
-        self.wide_min_window_height = WIDE_MIN_WINDOW_HEIGHT
-        self.set_default_size(1360, self.wide_min_window_height)
+        self.default_min_window_height = MIN_WINDOW_HEIGHT
+        self.set_default_size(1360, DEFAULT_WINDOW_HEIGHT)
         self.set_size_request(self.min_window_width, self.compact_min_window_height)
         self.updating_ui = False
         self.selected_band_index = 0
@@ -162,6 +164,23 @@ class MiniEqWindow(
         self.build_window_content(auto_route)
         self.controller.set_outputs_changed_callback(self.refresh_output_sinks)
 
+    def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
+        Adw.ApplicationWindow.do_size_allocate(self, width, height, baseline)
+        if self.ui_shutting_down or self.responsive_layout_size == (width, height):
+            return
+        self.responsive_layout_size = (width, height)
+        if self.responsive_layout_source_id == 0:
+            self.responsive_layout_source_id = GLib.idle_add(self.on_responsive_layout_idle)
+
+    def on_responsive_layout_idle(self) -> bool:
+        self.responsive_layout_source_id = 0
+        if self.ui_shutting_down:
+            return False
+        sync_responsive_layout = getattr(self, "sync_responsive_layout_for_size", None)
+        if sync_responsive_layout is not None:
+            sync_responsive_layout(*self.responsive_layout_size)
+        return False
+
     def schedule_post_present_setup(self) -> None:
         if self.post_present_ready or self.post_present_source_id != 0:
             return
@@ -211,6 +230,9 @@ class MiniEqWindow(
         if self.post_present_source_id > 0:
             destroy_glib_source(self.post_present_source_id)
             self.post_present_source_id = 0
+        if self.responsive_layout_source_id > 0:
+            destroy_glib_source(self.responsive_layout_source_id)
+            self.responsive_layout_source_id = 0
         if self.curve_metadata_refresh_source_id > 0:
             destroy_glib_source(self.curve_metadata_refresh_source_id)
             self.curve_metadata_refresh_source_id = 0
