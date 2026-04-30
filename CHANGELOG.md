@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6 - 2026-04-30
+
+- Improve compact window sizing so the minimum layout uses available vertical space.
+- Add release preflight guidance for deciding when a GNOME Shell extension upload is needed.
+- Move owner-specific release runbook details out of public documentation.
+- Refresh the public screenshot and social preview assets.
+
 ## 0.1.5 - 2026-04-30
 
 - Improve analyzer rendering responsiveness by moving spectrum drawing into a dedicated snapshot widget.

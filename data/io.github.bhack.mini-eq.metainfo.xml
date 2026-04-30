@@ -29,7 +29,7 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.5/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.6/docs/screenshots/mini-eq.png</image>
       <caption>Main equalizer window</caption>
     </screenshot>
   </screenshots>
@@ -37,6 +37,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.1.6" date="2026-04-30">
+      <description>
+        <ul>
+          <li>Improve compact window sizing so the minimum layout uses available vertical space.</li>
+          <li>Add release preflight guidance for GNOME Shell extension upload decisions.</li>
+          <li>Refresh the public screenshot and social preview assets.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-04-30">
       <description>
         <ul>
