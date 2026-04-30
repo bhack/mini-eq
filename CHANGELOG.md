@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5 - 2026-04-30
+
+- Improve analyzer rendering responsiveness by moving spectrum drawing into a dedicated snapshot widget.
+- Improve GNOME Shell extension controls, packaging checks, and demo tooling for review screenshots.
+- Clarify Equalizer APO and AutoEq preset import guidance in the README.
+- Remove unused legacy code and document repeatable cleanup checks for maintainers.
+
 ## 0.1.4 - 2026-04-30
 
 - Add the Mini EQ Controls GNOME Shell extension for panel routing, EQ, preset, and analyzer controls.
