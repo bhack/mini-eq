@@ -39,8 +39,10 @@ from .gtk_utils import create_dropdown_from_strings
 from .routing import SystemWideEqController
 from .window_analyzer import MiniEqWindowAnalyzerMixin
 from .window_graph import MiniEqWindowGraphMixin
+from .window_headroom import MiniEqWindowHeadroomMixin
 from .window_layout import MiniEqWindowLayoutMixin
 from .window_presets import MiniEqWindowPresetMixin
+from .window_utility import MiniEqWindowUtilityPaneMixin
 from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positive_int
 
 TOAST_TIMEOUT_SECONDS = 2
@@ -70,6 +72,8 @@ class MiniEqWindow(
     MiniEqWindowPresetMixin,
     MiniEqWindowAnalyzerMixin,
     MiniEqWindowGraphMixin,
+    MiniEqWindowHeadroomMixin,
+    MiniEqWindowUtilityPaneMixin,
     MiniEqWindowLayoutMixin,
     Adw.ApplicationWindow,
 ):
