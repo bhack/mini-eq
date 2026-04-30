@@ -11,8 +11,9 @@ PipeWire JACK compatibility layer plus NumPy for spectrum analysis.
 
 This is a public-facing repository. Treat every committed file, screenshot,
 artifact, and log snippet as public. Keep user-facing documentation focused on
-using the app, and keep maintainer-only process notes in this file or under
-`docs/`.
+using the app. Keep public maintainer guidance in this file or under `docs/`;
+keep owner-only local runbooks, credentials-dependent steps, and machine-local
+paths in ignored repo-local skills under `.agents/skills/`.
 
 ## Code Map
 
@@ -131,16 +132,15 @@ graph, analyzer, faders, and utility pane still share space deliberately.
 
 ## Release And Security
 
-Use `docs/release.md` as the release checklist. Before publishing release
-artifacts or changing repository/package visibility, verify the rendered README,
-package URLs, issue tracker, license, screenshots, and AppStream metadata.
+Use `docs/release.md` as the public release checklist. Before publishing
+release artifacts, verify the rendered README, package URLs, issue tracker,
+license, screenshots, and AppStream metadata.
 During release preparation, verify that version-bearing files agree:
 `pyproject.toml`, `CHANGELOG.md`, and the AppStream release entry and screenshot
 URL. The package `__version__` is derived from release metadata and should not
 be hardcoded separately.
 
-Before publishing artifacts or changing repository visibility, run a focused
-leak scan:
+Before publishing artifacts, run a focused leak scan:
 
 ```bash
 git rev-list --count HEAD

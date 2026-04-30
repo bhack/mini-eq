@@ -7,11 +7,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LEAK_PATTERN = r"(/home/|/Users/|secret|token|api[_-]?key|github_pat|BEGIN (RSA|OPENSSH|PRIVATE) KEY)"
 ALLOWED_LEAK_MATCHES = ("${{ github.token }}", "id-token: write")
+EXTENSION_SOURCE_DIR = ROOT / "extensions" / "gnome-shell" / "mini-eq@bhack.github.io"
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -23,10 +25,69 @@ def run(command: list[str | Path], *, cwd: Path = ROOT) -> None:
     subprocess.run([str(part) for part in command], cwd=cwd, check=True)
 
 
+def git_stdout(*args: str | Path) -> str:
+    result = subprocess.run(
+        ["git", *(str(arg) for arg in args)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
 def require_tools(*tools: str) -> None:
     missing = [tool for tool in tools if shutil.which(tool) is None]
     if missing:
         raise SystemExit(f"Missing required release tool(s): {', '.join(missing)}")
+
+
+def current_release_tag() -> str:
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        project = tomllib.load(pyproject_file)["project"]
+    return f"v{project['version']}"
+
+
+def git_tag_exists(tag: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
+        cwd=ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def extension_comparison_base_tag() -> str | None:
+    current_tag = current_release_tag()
+    if git_tag_exists(current_tag):
+        return current_tag
+
+    tags = git_stdout("tag", "--list", "v[0-9]*", "--sort=-v:refname").splitlines()
+    return tags[0] if tags else None
+
+
+def run_gnome_shell_extension_upload_notice() -> None:
+    base_tag = extension_comparison_base_tag()
+    if base_tag is None:
+        print("\nGNOME Shell extension upload notice skipped; no release tag found.")
+        return
+
+    extension_path = EXTENSION_SOURCE_DIR.relative_to(ROOT)
+    committed_changes = git_stdout("diff", "--name-only", f"{base_tag}..HEAD", "--", extension_path).splitlines()
+    worktree_changes = git_stdout("status", "--short", "--", extension_path).splitlines()
+
+    if not committed_changes and not worktree_changes:
+        print(f"\nGNOME Shell extension upload not indicated; no publishable extension changes since {base_tag}.")
+        return
+
+    print(f"\nGNOME Shell extension upload may be needed; publishable extension source changed since {base_tag}:")
+    for path in committed_changes:
+        print(f"  {path}")
+    for status_line in worktree_changes:
+        print(f"  {status_line}")
+    print("Build and test the extension zip before uploading it to extensions.gnome.org.")
 
 
 def run_leak_scan() -> None:
@@ -123,6 +184,7 @@ def main() -> int:
     run(["git", "diff", "--check"])
     run([python, "-m", "pytest", "tests/test_version_metadata.py", "-q"])
     run([python, ROOT / "tools/check_gnome_shell_extension.py"])
+    run_gnome_shell_extension_upload_notice()
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])
     run([python, "-m", "pytest", "-q"])

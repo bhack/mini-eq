@@ -8,8 +8,6 @@ substitute `.venv/bin/python` in the local checkout when available.
 ## Verify Metadata
 
 Confirm the repository URLs in `pyproject.toml` match the actual GitHub repository.
-Do not upload to TestPyPI or PyPI while the repository is private if the package
-metadata points at GitHub URLs that should not be public yet.
 
 ```bash
 git remote -v
@@ -46,6 +44,11 @@ For the full local release preflight, run:
 ```bash
 python3 tools/release_preflight.py
 ```
+
+The preflight prints a GNOME Shell extension upload notice when the publishable
+extension source changed since the relevant release tag. If it reports that an
+upload may be needed, test the extension and upload the generated zip to
+extensions.gnome.org after the release is ready.
 
 ## Check Locally
 
@@ -95,41 +98,6 @@ and attaches the built wheel and sdist. Keep `draft=true` for the first run,
 review the generated notes and assets on GitHub, then publish the draft
 manually.
 
-For a production GitHub release plus PyPI publish, dispatch with:
-
-```bash
-gh workflow run release.yml --repo bhack/mini-eq --ref main \
-  -f dry_run=false \
-  -f create_github_release=true \
-  -f tag_name=vX.Y.Z \
-  -f target=main \
-  -f draft=true \
-  -f prerelease=false \
-  -f publish_testpypi=false \
-  -f publish_pypi=true
-```
-
-If the `pypi` environment requires approval, the publish job will stay in
-`waiting` until the deployment is approved in GitHub Actions. The same approval
-can be done with `gh` when the logged-in account is allowed to approve:
-
-```bash
-run_id=<workflow run id>
-gh api "repos/bhack/mini-eq/actions/runs/${run_id}/pending_deployments"
-environment_id=1234567890
-gh api "repos/bhack/mini-eq/actions/runs/${run_id}/pending_deployments" \
-  -X POST \
-  -F environment_ids[]="$environment_id" \
-  -f state=approved \
-  -f comment='Publish vX.Y.Z to PyPI'
-```
-
-After dispatching the release workflow, watch it to completion:
-
-```bash
-gh run watch "$run_id" --repo bhack/mini-eq --exit-status
-```
-
 Draft GitHub release assets use temporary `untagged-*` download URLs. Publish
 the draft before using release asset URLs in the Flathub manifest or other
 public metadata.
@@ -144,31 +112,19 @@ publishing separate until TestPyPI installs have been validated. For a
 TestPyPI-only validation run, use `dry_run=false`,
 `create_github_release=false`, and `publish_testpypi=true`.
 
-Configure the TestPyPI trusted publisher with:
-
-- PyPI project name: `mini-eq`
-- Owner: `bhack`
-- Repository: `mini-eq`
-- Workflow: `release.yml`
-- Environment: `testpypi`
-
 Set `publish_pypi=true` only after the `pypi` GitHub environment and PyPI
 trusted publisher are configured. The PyPI job also uses
 `pypa/gh-action-pypi-publish` with OIDC and does not use API tokens. Keep the
 `pypi` environment protected with required review before publishing production
 packages.
 
-Configure the PyPI trusted publisher with:
-
-- PyPI project name: `mini-eq`
-- Owner: `bhack`
-- Repository: `mini-eq`
-- Workflow: `release.yml`
-- Environment: `pypi`
+Keep owner-specific workflow dispatch commands, environment approvals, and
+local release sequencing in an ignored repo-local skill rather than in public
+documentation.
 
 ## Security
 
-Before changing repository visibility to public:
+Before publishing release artifacts, run a focused leak scan:
 
 ```bash
 git rev-list --count HEAD
@@ -182,8 +138,7 @@ git grep -n -I -E "$leak_pattern" HEAD -- . \
   ':(exclude)tools/release_preflight.py'
 ```
 
-After changing repository visibility to public, enable these GitHub security
-features in Settings > Advanced Security:
+Keep these GitHub security features enabled in Settings > Advanced Security:
 
 - Dependency graph
 - Dependabot alerts
@@ -238,8 +193,8 @@ asset digest.
 ## Flathub Handoff
 
 Keep the detailed Flathub packaging procedure in `docs/flathub.md` and in the
-Flathub packaging repository. From this upstream repository, the release handoff
-is:
+Flathub packaging repository. From this upstream repository, the public release
+handoff is:
 
 1. Confirm the GitHub release is published, not draft.
 2. Compute or verify the release source archive SHA-256.

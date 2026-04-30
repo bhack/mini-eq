@@ -5,7 +5,6 @@ Use this note when maintaining the Mini EQ Flathub package.
 ## Current Status
 
 - Mini EQ is accepted on Flathub as `io.github.bhack.mini-eq`.
-- The app ID is verified through the GitHub login provider for `bhack`.
 - The Flathub publishing repository is
   `https://github.com/flathub/io.github.bhack.mini-eq`.
 - The upstream local Flatpak manifest is `io.github.bhack.mini-eq.yaml`. It is
@@ -70,16 +69,9 @@ release, then update the Flathub manifest to the new release archive.
 9. Open a pull request against the Flathub repository's `master` branch.
 10. Install and test the temporary PR build posted by Flathub when practical.
 11. Merge only after the Flathub PR build and checks pass.
-12. Watch the official build. Successful official builds are published
-    automatically, but publication can lag depending on Flathub's backlog.
-13. If the official build is held for moderation, answer the bot issue or
-    moderator questions. Permission changes and critical AppStream field changes
-    can trigger moderation.
-14. Recheck the public listing and banner preview:
+12. Recheck the public listing and banner preview after publication:
    - `https://flathub.org/en/apps/io.github.bhack.mini-eq`
    - `https://flathub.org/en/apps/io.github.bhack.mini-eq/bannerpreview`
-15. If quality fixes landed, use the listing quality panel to request a
-    re-review.
 
 GitHub draft releases expose assets under temporary `untagged-*` URLs. Publish
 the upstream GitHub release first, then use the stable asset URL:
@@ -101,17 +93,9 @@ The command should report that the manifests match outside the Mini EQ source
 stanza. Any other difference should be intentional and usually belongs in both
 repositories.
 
-The Flathub `master` branch is protected, so direct pushes are rejected. Push an
-update branch and open a PR:
-
-```bash
-git switch -c update-X.Y.Z
-git push -u origin update-X.Y.Z
-gh pr create --repo flathub/io.github.bhack.mini-eq \
-  --base master \
-  --head update-X.Y.Z \
-  --title 'Update mini-eq to X.Y.Z'
-```
+The Flathub `master` branch is protected, so use a branch and pull request for
+publishing manifest updates. Keep local checkout paths, branch naming habits,
+and owner-specific PR commands in ignored repo-local runbooks.
 
 ## Validation
 

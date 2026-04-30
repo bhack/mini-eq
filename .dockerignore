@@ -1,5 +1,6 @@
 .git/
 .codex
+.agents/
 .pytest_cache/
 .ruff_cache/
 .venv/
