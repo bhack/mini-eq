@@ -41,6 +41,14 @@ def test_default_preset_storage_uses_standalone_config_namespace(
     assert core.preset_storage_dir() == core.default_preset_storage_dir()
 
 
+def test_user_config_dir_ignores_relative_xdg_config_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    home_dir = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setenv("XDG_CONFIG_HOME", "relative-config")
+
+    assert core.user_config_dir() == home_dir / ".config"
+
+
 def test_sanitize_preset_name_removes_invalid_chars_and_trims() -> None:
     assert core.sanitize_preset_name('  bad<>:"/\\\\|?* name...  ') == "bad name"
 

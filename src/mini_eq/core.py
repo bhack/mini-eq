@@ -260,7 +260,7 @@ def ensure_preset_storage_dir() -> Path:
 
 def user_config_dir() -> Path:
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
-    if xdg_config_home:
+    if xdg_config_home and Path(xdg_config_home).is_absolute():
         return Path(xdg_config_home)
 
     return Path.home() / ".config"
