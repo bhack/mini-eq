@@ -10,6 +10,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gio, GLib, GLibUnix
 
+from .appearance import apply_appearance_preference, load_appearance_preference
 from .cli import parse_args
 from .dbus_control import MiniEqDbusControl
 from .desktop_integration import APP_ICON_NAME, APP_ID, install_app_icon, install_desktop_integration
@@ -31,6 +32,7 @@ class MiniEqApplication(Adw.Application):
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
+        apply_appearance_preference(load_appearance_preference(), self.get_style_manager())
         install_app_icon()
         self.install_standard_actions()
         self.dbus_control = MiniEqDbusControl(self)

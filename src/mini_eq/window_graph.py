@@ -10,6 +10,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
 from .analyzer import analyzer_db_to_display_norm
+from .appearance import style_manager_is_dark
 from .core import (
     FILTER_TYPE_INDEX_BY_VALUE,
     FILTER_TYPE_ORDER,
@@ -44,6 +45,11 @@ def filter_type_label(filter_type: int) -> str:
 
 
 class MiniEqWindowGraphMixin:
+    def is_dark_appearance(self) -> bool:
+        application = self.get_application()
+        style_manager = application.get_style_manager() if application is not None else None
+        return style_manager_is_dark(style_manager)
+
     def queue_graph_draw(self) -> None:
         self.graph_area.queue_draw()
         if hasattr(self, "graph_response_area"):
@@ -600,6 +606,7 @@ class MiniEqWindowGraphMixin:
             height,
             getattr(self, "graph_background_revision", 0),
             bool(self.analyzer_enabled),
+            self.is_dark_appearance(),
             round(float(self.analyzer_db_floor), 4),
             round(float(getattr(self, "analyzer_display_gain_db", 0.0)), 4),
         )
@@ -626,14 +633,42 @@ class MiniEqWindowGraphMixin:
     ) -> None:
         plot_width = width_f - left - right
         plot_height = height_f - top - bottom
+        dark = self.is_dark_appearance()
 
-        cr.set_source_rgb(0.032, 0.046, 0.064)
+        if dark:
+            canvas_bg = (0.026, 0.039, 0.056)
+            plot_top_color = (0.105, 0.155, 0.225, 0.98)
+            plot_bottom_color = (0.045, 0.070, 0.108, 0.98)
+            major_grid = (0.72, 0.80, 0.88, 0.28)
+            grid = (0.45, 0.52, 0.60, 0.20)
+            vertical_grid = (0.45, 0.52, 0.60, 0.18)
+            axis_label = (0.72, 0.76, 0.80)
+            edge_label = (0.82, 0.85, 0.89)
+            border = (0.85, 0.90, 0.96, 0.14)
+            analyzer_grid = (0.42, 0.78, 0.92)
+            analyzer_label = (0.45, 0.78, 0.86)
+            monitor_label = (0.50, 0.86, 0.98)
+        else:
+            canvas_bg = (0.74, 0.81, 0.88)
+            plot_top_color = (0.95, 0.97, 0.99, 0.98)
+            plot_bottom_color = (0.81, 0.87, 0.93, 0.98)
+            major_grid = (0.18, 0.25, 0.32, 0.34)
+            grid = (0.20, 0.28, 0.36, 0.20)
+            vertical_grid = (0.20, 0.28, 0.36, 0.18)
+            axis_label = (0.18, 0.25, 0.32)
+            edge_label = (0.12, 0.18, 0.24)
+            border = (0.16, 0.23, 0.30, 0.24)
+            analyzer_grid = (0.04, 0.42, 0.58)
+            analyzer_label = (0.02, 0.34, 0.50)
+            monitor_label = (0.02, 0.36, 0.54)
+
+        cr.set_source_rgb(*canvas_bg)
         cr.rectangle(0, 0, width_f, height_f)
         cr.fill()
 
         background = cairo.LinearGradient(0, top, 0, height_f - bottom)
-        background.add_color_stop_rgba(0.0, 0.10, 0.15, 0.22, 0.98)
-        background.add_color_stop_rgba(1.0, 0.05, 0.08, 0.12, 0.98)
+        background.add_color_stop_rgba(0.0, *plot_top_color)
+        background.add_color_stop_rgba(1.0, *plot_bottom_color)
         cr.set_source(background)
         cr.rectangle(left, top, plot_width, plot_height)
         cr.fill()
@@ -644,47 +679,47 @@ class MiniEqWindowGraphMixin:
         for db_value in db_lines:
             y = self.db_to_y(float(db_value), height_f, top, bottom)
             if db_value == 0:
-                cr.set_source_rgba(0.72, 0.80, 0.88, 0.24)
+                cr.set_source_rgba(*major_grid)
                 cr.set_line_width(1.6)
             else:
-                cr.set_source_rgba(0.45, 0.52, 0.60, 0.18)
+                cr.set_source_rgba(*grid)
                 cr.set_line_width(1.0)
             cr.move_to(left, y)
             cr.line_to(width_f - right, y)
             cr.stroke()
-            label = "+0 dB" if db_value == 0 else f"{db_value:+d}"
-            self.draw_text(cr, label, 10, y + 4, (0.72, 0.76, 0.80), 11.5)
+            axis_text = "+0 dB" if db_value == 0 else f"{db_value:+d}"
+            self.draw_text(cr, axis_text, 10, y + 4, axis_label, 11.5)
 
         analyzer_db_lines = [-60, -40, -20, 0]
         for db_value in analyzer_db_lines:
             y = self.analyzer_display_db_to_y(float(db_value), height_f, top, bottom)
-            cr.set_source_rgba(0.42, 0.78, 0.92, 0.10 if db_value != 0 else 0.18)
+            cr.set_source_rgba(*analyzer_grid, 0.10 if db_value != 0 else 0.18)
             cr.set_line_width(1.0)
             cr.move_to(left, y)
             cr.line_to(width_f - right, y)
             cr.stroke()
             label = "0 dBFS" if db_value == 0 else str(db_value)
-            self.draw_text(cr, label, width_f - right + 8, y + 4, (0.45, 0.78, 0.86), 10.5)
+            self.draw_text(cr, label, width_f - right + 8, y + 4, analyzer_label, 10.5)
 
         for freq in freq_lines:
             x = self.frequency_to_x(float(freq), width_f, left, right)
-            cr.set_source_rgba(0.45, 0.52, 0.60, 0.16)
+            cr.set_source_rgba(*vertical_grid)
             cr.set_line_width(1.0)
             cr.move_to(x, top)
             cr.line_to(x, height_f - bottom)
             cr.stroke()
-            label = f"{int(freq / 1000)}k" if freq >= 1000 else str(freq)
-            self.draw_text(cr, label, x - 10, height_f - 10, (0.72, 0.76, 0.80), 11.5)
+            freq_text = f"{int(freq / 1000)}k" if freq >= 1000 else str(freq)
+            self.draw_text(cr, freq_text, x - 10, height_f - 10, axis_label, 11.5)
 
-        cr.set_source_rgba(0.85, 0.90, 0.96, 0.10)
+        cr.set_source_rgba(*border)
         cr.set_line_width(1.0)
         cr.rectangle(left, top, plot_width, plot_height)
         cr.stroke()
 
-        self.draw_text(cr, "20 Hz", left, 18, (0.82, 0.85, 0.89), 11.5)
-        self.draw_text(cr, "20 kHz", width_f - 58, 18, (0.82, 0.85, 0.89), 11.5)
+        self.draw_text(cr, "20 Hz", left, 18, edge_label, 11.5)
+        self.draw_text(cr, "20 kHz", width_f - 58, 18, edge_label, 11.5)
         if self.analyzer_enabled:
-            self.draw_text(cr, "Monitor", left + 10, top + 18, (0.50, 0.86, 0.98), 12.5)
+            self.draw_text(cr, "Monitor", left + 10, top + 18, monitor_label, 12.5)
 
     def graph_cached_response_surface(
         self,
@@ -700,6 +735,7 @@ class MiniEqWindowGraphMixin:
         cache_key = (
             self.graph_layout_key(width_f, height_f),
             getattr(self, "graph_response_revision", 0),
+            self.is_dark_appearance(),
         )
         if getattr(self, "graph_response_surface_key", None) == cache_key:
             return self.graph_response_surface
@@ -722,10 +758,19 @@ class MiniEqWindowGraphMixin:
         top: float,
         bottom: float,
     ) -> None:
+        dark = self.is_dark_appearance()
+        selected_line = (0.54, 0.74, 0.96, 0.18) if dark else (0.03, 0.32, 0.60, 0.24)
+        selected_response = (0.50, 0.80, 0.98) if dark else (0.02, 0.34, 0.62)
+        disabled_response = (0.58, 0.64, 0.72) if dark else (0.34, 0.40, 0.46)
+        selected_point = FOCUS_BLUE_LIGHT if dark else (0.02, 0.30, 0.56)
+        selected_halo = FOCUS_BLUE if dark else (0.02, 0.36, 0.68)
+        effective_point = (0.78, 0.85, 0.93) if dark else (0.18, 0.25, 0.32)
+        inactive_point = (0.44, 0.50, 0.57) if dark else (0.50, 0.56, 0.62)
+        response_amber = RESPONSE_AMBER if dark else (0.82, 0.34, 0.02)
         selected_band = self.controller.bands[self.selected_band_index]
         selected_x = self.frequency_to_x(selected_band.frequency, width_f, left, right)
 
-        cr.set_source_rgba(0.54, 0.74, 0.96, 0.18)
+        cr.set_source_rgba(*selected_line)
         cr.set_line_width(1.4)
         cr.move_to(selected_x, top)
         cr.line_to(selected_x, height_f - bottom)
@@ -744,20 +789,20 @@ class MiniEqWindowGraphMixin:
             gradient = cairo.LinearGradient(0, top, 0, height_f - bottom)
             fill_alpha_top = 0.24 if self.controller.eq_enabled else 0.10
             fill_alpha_bottom = 0.02 if self.controller.eq_enabled else 0.01
-            gradient.add_color_stop_rgba(0.0, *RESPONSE_AMBER, fill_alpha_top)
-            gradient.add_color_stop_rgba(1.0, *RESPONSE_AMBER, fill_alpha_bottom)
+            gradient.add_color_stop_rgba(0.0, *response_amber, fill_alpha_top)
+            gradient.add_color_stop_rgba(1.0, *response_amber, fill_alpha_bottom)
             cr.set_source(gradient)
             cr.fill()
 
             if selected_points:
-                cr.set_source_rgba(0.50, 0.80, 0.98, 0.28 if self.controller.eq_enabled else 0.12)
+                cr.set_source_rgba(*selected_response, 0.28 if self.controller.eq_enabled else 0.12)
                 cr.set_line_width(1.4)
                 cr.move_to(selected_points[0][0], selected_points[0][1])
                 for x, y in selected_points[1:]:
                     cr.line_to(x, y)
                 cr.stroke()
 
-            cr.set_source_rgba(*RESPONSE_AMBER, 0.12 if self.controller.eq_enabled else 0.06)
+            cr.set_source_rgba(*response_amber, 0.12 if self.controller.eq_enabled else 0.06)
             cr.set_line_width(6.0)
             cr.new_path()
             cr.move_to(points[0][0], points[0][1])
@@ -766,9 +811,9 @@ class MiniEqWindowGraphMixin:
             cr.stroke()
 
             if self.controller.eq_enabled:
-                cr.set_source_rgb(*RESPONSE_AMBER)
+                cr.set_source_rgb(*response_amber)
             else:
-                cr.set_source_rgb(0.58, 0.64, 0.72)
+                cr.set_source_rgb(*disabled_response)
             cr.set_line_width(2.6)
             cr.new_path()
             cr.move_to(points[0][0], points[0][1])
@@ -791,16 +836,16 @@ class MiniEqWindowGraphMixin:
             selected = index == self.selected_band_index
             effective = band_is_effective(band, solo_active)
             if selected:
-                cr.set_source_rgb(*FOCUS_BLUE_LIGHT)
+                cr.set_source_rgb(*selected_point)
             elif effective:
-                cr.set_source_rgb(0.78, 0.85, 0.93)
+                cr.set_source_rgb(*effective_point)
             else:
-                cr.set_source_rgb(0.44, 0.50, 0.57)
+                cr.set_source_rgb(*inactive_point)
             cr.arc(x, y, 5.8 if selected else (4.2 if effective else 3.6), 0.0, math.tau)
             cr.fill()
 
             if selected:
-                cr.set_source_rgba(*FOCUS_BLUE, 0.24)
+                cr.set_source_rgba(*selected_halo, 0.24)
                 cr.arc(x, y, 12.0, 0.0, math.tau)
                 cr.fill()
 

@@ -11,6 +11,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gdk, Gtk
 
+from .appearance import style_manager_is_dark
 from .core import (
     EQ_GAIN_MAX_DB,
     EQ_GAIN_MIN_DB,
@@ -123,6 +124,12 @@ class EqBandFader(Gtk.DrawingArea):
         click = Gtk.GestureClick()
         click.connect("pressed", self.on_click_pressed)
         self.add_controller(click)
+
+    def is_dark(self) -> bool:
+        root = self.get_root()
+        application = root.get_application() if root is not None and hasattr(root, "get_application") else None
+        style_manager = application.get_style_manager() if application is not None else None
+        return style_manager_is_dark(style_manager)
 
     def set_band_state(
         self,
@@ -280,13 +287,64 @@ class EqBandFader(Gtk.DrawingArea):
         effective = self.active and not self.muted and (not self.solo_active or self.soloed)
         alpha = 1.0 if effective else 0.48
         engaged = self.selected or self.hovered or self.focused or self.dragging_gain
+        dark = self.is_dark()
+        if dark:
+            engaged_fill_rgb = (1.0, 1.0, 1.0)
+            selected_fill_alpha = 0.026
+            hover_fill_alpha = 0.045
+            text_main = (0.82, 0.86, 0.90)
+            text_type_selected = (0.72, 0.78, 0.84)
+            text_type = (0.66, 0.72, 0.78)
+            text_disabled = (0.50, 0.56, 0.62)
+            gain_color_selected = (0.91, 0.95, 0.99)
+            gain_color_normal = (0.90, 0.94, 0.98)
+            gain_color_disabled = (0.62, 0.68, 0.74)
+            track_shadow = (0.02, 0.03, 0.045, 0.42)
+            track_gradient_colors = ((0.20, 0.26, 0.34, 0.82), (0.10, 0.14, 0.20, 0.82))
+            selected_fill_gradient_colors = ((0.56, 0.69, 0.81, 0.56), (0.38, 0.51, 0.64, 0.56))
+            fill_gradient_colors = ((0.58, 0.68, 0.78, 0.52), (0.38, 0.48, 0.60, 0.52))
+            tick_color = (0.82, 0.88, 0.94)
+            knob_shadow = (0.0, 0.0, 0.0, 0.28)
+            knob_selected = (0.54, 0.72, 0.90)
+            knob_normal = (0.70, 0.77, 0.84)
+            knob_border = (0.0, 0.0, 0.0, 0.28)
+            knob_highlight = (1.0, 1.0, 1.0, 0.24)
+            overview_freq = (0.76, 0.81, 0.86)
+            overview_freq_disabled = (0.54, 0.59, 0.64)
+            q_text = (0.60, 0.66, 0.72)
+            q_text_disabled = (0.46, 0.52, 0.58)
+        else:
+            engaged_fill_rgb = (0.0, 0.0, 0.0)
+            selected_fill_alpha = 0.030
+            hover_fill_alpha = 0.045
+            text_main = (0.15, 0.20, 0.25)
+            text_type_selected = (0.18, 0.27, 0.36)
+            text_type = (0.28, 0.35, 0.42)
+            text_disabled = (0.52, 0.58, 0.64)
+            gain_color_selected = (0.12, 0.18, 0.24)
+            gain_color_normal = (0.20, 0.27, 0.34)
+            gain_color_disabled = (0.58, 0.63, 0.68)
+            track_shadow = (0.0, 0.0, 0.0, 0.16)
+            track_gradient_colors = ((0.62, 0.71, 0.80, 0.86), (0.43, 0.54, 0.65, 0.86))
+            selected_fill_gradient_colors = ((0.26, 0.54, 0.78, 0.70), (0.16, 0.38, 0.58, 0.70))
+            fill_gradient_colors = ((0.36, 0.52, 0.66, 0.62), (0.24, 0.38, 0.52, 0.62))
+            tick_color = (0.20, 0.27, 0.34)
+            knob_shadow = (0.0, 0.0, 0.0, 0.18)
+            knob_selected = (0.36, 0.61, 0.84)
+            knob_normal = (0.52, 0.64, 0.75)
+            knob_border = (0.0, 0.0, 0.0, 0.20)
+            knob_highlight = (1.0, 1.0, 1.0, 0.36)
+            overview_freq = (0.20, 0.28, 0.36)
+            overview_freq_disabled = (0.60, 0.65, 0.70)
+            q_text = (0.34, 0.42, 0.50)
+            q_text_disabled = (0.66, 0.70, 0.74)
 
         if engaged:
             rounded_rectangle(cr, 2.0, 2.0, width_f - 4.0, height_f - 4.0, 15.0)
             if self.selected:
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.026 * alpha)
+                cr.set_source_rgba(*engaged_fill_rgb, selected_fill_alpha * alpha)
             else:
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.045 * alpha)
+                cr.set_source_rgba(*engaged_fill_rgb, hover_fill_alpha * alpha)
             cr.fill_preserve()
             border_alpha = 0.30 if self.selected else 0.15
             if self.focused:
@@ -298,25 +356,25 @@ class EqBandFader(Gtk.DrawingArea):
             cr.set_line_width(1.0)
             cr.stroke()
 
-        self.draw_text(cr, str(self.index + 1), center_x, 15.0, 10.0, (0.82, 0.86, 0.90), bold=True)
+        self.draw_text(cr, str(self.index + 1), center_x, 15.0, 10.0, text_main, bold=True)
 
-        type_color = (0.72, 0.78, 0.84) if self.selected else (0.66, 0.72, 0.78)
+        type_color = text_type_selected if self.selected else text_type
         if not self.active:
-            type_color = (0.50, 0.56, 0.62)
+            type_color = text_disabled
         self.draw_text(cr, self.compact_filter_type_label(), center_x, 29.5, 9.0, type_color, bold=True)
 
-        gain_text = f"{self.gain_db:+.1f} dB"
+        gain_label = f"{self.gain_db:+.1f} dB"
         gain_width = 60.0
         rounded_rectangle(cr, center_x - gain_width / 2.0, 35.0, gain_width, 18.0, 8.0)
         if self.selected:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.08 * alpha)
+            cr.set_source_rgba(*engaged_fill_rgb, 0.08 * alpha)
         else:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.07 * alpha)
+            cr.set_source_rgba(*engaged_fill_rgb, 0.07 * alpha)
         cr.fill()
-        gain_color = (0.91, 0.95, 0.99) if self.selected else (0.90, 0.94, 0.98)
+        gain_color = gain_color_selected if self.selected else gain_color_normal
         if not self.active:
-            gain_color = (0.62, 0.68, 0.74)
-        self.draw_text(cr, gain_text, center_x, 48.1, 9.3, gain_color, bold=True)
+            gain_color = gain_color_disabled
+        self.draw_text(cr, gain_label, center_x, 48.1, 9.3, gain_color, bold=True)
 
         track_top, track_bottom = self.track_bounds(height_f)
         track_x = center_x - 3.5
@@ -325,13 +383,13 @@ class EqBandFader(Gtk.DrawingArea):
         zero_y = self.gain_to_y(0.0, track_top, track_bottom)
 
         rounded_rectangle(cr, track_x - 2.0, track_top - 1.0, track_width + 4.0, track_bottom - track_top + 2.0, 6.0)
-        cr.set_source_rgba(0.02, 0.03, 0.045, 0.42 * alpha)
+        cr.set_source_rgba(track_shadow[0], track_shadow[1], track_shadow[2], track_shadow[3] * alpha)
         cr.fill()
 
         rounded_rectangle(cr, track_x, track_top, track_width, track_bottom - track_top, 3.5)
         track_gradient = cairo.LinearGradient(0, track_top, 0, track_bottom)
-        track_gradient.add_color_stop_rgba(0.0, 0.20, 0.26, 0.34, 0.82 * alpha)
-        track_gradient.add_color_stop_rgba(1.0, 0.10, 0.14, 0.20, 0.82 * alpha)
+        track_gradient.add_color_stop_rgba(0.0, *track_gradient_colors[0][:3], track_gradient_colors[0][3] * alpha)
+        track_gradient.add_color_stop_rgba(1.0, *track_gradient_colors[1][:3], track_gradient_colors[1][3] * alpha)
         cr.set_source(track_gradient)
         cr.fill()
 
@@ -342,18 +400,26 @@ class EqBandFader(Gtk.DrawingArea):
         rounded_rectangle(cr, track_x, fill_top, track_width, fill_bottom - fill_top, 4.0)
         fill_gradient = cairo.LinearGradient(0, fill_top, 0, fill_bottom)
         if self.selected or self.dragging_gain:
-            fill_gradient.add_color_stop_rgba(0.0, 0.56, 0.69, 0.81, 0.56 * alpha)
-            fill_gradient.add_color_stop_rgba(1.0, 0.38, 0.51, 0.64, 0.56 * alpha)
+            fill_gradient.add_color_stop_rgba(
+                0.0,
+                *selected_fill_gradient_colors[0][:3],
+                selected_fill_gradient_colors[0][3] * alpha,
+            )
+            fill_gradient.add_color_stop_rgba(
+                1.0,
+                *selected_fill_gradient_colors[1][:3],
+                selected_fill_gradient_colors[1][3] * alpha,
+            )
         else:
-            fill_gradient.add_color_stop_rgba(0.0, 0.58, 0.68, 0.78, 0.52 * alpha)
-            fill_gradient.add_color_stop_rgba(1.0, 0.38, 0.48, 0.60, 0.52 * alpha)
+            fill_gradient.add_color_stop_rgba(0.0, *fill_gradient_colors[0][:3], fill_gradient_colors[0][3] * alpha)
+            fill_gradient.add_color_stop_rgba(1.0, *fill_gradient_colors[1][:3], fill_gradient_colors[1][3] * alpha)
         cr.set_source(fill_gradient)
         cr.fill()
 
         for tick_gain in (-24.0, -12.0, 0.0, 12.0, 24.0):
             tick_y = self.gain_to_y(tick_gain, track_top, track_bottom)
             tick_alpha = 0.32 if tick_gain == 0.0 else 0.14
-            cr.set_source_rgba(0.82, 0.88, 0.94, tick_alpha * alpha)
+            cr.set_source_rgba(*tick_color, tick_alpha * alpha)
             cr.set_line_width(1.15 if tick_gain == 0.0 else 1.0)
             cr.move_to(center_x + 9.0, tick_y)
             cr.line_to(center_x + (20.0 if tick_gain == 0.0 else 14.0), tick_y)
@@ -369,27 +435,27 @@ class EqBandFader(Gtk.DrawingArea):
         knob_y_top = knob_y - (knob_height / 2.0)
 
         rounded_rectangle(cr, knob_x + 1.0, knob_y_top + 2.0, knob_width, knob_height, 5.0)
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.28 * alpha)
+        cr.set_source_rgba(knob_shadow[0], knob_shadow[1], knob_shadow[2], knob_shadow[3] * alpha)
         cr.fill()
 
         rounded_rectangle(cr, knob_x, knob_y_top, knob_width, knob_height, 5.0)
         if self.selected or self.dragging_gain:
-            cr.set_source_rgba(0.54, 0.72, 0.90, 0.98 * alpha)
+            cr.set_source_rgba(*knob_selected, 0.98 * alpha)
         else:
-            cr.set_source_rgba(0.70, 0.77, 0.84, 0.98 * alpha)
+            cr.set_source_rgba(*knob_normal, 0.98 * alpha)
         cr.fill_preserve()
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.28 * alpha)
+        cr.set_source_rgba(knob_border[0], knob_border[1], knob_border[2], knob_border[3] * alpha)
         cr.set_line_width(1.0)
         cr.stroke()
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.24 * alpha)
+        cr.set_source_rgba(knob_highlight[0], knob_highlight[1], knob_highlight[2], knob_highlight[3] * alpha)
         cr.set_line_width(1.0)
         cr.move_to(center_x - 7.0, knob_y)
         cr.line_to(center_x + 7.0, knob_y)
         cr.stroke()
 
-        overview_freq_color = (0.76, 0.81, 0.86) if self.active else (0.54, 0.59, 0.64)
+        overview_freq_color = overview_freq if self.active else overview_freq_disabled
         if self.show_q_in_tile(height_f):
-            q_color = (0.60, 0.66, 0.72) if self.active else (0.46, 0.52, 0.58)
+            q_color = q_text if self.active else q_text_disabled
             self.draw_text(cr, self.selected_frequency_label(), center_x, height_f - 25.0, 9.0, overview_freq_color)
             self.draw_text(cr, self.compact_q_label(), center_x, height_f - 11.0, 8.6, q_color)
         else:

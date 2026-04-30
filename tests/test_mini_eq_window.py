@@ -31,6 +31,15 @@ def test_on_close_request_starts_custom_shutdown_sequence() -> None:
     assert calls == ["begin"]
 
 
+def test_compact_warning_title_keeps_bluetooth_warning_glanceable() -> None:
+    assert (
+        window.compact_warning_title(
+            "Bluetooth output is in headset mode. Switch back to A2DP for full-band music playback."
+        )
+        == "Headset"
+    )
+
+
 def test_begin_close_request_shutdown_restores_routing_before_delayed_quit(monkeypatch) -> None:
     scheduled: list[tuple[int, object]] = []
     application = SimpleNamespace(quit_count=0)

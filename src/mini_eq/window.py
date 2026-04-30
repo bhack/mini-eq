@@ -16,6 +16,12 @@ from .analyzer import (
     ANALYZER_DISPLAY_GAIN_MAX,
     ANALYZER_DISPLAY_GAIN_MIN,
 )
+from .appearance import (
+    apply_appearance_preference,
+    load_appearance_preference,
+    normalize_appearance,
+    save_appearance_preference,
+)
 from .band_fader import EqBandFader
 from .core import (
     APP_NAME,
@@ -50,6 +56,14 @@ TOAST_IGNORED_PREFIXES = (
     "system audio routed",
     "system audio routing disabled",
 )
+COMPACT_WARNING_TITLES = {
+    "Selected output sink is unavailable.": "No Output",
+    "Bluetooth output is in headset mode. Switch back to A2DP for full-band music playback.": "Headset",
+}
+
+
+def compact_warning_title(message: str) -> str:
+    return COMPACT_WARNING_TITLES.get(message, message)
 
 
 class MiniEqWindow(
@@ -61,6 +75,7 @@ class MiniEqWindow(
 ):
     def __init__(self, app: Adw.Application, controller: SystemWideEqController, auto_route: bool) -> None:
         super().__init__(application=app, title=APP_NAME)
+        self.add_css_class("mini-eq-window")
         self.controller = controller
         self.auto_route_on_startup = auto_route
         self.post_present_source_id = 0
@@ -116,9 +131,12 @@ class MiniEqWindow(
         self.headroom_panel: Gtk.Box | None = None
         self.headroom_fix_button: Gtk.Button | None = None
         self.close_finish_source_id = 0
+        self.appearance_preference = load_appearance_preference()
+        self.appearance_action: Gio.SimpleAction | None = None
+        self.appearance_root: Gtk.Widget | None = None
+        self.style_manager = app.get_style_manager()
+        self.style_dark_notify_handler_id = 0
 
-        self.warning_banner = Adw.Banner()
-        self.warning_banner.set_revealed(False)
         self.system_state_label = Gtk.Label(xalign=0.5)
 
         self.output_combo = Gtk.DropDown(model=self.output_sink_model)
@@ -161,7 +179,11 @@ class MiniEqWindow(
         self.controller.set_status_callback(self.set_status)
         self.controller.set_analyzer_levels_callback(self.on_analyzer_levels)
         self.install_css()
+        self.sync_appearance_css_class()
         self.build_window_content(auto_route)
+        self.style_dark_notify_handler_id = self.style_manager.connect(
+            "notify::dark", self.on_style_manager_dark_changed
+        )
         self.controller.set_outputs_changed_callback(self.refresh_output_sinks)
 
     def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
@@ -239,6 +261,9 @@ class MiniEqWindow(
         if self.engine_control_refresh_source_id > 0:
             destroy_glib_source(self.engine_control_refresh_source_id)
             self.engine_control_refresh_source_id = 0
+        if self.style_dark_notify_handler_id > 0:
+            self.style_manager.disconnect(self.style_dark_notify_handler_id)
+            self.style_dark_notify_handler_id = 0
         self.pending_engine_band_indexes.clear()
         self.controller.set_status_callback(None)
         self.controller.set_outputs_changed_callback(None)
@@ -252,6 +277,50 @@ class MiniEqWindow(
         if application is not None:
             application.quit()
         return False
+
+    def queue_theme_sensitive_redraw(self) -> None:
+        self.sync_appearance_css_class()
+        self.invalidate_graph_background_cache()
+        self.invalidate_graph_response_cache()
+        self.queue_graph_draw()
+        self.queue_analyzer_draw(force=True)
+        for fader in self.band_fader_widgets:
+            fader.queue_draw()
+        if self.headroom_meter_area is not None:
+            self.headroom_meter_area.queue_draw()
+
+    def on_style_manager_dark_changed(self, _style_manager, _param: object) -> None:
+        self.queue_theme_sensitive_redraw()
+
+    def sync_appearance_css_class(self) -> None:
+        targets = [self]
+        if self.appearance_root is not None:
+            targets.append(self.appearance_root)
+
+        if self.style_manager.get_dark():
+            for target in targets:
+                target.add_css_class("mini-eq-dark")
+                target.remove_css_class("mini-eq-light")
+        else:
+            for target in targets:
+                target.add_css_class("mini-eq-light")
+                target.remove_css_class("mini-eq-dark")
+
+    def on_appearance_action_state_changed(
+        self,
+        action: Gio.SimpleAction,
+        value: GLib.Variant | None,
+    ) -> None:
+        if value is None:
+            return
+
+        appearance = normalize_appearance(value.get_string())
+        application = self.get_application()
+        style_manager = application.get_style_manager() if application is not None else None
+        self.appearance_preference = apply_appearance_preference(appearance, style_manager)
+        save_appearance_preference(self.appearance_preference)
+        action.set_state(GLib.Variant.new_string(self.appearance_preference))
+        self.queue_theme_sensitive_redraw()
 
     def begin_close_request_shutdown(self) -> None:
         if self.ui_shutting_down or self.close_finish_source_id > 0:
@@ -531,19 +600,11 @@ class MiniEqWindow(
                     kind="safe",
                 )
 
-        self.warning_banner.remove_css_class("warning-banner-alert")
-
-        if warnings:
-            self.warning_banner.set_title("  ".join(warnings))
-            self.warning_banner.add_css_class("warning-banner-alert")
-            self.warning_banner.set_revealed(True)
-        else:
-            self.warning_banner.set_revealed(False)
-
         self.system_state_label.remove_css_class("system-state-live")
         self.system_state_label.remove_css_class("system-state-warning")
         self.system_state_label.remove_css_class("system-state-bypass")
         self.system_state_label.remove_css_class("system-state-idle")
+        self.system_state_label.set_tooltip_text(None)
 
         if not route_enabled:
             self.system_state_label.set_text("Not Applied")
@@ -551,8 +612,13 @@ class MiniEqWindow(
         elif not self.controller.eq_enabled:
             self.system_state_label.set_text("Original")
             self.system_state_label.add_css_class("system-state-bypass")
-        elif warnings or headroom_needs_attention:
-            self.system_state_label.set_text("Check")
+        elif warnings:
+            self.system_state_label.set_text(compact_warning_title(warnings[0]))
+            self.system_state_label.set_tooltip_text("\n".join(warnings))
+            self.system_state_label.add_css_class("system-state-warning")
+        elif headroom_needs_attention:
+            self.system_state_label.set_text("Clipping")
+            self.system_state_label.set_tooltip_text("Lower preamp to avoid clipping.")
             self.system_state_label.add_css_class("system-state-warning")
         elif route_enabled:
             self.system_state_label.set_text("Applied")

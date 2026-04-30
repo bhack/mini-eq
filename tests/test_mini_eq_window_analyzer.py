@@ -228,6 +228,23 @@ def test_analyzer_widget_plot_points_use_plot_local_coordinates() -> None:
     assert spectrum_points[-1][0] == pytest.approx(bars[-1][0] + bars[-1][2])
 
 
+def test_analyzer_palette_uses_darker_monitor_overlay_in_light_mode() -> None:
+    dark_bar, dark_line = analyzer_widget.analyzer_plot_palette(dark=True, enabled=True)
+    light_bar, light_line = analyzer_widget.analyzer_plot_palette(dark=False, enabled=True)
+
+    assert light_bar[2] < dark_bar[2]
+    assert light_line[2] < dark_line[2]
+    assert light_line[3] > dark_line[3]
+
+
+def test_analyzer_palette_uses_lower_alpha_when_disabled() -> None:
+    enabled_bar, enabled_line = analyzer_widget.analyzer_plot_palette(dark=False, enabled=True)
+    disabled_bar, disabled_line = analyzer_widget.analyzer_plot_palette(dark=False, enabled=False)
+
+    assert disabled_bar[3] < enabled_bar[3]
+    assert disabled_line[3] < enabled_line[3]
+
+
 def test_analyzer_level_frames_emit_compact_control_signal() -> None:
     window = AnalyzerSignalWindow()
 

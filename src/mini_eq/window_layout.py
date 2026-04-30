@@ -8,9 +8,10 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gdk, Gio, GObject, Gtk, Pango
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from .analyzer_widget import AnalyzerPlotWidget
+from .appearance import style_manager_is_dark
 from .band_fader import EqBandFader
 from .core import (
     APP_NAME,
@@ -86,6 +87,8 @@ class MiniEqWindowLayoutMixin:
         root.set_margin_end(10)
         root.set_vexpand(True)
         root.set_valign(Gtk.Align.FILL)
+        self.appearance_root = root
+        self.sync_appearance_css_class()
 
         content_clamp = Adw.Clamp()
         content_clamp.set_orientation(Gtk.Orientation.HORIZONTAL)
@@ -133,10 +136,23 @@ class MiniEqWindowLayoutMixin:
 
         add_window_action("import-apo", lambda: self.on_import_apo_clicked(tools_button))
         add_window_action("reset-eq", lambda: self.on_clear_clicked(tools_button))
+        self.appearance_action = Gio.SimpleAction.new_stateful(
+            "appearance",
+            GLib.VariantType.new("s"),
+            GLib.Variant.new_string(self.appearance_preference),
+        )
+        self.appearance_action.connect("change-state", self.on_appearance_action_state_changed)
+        self.add_action(self.appearance_action)
 
         tools_menu = Gio.Menu()
         tools_menu.append("Import Equalizer APO…", "win.import-apo")
         tools_menu.append("Reset EQ", "win.reset-eq")
+
+        appearance_menu = Gio.Menu()
+        appearance_menu.append("System", "win.appearance::system")
+        appearance_menu.append("Light", "win.appearance::light")
+        appearance_menu.append("Dark", "win.appearance::dark")
+        tools_menu.append_submenu("Appearance", appearance_menu)
 
         app_menu = Gio.Menu()
         app_menu.append("Quit", "app.quit")
@@ -151,6 +167,7 @@ class MiniEqWindowLayoutMixin:
         route_label = Gtk.Label(label="System-wide EQ", xalign=0.0)
         route_box.append(route_label)
         self.route_switch.set_tooltip_text("Apply this curve to system audio")
+        self.route_switch.set_valign(Gtk.Align.CENTER)
         set_accessible_label(self.route_switch, "System-wide EQ")
         route_box.append(self.route_switch)
 
@@ -398,6 +415,7 @@ class MiniEqWindowLayoutMixin:
         self.bypass_state_label.set_xalign(0.5)
         compare_panel.append(self.bypass_state_label)
         self.bypass_switch.set_tooltip_text("Compare equalized audio with the original")
+        self.bypass_switch.set_valign(Gtk.Align.CENTER)
         set_accessible_label(self.bypass_switch, "Equalized Audio")
         compare_panel.append(self.bypass_switch)
         system_section.append(compare_panel)
@@ -474,9 +492,6 @@ class MiniEqWindowLayoutMixin:
         analyzer_settings_group.add(freeze_row)
 
         right_column.append(system_section)
-
-        self.warning_banner.add_css_class("warning-banner")
-        right_column.append(self.warning_banner)
 
         graph_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         graph_shell.add_css_class("panel-card")
@@ -1065,12 +1080,20 @@ class MiniEqWindowLayoutMixin:
         def x_for_db(value: float) -> float:
             return width_f * clamp((value + 12.0) / 18.0, 0.0, 1.0)
 
+        application = self.get_application()
+        style_manager = application.get_style_manager() if application is not None else None
+        dark = style_manager_is_dark(style_manager)
+        track_alpha = 0.06 if dark else 0.14
+        inactive_alpha = 0.20 if dark else 0.36
+        zero_rgba = (0.05, 0.07, 0.10, 0.62) if dark else (0.16, 0.18, 0.21, 0.48)
+        marker_rgba = (0.96, 0.98, 1.0, 0.98) if dark else (0.12, 0.15, 0.18, 0.98)
+
         rounded_rect(0.0, track_y, width_f, track_height, radius)
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.06)
+        cr.set_source_rgba(1.0, 1.0, 1.0, track_alpha)
         cr.fill()
 
         if kind == "bypass" or peak is None:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.20)
+            cr.set_source_rgba(1.0, 1.0, 1.0, inactive_alpha)
             cr.set_line_width(1.0)
             cr.move_to(x_for_db(0.0), track_y - 1.0)
             cr.line_to(x_for_db(0.0), track_y + track_height + 1.0)
@@ -1094,14 +1117,14 @@ class MiniEqWindowLayoutMixin:
         cr.restore()
 
         zero_x = x_for_db(0.0)
-        cr.set_source_rgba(0.05, 0.07, 0.10, 0.62)
+        cr.set_source_rgba(*zero_rgba)
         cr.set_line_width(1.0)
         cr.move_to(zero_x, track_y - 1.0)
         cr.line_to(zero_x, track_y + track_height + 1.0)
         cr.stroke()
 
         marker_x = x_for_db(peak)
-        cr.set_source_rgba(0.96, 0.98, 1.0, 0.98)
+        cr.set_source_rgba(*marker_rgba)
         cr.arc(marker_x, track_y + (track_height / 2.0), 3.2, 0.0, 6.2832)
         cr.fill()
 

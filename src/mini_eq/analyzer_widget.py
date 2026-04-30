@@ -19,14 +19,40 @@ from .analyzer import (
     analyzer_bin_center_frequencies,
     analyzer_level_to_display_norm,
 )
+from .appearance import style_manager_is_dark
 from .core import GRAPH_FREQ_MAX, GRAPH_FREQ_MIN, clamp
 
-ANALYZER_BAR_COLOR = (0.33, 0.78, 0.90)
-ANALYZER_LINE_COLOR = (0.58, 0.90, 0.98)
-ANALYZER_BAR_ALPHA = 0.15
-ANALYZER_BAR_ALPHA_INACTIVE = 0.06
-ANALYZER_LINE_ALPHA = 0.32
-ANALYZER_LINE_ALPHA_INACTIVE = 0.14
+ANALYZER_DARK_BAR_COLOR = (0.33, 0.78, 0.90)
+ANALYZER_DARK_LINE_COLOR = (0.58, 0.90, 0.98)
+ANALYZER_DARK_BAR_ALPHA = 0.15
+ANALYZER_DARK_BAR_ALPHA_INACTIVE = 0.06
+ANALYZER_DARK_LINE_ALPHA = 0.32
+ANALYZER_DARK_LINE_ALPHA_INACTIVE = 0.14
+ANALYZER_LIGHT_BAR_COLOR = (0.03, 0.46, 0.60)
+ANALYZER_LIGHT_LINE_COLOR = (0.00, 0.34, 0.50)
+ANALYZER_LIGHT_BAR_ALPHA = 0.17
+ANALYZER_LIGHT_BAR_ALPHA_INACTIVE = 0.07
+ANALYZER_LIGHT_LINE_ALPHA = 0.36
+ANALYZER_LIGHT_LINE_ALPHA_INACTIVE = 0.15
+
+
+def analyzer_plot_palette(
+    *,
+    dark: bool,
+    enabled: bool,
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+    if dark:
+        bar_color = ANALYZER_DARK_BAR_COLOR
+        line_color = ANALYZER_DARK_LINE_COLOR
+        bar_alpha = ANALYZER_DARK_BAR_ALPHA if enabled else ANALYZER_DARK_BAR_ALPHA_INACTIVE
+        line_alpha = ANALYZER_DARK_LINE_ALPHA if enabled else ANALYZER_DARK_LINE_ALPHA_INACTIVE
+    else:
+        bar_color = ANALYZER_LIGHT_BAR_COLOR
+        line_color = ANALYZER_LIGHT_LINE_COLOR
+        bar_alpha = ANALYZER_LIGHT_BAR_ALPHA if enabled else ANALYZER_LIGHT_BAR_ALPHA_INACTIVE
+        line_alpha = ANALYZER_LIGHT_LINE_ALPHA if enabled else ANALYZER_LIGHT_LINE_ALPHA_INACTIVE
+
+    return (*bar_color, bar_alpha), (*line_color, line_alpha)
 
 
 def analyzer_frequency_to_x(frequency: float, width: float, left: float, right: float) -> float:
@@ -167,6 +193,12 @@ class AnalyzerPlotWidget(Gtk.Widget):
         self._display_gain_db = float(display_gain_db)
         self._enabled = bool(enabled)
 
+    def is_dark_appearance(self) -> bool:
+        root = self.get_root()
+        application = root.get_application() if root is not None and hasattr(root, "get_application") else None
+        style_manager = application.get_style_manager() if hasattr(application, "get_style_manager") else None
+        return style_manager_is_dark(style_manager)
+
     def do_measure(
         self,
         orientation: Gtk.Orientation,
@@ -185,16 +217,9 @@ class AnalyzerPlotWidget(Gtk.Widget):
         if width <= 0 or height <= 0 or not any(level > 0.01 for level in self._levels):
             return
 
-        bar_alpha = ANALYZER_BAR_ALPHA if self._enabled else ANALYZER_BAR_ALPHA_INACTIVE
-        line_alpha = ANALYZER_LINE_ALPHA if self._enabled else ANALYZER_LINE_ALPHA_INACTIVE
-        bar_color = Gdk.RGBA(red=ANALYZER_BAR_COLOR[0], green=ANALYZER_BAR_COLOR[1], blue=ANALYZER_BAR_COLOR[2])
-        line_color = Gdk.RGBA(
-            red=ANALYZER_LINE_COLOR[0],
-            green=ANALYZER_LINE_COLOR[1],
-            blue=ANALYZER_LINE_COLOR[2],
-        )
-        bar_color.alpha = bar_alpha
-        line_color.alpha = line_alpha
+        bar_rgba, line_rgba = analyzer_plot_palette(dark=self.is_dark_appearance(), enabled=self._enabled)
+        bar_color = Gdk.RGBA(red=bar_rgba[0], green=bar_rgba[1], blue=bar_rgba[2], alpha=bar_rgba[3])
+        line_color = Gdk.RGBA(red=line_rgba[0], green=line_rgba[1], blue=line_rgba[2], alpha=line_rgba[3])
 
         bars, spectrum_points = analyzer_plot_points(
             self._levels,
