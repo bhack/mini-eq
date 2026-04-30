@@ -29,7 +29,7 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.6/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.7/docs/screenshots/mini-eq.png</image>
       <caption>Main equalizer window</caption>
     </screenshot>
   </screenshots>
@@ -37,6 +37,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.1.7" date="2026-04-30">
+      <description>
+        <ul>
+          <li>Add System, Light, and Dark appearance modes.</li>
+          <li>Improve light-theme readability across the graph, analyzer, faders, and signal controls.</li>
+          <li>Refresh the public screenshot and social preview assets.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.6" date="2026-04-30">
       <description>
         <ul>

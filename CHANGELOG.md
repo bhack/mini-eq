@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7 - 2026-04-30
+
+- Add System, Light, and Dark appearance modes.
+- Improve light-theme readability for the graph, analyzer, faders, and signal controls.
+- Replace the persistent output warning banner with compact Signal state chips.
+- Refresh the public screenshot and social preview assets.
+
 ## 0.1.6 - 2026-04-30
 
 - Improve compact window sizing so the minimum layout uses available vertical space.
