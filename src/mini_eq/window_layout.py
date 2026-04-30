@@ -10,6 +10,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gdk, Gio, GObject, Gtk, Pango
 
+from .analyzer_widget import AnalyzerPlotWidget
 from .band_fader import EqBandFader
 from .core import (
     APP_NAME,
@@ -24,11 +25,20 @@ from .core import (
     MAX_BANDS,
     clamp,
 )
+from .window_graph import GRAPH_PLOT_BOTTOM, GRAPH_PLOT_LEFT, GRAPH_PLOT_RIGHT, GRAPH_PLOT_TOP
 
 ADAPTIVE_NARROW_BREAKPOINT_SP = 1320
 COMPACT_BREAKPOINT_SP = 1080
+DEFAULT_GRAPH_CONTENT_WIDTH = 900
+COMPACT_GRAPH_CONTENT_WIDTH = 760
 DEFAULT_GRAPH_CONTENT_HEIGHT = 196
 COMPACT_GRAPH_CONTENT_HEIGHT = 142
+GRAPH_PLOT_HORIZONTAL_MARGINS = int(GRAPH_PLOT_LEFT + GRAPH_PLOT_RIGHT)
+GRAPH_PLOT_VERTICAL_MARGINS = int(GRAPH_PLOT_TOP + GRAPH_PLOT_BOTTOM)
+DEFAULT_ANALYZER_CONTENT_WIDTH = max(1, DEFAULT_GRAPH_CONTENT_WIDTH - GRAPH_PLOT_HORIZONTAL_MARGINS)
+COMPACT_ANALYZER_CONTENT_WIDTH = max(1, COMPACT_GRAPH_CONTENT_WIDTH - GRAPH_PLOT_HORIZONTAL_MARGINS)
+DEFAULT_ANALYZER_CONTENT_HEIGHT = max(1, DEFAULT_GRAPH_CONTENT_HEIGHT - GRAPH_PLOT_VERTICAL_MARGINS)
+COMPACT_ANALYZER_CONTENT_HEIGHT = max(1, COMPACT_GRAPH_CONTENT_HEIGHT - GRAPH_PLOT_VERTICAL_MARGINS)
 DEFAULT_FADER_SECTION_SPACING = 6
 COMPACT_FADER_SECTION_SPACING = 3
 DEFAULT_FADER_WIDGET_HEIGHT = 182
@@ -477,7 +487,7 @@ class MiniEqWindowLayoutMixin:
         graph_overlay.set_valign(Gtk.Align.FILL)
 
         self.graph_area = Gtk.DrawingArea()
-        self.graph_area.set_content_width(900)
+        self.graph_area.set_content_width(DEFAULT_GRAPH_CONTENT_WIDTH)
         self.graph_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
         self.graph_area.set_hexpand(True)
         self.graph_area.set_vexpand(True)
@@ -491,20 +501,23 @@ class MiniEqWindowLayoutMixin:
         self.graph_area.add_controller(graph_click)
         graph_overlay.set_child(self.graph_area)
 
-        self.analyzer_area = Gtk.DrawingArea()
-        self.analyzer_area.set_content_width(900)
-        self.analyzer_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
+        self.analyzer_area = AnalyzerPlotWidget()
+        self.analyzer_area.set_content_width(DEFAULT_ANALYZER_CONTENT_WIDTH)
+        self.analyzer_area.set_content_height(DEFAULT_ANALYZER_CONTENT_HEIGHT)
         self.analyzer_area.set_hexpand(True)
         self.analyzer_area.set_vexpand(True)
         self.analyzer_area.set_halign(Gtk.Align.FILL)
         self.analyzer_area.set_valign(Gtk.Align.FILL)
+        self.analyzer_area.set_margin_start(int(GRAPH_PLOT_LEFT))
+        self.analyzer_area.set_margin_end(int(GRAPH_PLOT_RIGHT))
+        self.analyzer_area.set_margin_top(int(GRAPH_PLOT_TOP))
+        self.analyzer_area.set_margin_bottom(int(GRAPH_PLOT_BOTTOM))
         self.analyzer_area.set_can_target(False)
         self.analyzer_area.set_accessible_role(Gtk.AccessibleRole.PRESENTATION)
-        self.analyzer_area.set_draw_func(self.on_analyzer_draw)
         graph_overlay.add_overlay(self.analyzer_area)
 
         self.graph_response_area = Gtk.DrawingArea()
-        self.graph_response_area.set_content_width(900)
+        self.graph_response_area.set_content_width(DEFAULT_GRAPH_CONTENT_WIDTH)
         self.graph_response_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
         self.graph_response_area.set_hexpand(True)
         self.graph_response_area.set_vexpand(True)
@@ -711,9 +724,9 @@ class MiniEqWindowLayoutMixin:
         compact_breakpoint.add_setter(workspace, "pin-sidebar", False)
         compact_breakpoint.add_setter(workspace, "show-sidebar", False)
         compact_breakpoint.add_setter(utility_pane_button, "visible", True)
-        compact_breakpoint.add_setter(self.graph_area, "content-width", 760)
-        compact_breakpoint.add_setter(self.analyzer_area, "content-width", 760)
-        compact_breakpoint.add_setter(self.graph_response_area, "content-width", 760)
+        compact_breakpoint.add_setter(self.graph_area, "content-width", COMPACT_GRAPH_CONTENT_WIDTH)
+        compact_breakpoint.add_setter(self.analyzer_area, "content-width", COMPACT_ANALYZER_CONTENT_WIDTH)
+        compact_breakpoint.add_setter(self.graph_response_area, "content-width", COMPACT_GRAPH_CONTENT_WIDTH)
 
         def move_if_needed(child: Gtk.Widget, parent: Gtk.Box) -> None:
             current_parent = child.get_parent()
@@ -731,7 +744,7 @@ class MiniEqWindowLayoutMixin:
             if compact:
                 graph_shell.set_spacing(2)
                 self.graph_area.set_content_height(COMPACT_GRAPH_CONTENT_HEIGHT)
-                self.analyzer_area.set_content_height(COMPACT_GRAPH_CONTENT_HEIGHT)
+                self.analyzer_area.set_content_height(COMPACT_ANALYZER_CONTENT_HEIGHT)
                 self.graph_response_area.set_content_height(COMPACT_GRAPH_CONTENT_HEIGHT)
                 fader_section.set_spacing(COMPACT_FADER_SECTION_SPACING)
                 fader_section.set_vexpand(False)
@@ -771,7 +784,7 @@ class MiniEqWindowLayoutMixin:
 
             graph_shell.set_spacing(6)
             self.graph_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
-            self.analyzer_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
+            self.analyzer_area.set_content_height(DEFAULT_ANALYZER_CONTENT_HEIGHT)
             self.graph_response_area.set_content_height(DEFAULT_GRAPH_CONTENT_HEIGHT)
             fader_section.set_spacing(DEFAULT_FADER_SECTION_SPACING)
             fader_section.set_vexpand(False)

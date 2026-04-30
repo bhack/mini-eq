@@ -7,11 +7,8 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk
 
 from .analyzer import (
-    ANALYZER_BAND_FREQUENCIES,
     ANALYZER_DISPLAY_GAIN_MAX,
     ANALYZER_DISPLAY_GAIN_MIN,
-    analyzer_band_edges,
-    analyzer_bin_center_frequencies,
     analyzer_level_to_display_norm,
 )
 from .core import clamp
@@ -108,9 +105,21 @@ class MiniEqWindowAnalyzerMixin:
         if not force and not self.analyzer_pixels_changed(pixel_heights):
             return
 
-        self.analyzer_pending_pixel_heights = pixel_heights
         self.analyzer_last_redraw_time = now
+        self.sync_analyzer_plot_widget()
         self.analyzer_area.queue_draw()
+
+    def sync_analyzer_plot_widget(self) -> None:
+        if not hasattr(self, "analyzer_area"):
+            return
+
+        set_analyzer_state = getattr(self.analyzer_area, "set_analyzer_state", None)
+        if callable(set_analyzer_state):
+            set_analyzer_state(
+                self.analyzer_levels,
+                display_gain_db=getattr(self, "analyzer_display_gain_db", 0.0),
+                enabled=getattr(self, "analyzer_enabled", False),
+            )
 
     def analyzer_area_is_drawable(self) -> bool:
         if not hasattr(self, "analyzer_area"):
@@ -136,8 +145,7 @@ class MiniEqWindowAnalyzerMixin:
         if width <= 0 or height <= 0:
             return ()
 
-        _width_f, height_f, _left, _right, top, bottom = self.graph_plot_bounds(width, height)
-        usable_height = max(height_f - top - bottom, 1.0)
+        usable_height = max(float(height), 1.0)
         display_gain_db = getattr(self, "analyzer_display_gain_db", 0.0)
         heights: list[float] = []
 
@@ -160,70 +168,6 @@ class MiniEqWindowAnalyzerMixin:
                 return True
 
         return False
-
-    def analyzer_bin_frequencies(self) -> list[float]:
-        if not self.analyzer_levels:
-            return []
-
-        count = len(self.analyzer_levels)
-        if getattr(self, "analyzer_frequency_cache_key", None) == count:
-            return self.analyzer_frequency_cache
-
-        if count == len(ANALYZER_BAND_FREQUENCIES):
-            frequencies = list(ANALYZER_BAND_FREQUENCIES)
-        else:
-            frequencies = list(analyzer_bin_center_frequencies(count))
-        self.analyzer_frequency_cache_key = count
-        self.analyzer_frequency_cache = frequencies
-        return frequencies
-
-    def analyzer_bar_geometry(
-        self,
-        width: float,
-        left: float,
-        right: float,
-        count: int,
-    ) -> list[tuple[float, float, float]]:
-        cache_key = (
-            count,
-            round(float(width), 2),
-            round(float(left), 2),
-            round(float(right), 2),
-        )
-        if getattr(self, "graph_analyzer_geometry_key", None) == cache_key:
-            return self.graph_analyzer_geometry
-
-        plot_right = max(left + 1.0, width - right)
-        if count <= 0:
-            self.graph_analyzer_geometry_key = cache_key
-            self.graph_analyzer_geometry = []
-            return []
-
-        if count == len(ANALYZER_BAND_FREQUENCIES):
-            frequencies = ANALYZER_BAND_FREQUENCIES
-        else:
-            frequencies = analyzer_bin_center_frequencies(count)
-        edges = analyzer_band_edges(frequencies)
-
-        geometry: list[tuple[float, float, float]] = []
-        for index in range(count):
-            raw_x0 = clamp(self.frequency_to_x(edges[index], width, left, right), left, plot_right)
-            raw_x1 = clamp(self.frequency_to_x(edges[index + 1], width, left, right), left, plot_right)
-            center_x = clamp(self.frequency_to_x(frequencies[index], width, left, right), left, plot_right)
-            bucket_width = raw_x1 - raw_x0
-            inner_gap = min(1.5, bucket_width * 0.35) if count > 1 else 0.0
-            x0 = raw_x0 + inner_gap / 2.0
-            x1 = raw_x1 - inner_gap / 2.0
-
-            if x1 <= x0:
-                x0 = clamp(center_x - 0.5, left, max(left, plot_right - 1.0))
-                x1 = clamp(x0 + 1.0, x0 + 1.0, plot_right)
-
-            geometry.append((x0, x1 - x0, center_x))
-
-        self.graph_analyzer_geometry_key = cache_key
-        self.graph_analyzer_geometry = geometry
-        return geometry
 
     def on_analyzer_levels(self, levels: list[float]) -> None:
         if self.ui_shutting_down:

@@ -5,15 +5,9 @@ import pytest
 from tests._mini_eq_imports import import_mini_eq_module
 
 analyzer = import_mini_eq_module("analyzer")
+analyzer_widget = import_mini_eq_module("analyzer_widget")
 window_analyzer = import_mini_eq_module("window_analyzer")
 window_graph = import_mini_eq_module("window_graph")
-
-
-class AnalyzerGeometryWindow(
-    window_analyzer.MiniEqWindowAnalyzerMixin,
-    window_graph.MiniEqWindowGraphMixin,
-):
-    pass
 
 
 class FakeApplication:
@@ -57,6 +51,25 @@ class UnmappedAnalyzerArea:
 class AnalyzerDrawWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
     def __init__(self) -> None:
         self.analyzer_area = UnmappedAnalyzerArea()
+
+
+class AllocatedAnalyzerArea:
+    def __init__(self, width: int, height: int) -> None:
+        self.width = width
+        self.height = height
+
+    def get_allocated_width(self) -> int:
+        return self.width
+
+    def get_allocated_height(self) -> int:
+        return self.height
+
+
+class AnalyzerAllocatedWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
+    def __init__(self, width: int, height: int) -> None:
+        self.analyzer_area = AllocatedAnalyzerArea(width, height)
+        self.analyzer_levels = [0.5, 1.0]
+        self.analyzer_display_gain_db = 0.0
 
 
 class FakeAnalyzerController:
@@ -137,16 +150,14 @@ class AnalyzerToggleWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
 
 
 def test_analyzer_bars_follow_log_frequency_edges() -> None:
-    window = AnalyzerGeometryWindow()
     width = 640.0
     left = 58.0
     right = 52.0
     plot_right = width - right
-    count = len(window_analyzer.ANALYZER_BAND_FREQUENCIES)
-    window.analyzer_levels = [0.0] * count
+    count = len(analyzer.ANALYZER_BAND_FREQUENCIES)
 
-    geometry = window.analyzer_bar_geometry(width, left, right, count)
-    edges = analyzer.analyzer_band_edges(window_analyzer.ANALYZER_BAND_FREQUENCIES)
+    geometry = analyzer_widget.analyzer_bar_geometry(width, left, right, count)
+    edges = analyzer.analyzer_band_edges(analyzer.ANALYZER_BAND_FREQUENCIES)
 
     assert geometry[0][0] > left
     assert geometry[-1][0] + geometry[-1][1] <= plot_right
@@ -155,17 +166,66 @@ def test_analyzer_bars_follow_log_frequency_edges() -> None:
     assert all(left <= center_x <= plot_right for _x0, _bar_width, center_x in geometry)
 
     assert geometry[0][0] == pytest.approx(
-        window.frequency_to_x(edges[0], width, left, right) + 0.75,
+        analyzer_widget.analyzer_frequency_to_x(edges[0], width, left, right) + 0.75,
     )
     for frequency, (_x0, _bar_width, center_x) in zip(
-        window_analyzer.ANALYZER_BAND_FREQUENCIES,
+        analyzer.ANALYZER_BAND_FREQUENCIES,
         geometry,
         strict=True,
     ):
-        assert center_x == pytest.approx(window.frequency_to_x(frequency, width, left, right))
+        assert center_x == pytest.approx(analyzer_widget.analyzer_frequency_to_x(frequency, width, left, right))
 
-    band_5k_index = window_analyzer.ANALYZER_BAND_FREQUENCIES.index(5000.0)
-    assert geometry[band_5k_index][2] == pytest.approx(window.frequency_to_x(5000.0, width, left, right))
+    band_5k_index = analyzer.ANALYZER_BAND_FREQUENCIES.index(5000.0)
+    assert geometry[band_5k_index][2] == pytest.approx(
+        analyzer_widget.analyzer_frequency_to_x(5000.0, width, left, right)
+    )
+
+
+def test_analyzer_plot_geometry_matches_full_graph_coordinates() -> None:
+    full_width = 640.0
+    left = window_graph.GRAPH_PLOT_LEFT
+    right = window_graph.GRAPH_PLOT_RIGHT
+    plot_width = full_width - left - right
+    count = len(analyzer.ANALYZER_BAND_FREQUENCIES)
+
+    full_geometry = analyzer_widget.analyzer_bar_geometry(full_width, left, right, count)
+    plot_geometry = analyzer_widget.analyzer_bar_geometry(plot_width, 0.0, 0.0, count)
+
+    for (full_x, full_bar_width, full_center), (plot_x, plot_bar_width, plot_center) in zip(
+        full_geometry,
+        plot_geometry,
+        strict=True,
+    ):
+        assert plot_x == pytest.approx(full_x - left)
+        assert plot_bar_width == pytest.approx(full_bar_width)
+        assert plot_center == pytest.approx(full_center - left)
+
+
+def test_analyzer_pixel_heights_use_allocated_plot_height() -> None:
+    window = AnalyzerAllocatedWindow(900, 200)
+
+    heights = window.current_analyzer_pixel_heights()
+
+    assert heights[0] == pytest.approx(
+        200.0 * analyzer.analyzer_level_to_display_norm(0.5, window.analyzer_display_gain_db)
+    )
+    assert heights[1] == pytest.approx(
+        200.0 * analyzer.analyzer_level_to_display_norm(1.0, window.analyzer_display_gain_db)
+    )
+
+
+def test_analyzer_widget_plot_points_use_plot_local_coordinates() -> None:
+    levels = (0.5, 1.0)
+
+    bars, spectrum_points = analyzer_widget.analyzer_plot_points(levels, 320.0, 120.0, 0.0)
+
+    assert len(bars) == len(levels)
+    assert bars[0][0] >= 0.0
+    assert bars[-1][0] + bars[-1][2] <= 320.0
+    assert bars[0][3] == pytest.approx(120.0 * analyzer.analyzer_level_to_display_norm(0.5))
+    assert bars[1][3] == pytest.approx(120.0 * analyzer.analyzer_level_to_display_norm(1.0))
+    assert spectrum_points[0][0] == pytest.approx(bars[0][0])
+    assert spectrum_points[-1][0] == pytest.approx(bars[-1][0] + bars[-1][2])
 
 
 def test_analyzer_level_frames_emit_compact_control_signal() -> None:

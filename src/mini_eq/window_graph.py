@@ -9,7 +9,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import GLib, Gtk
 
-from .analyzer import analyzer_db_to_display_norm, analyzer_level_to_display_norm
+from .analyzer import analyzer_db_to_display_norm
 from .core import (
     FILTER_TYPE_INDEX_BY_VALUE,
     FILTER_TYPE_ORDER,
@@ -33,6 +33,10 @@ ENGINE_CONTROL_REFRESH_INTERVAL_MS = 16
 FOCUS_BLUE = (0.47, 0.72, 1.0)
 FOCUS_BLUE_LIGHT = (0.68, 0.84, 1.0)
 RESPONSE_AMBER = (0.84, 0.46, 0.12)
+GRAPH_PLOT_LEFT = 58.0
+GRAPH_PLOT_RIGHT = 52.0
+GRAPH_PLOT_TOP = 26.0
+GRAPH_PLOT_BOTTOM = 34.0
 
 
 def filter_type_label(filter_type: int) -> str:
@@ -495,11 +499,6 @@ class MiniEqWindowGraphMixin:
         normalized = (clamp(db_value, GRAPH_DB_MIN, GRAPH_DB_MAX) - GRAPH_DB_MIN) / (GRAPH_DB_MAX - GRAPH_DB_MIN)
         return (height - bottom) - (usable * normalized)
 
-    def analyzer_level_to_y(self, level: float, height: float, top: float, bottom: float) -> float:
-        usable = max(height - top - bottom, 1.0)
-        normalized = analyzer_level_to_display_norm(level, getattr(self, "analyzer_display_gain_db", 0.0))
-        return (height - bottom) - (usable * normalized)
-
     def analyzer_display_db_to_y(self, display_db: float, height: float, top: float, bottom: float) -> float:
         usable = max(height - top - bottom, 1.0)
         normalized = analyzer_db_to_display_norm(display_db)
@@ -600,7 +599,7 @@ class MiniEqWindowGraphMixin:
     def graph_plot_bounds(self, width: int, height: int) -> tuple[float, float, float, float, float, float]:
         width_f = float(width)
         height_f = float(height)
-        return width_f, height_f, 58.0, 52.0, 26.0, 34.0
+        return width_f, height_f, GRAPH_PLOT_LEFT, GRAPH_PLOT_RIGHT, GRAPH_PLOT_TOP, GRAPH_PLOT_BOTTOM
 
     def graph_cached_background_surface(
         self,
@@ -730,44 +729,6 @@ class MiniEqWindowGraphMixin:
         self.graph_response_surface = surface
         return surface
 
-    def draw_graph_analyzer(
-        self,
-        cr,
-        width_f: float,
-        height_f: float,
-        left: float,
-        right: float,
-        top: float,
-        bottom: float,
-    ) -> None:
-        if not any(level > 0.01 for level in self.analyzer_levels):
-            return
-
-        geometry = self.analyzer_bar_geometry(width_f, left, right, len(self.analyzer_levels))
-        spectrum_points: list[tuple[float, float]] = []
-        base_y = height_f - bottom
-        usable_height = max(height_f - top - bottom, 1.0)
-        display_gain_db = getattr(self, "analyzer_display_gain_db", 0.0)
-        cr.set_source_rgba(0.33, 0.78, 0.90, 0.15 if self.analyzer_enabled else 0.06)
-        for level, (x0, bar_width, center_x) in zip(self.analyzer_levels, geometry, strict=False):
-            normalized = analyzer_level_to_display_norm(level, display_gain_db)
-            y = base_y - (usable_height * normalized)
-            cr.rectangle(x0, y, bar_width, max(base_y - y, 1.0))
-            if not spectrum_points:
-                spectrum_points.append((x0, y))
-            spectrum_points.append((center_x, y))
-            last_bar_edge = x0 + bar_width
-        cr.fill()
-
-        if spectrum_points:
-            spectrum_points.append((last_bar_edge, spectrum_points[-1][1]))
-            cr.set_source_rgba(0.58, 0.90, 0.98, 0.32 if self.analyzer_enabled else 0.14)
-            cr.set_line_width(1.3)
-            cr.move_to(spectrum_points[0][0], spectrum_points[0][1])
-            for x, y in spectrum_points[1:]:
-                cr.line_to(x, y)
-            cr.stroke()
-
     def draw_graph_response_overlay(
         self,
         cr,
@@ -871,16 +832,6 @@ class MiniEqWindowGraphMixin:
         )
         cr.set_source_surface(background_surface, 0, 0)
         cr.paint()
-
-    def on_analyzer_draw(self, area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
-        if width <= 0 or height <= 0:
-            return
-
-        width_f, height_f, left, right, top, bottom = self.graph_plot_bounds(width, height)
-        pending = getattr(self, "analyzer_pending_pixel_heights", ())
-        self.analyzer_drawn_pixel_heights = pending or self.current_analyzer_pixel_heights()
-        self.analyzer_pending_pixel_heights = ()
-        self.draw_graph_analyzer(cr, width_f, height_f, left, right, top, bottom)
 
     def on_graph_response_draw(self, area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
         if width <= 0 or height <= 0:
