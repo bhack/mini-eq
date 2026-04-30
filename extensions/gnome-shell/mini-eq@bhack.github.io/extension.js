@@ -47,10 +47,17 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._updating = false;
         this._refreshSourceId = 0;
         this._watchId = 0;
+        this._signalId = 0;
+        this._analyzerSignalId = 0;
         this._presetsSignalId = 0;
         this._presetItems = [];
         this._analyzerBars = [];
+        this._analyzerBarHeights = [];
+        this._analyzerBarStyles = [];
         this._panelAnalyzerDimColor = PANEL_ANALYZER_STANDBY_COLOR;
+        this._running = false;
+        this._routed = false;
+        this._eqEnabled = false;
         this.visible = false;
 
         const box = new St.BoxLayout({
@@ -109,6 +116,18 @@ class MiniEqIndicator extends PanelMenu.Button {
                 this._applyState(state);
             });
 
+        this._analyzerSignalId = Gio.DBus.session.signal_subscribe(
+            BUS_NAME,
+            INTERFACE_NAME,
+            'AnalyzerLevelsChanged',
+            OBJECT_PATH,
+            null,
+            Gio.DBusSignalFlags.NONE,
+            (_connection, _sender, _objectPath, _interfaceName, _signalName, parameters) => {
+                const [levels] = parameters.deepUnpack();
+                this._applyAnalyzerLevels(levels);
+            });
+
         this._presetsSignalId = Gio.DBus.session.signal_subscribe(
             BUS_NAME,
             INTERFACE_NAME,
@@ -141,6 +160,11 @@ class MiniEqIndicator extends PanelMenu.Button {
         if (this._signalId) {
             Gio.DBus.session.signal_unsubscribe(this._signalId);
             this._signalId = 0;
+        }
+
+        if (this._analyzerSignalId) {
+            Gio.DBus.session.signal_unsubscribe(this._analyzerSignalId);
+            this._analyzerSignalId = 0;
         }
 
         if (this._presetsSignalId) {
@@ -265,8 +289,10 @@ class MiniEqIndicator extends PanelMenu.Button {
         const eqEnabled = Boolean(unpackValue(state.eq_enabled));
         const routed = Boolean(unpackValue(state.routed));
         const presetName = unpackValue(state.preset_name) || _('Current State');
-        const analyzerLevels = unpackValue(state.analyzer_levels) || [];
 
+        this._running = running;
+        this._routed = routed;
+        this._eqEnabled = eqEnabled;
         this.visible = running;
         this._syncPanelStateStyle(running, routed, eqEnabled);
         this._updating = true;
@@ -277,7 +303,9 @@ class MiniEqIndicator extends PanelMenu.Button {
             this._updating = false;
         }
 
-        this._setAnalyzerLevels(running && routed && eqEnabled ? analyzerLevels : []);
+        if (!running || !routed || !eqEnabled)
+            this._setAnalyzerLevels([]);
+
         this._routingItem.setSensitive(running);
         this._eqItem.setSensitive(running && routed);
         this._presetsItem.setSensitive(running);
@@ -286,6 +314,9 @@ class MiniEqIndicator extends PanelMenu.Button {
     }
 
     _setDisconnectedState() {
+        this._running = false;
+        this._routed = false;
+        this._eqEnabled = false;
         this.visible = false;
         this._syncPanelStateStyle(false, false, false);
         this._updating = true;
@@ -313,6 +344,10 @@ class MiniEqIndicator extends PanelMenu.Button {
         if (routed)
             return _('Original audio selected');
         return _('System-wide EQ is off');
+    }
+
+    _applyAnalyzerLevels(levels) {
+        this._setAnalyzerLevels(this._running && this._routed && this._eqEnabled ? levels : []);
     }
 
     _syncPanelStateStyle(running, routed, eqEnabled) {
@@ -347,6 +382,8 @@ class MiniEqIndicator extends PanelMenu.Button {
             bar.set_size(PANEL_ANALYZER_WIDTH, 2);
             analyzer.add_child(bar);
             this._analyzerBars.push(bar);
+            this._analyzerBarHeights.push(2);
+            this._analyzerBarStyles.push(this._barStyle(false));
         }
 
         return analyzer;
@@ -358,8 +395,17 @@ class MiniEqIndicator extends PanelMenu.Button {
             const normalized = Math.max(0.0, Math.min(1.0, level));
             const active = normalized > 0.02;
             const height = Math.max(2, Math.round(PANEL_ANALYZER_HEIGHT * normalized));
-            this._analyzerBars[index].set_size(PANEL_ANALYZER_WIDTH, height);
-            this._analyzerBars[index].set_style(this._barStyle(active));
+            const style = this._barStyle(active);
+
+            if (this._analyzerBarHeights[index] !== height) {
+                this._analyzerBars[index].set_size(PANEL_ANALYZER_WIDTH, height);
+                this._analyzerBarHeights[index] = height;
+            }
+
+            if (this._analyzerBarStyles[index] !== style) {
+                this._analyzerBars[index].set_style(style);
+                this._analyzerBarStyles[index] = style;
+            }
         }
     }
 

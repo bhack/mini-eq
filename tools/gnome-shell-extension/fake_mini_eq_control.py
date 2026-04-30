@@ -17,6 +17,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 BUS_NAME = "io.github.bhack.mini-eq"
 OBJECT_PATH = "/io/github/bhack/mini_eq/Control"
 INTERFACE_NAME = "io.github.bhack.MiniEq.Control"
+ANALYZER_DB_FLOOR = -100.0
 
 INTROSPECTION_XML = f"""
 <node>
@@ -40,10 +41,42 @@ INTROSPECTION_XML = f"""
     <signal name="StateChanged">
       <arg name="state" type="a{{sv}}"/>
     </signal>
+    <signal name="AnalyzerLevelsChanged">
+      <arg name="levels" type="ad"/>
+    </signal>
     <signal name="PresetsChanged"/>
   </interface>
 </node>
 """
+
+
+def clamp_level(level: float) -> float:
+    return max(0.0, min(1.0, float(level)))
+
+
+def level_to_db(level: float) -> float:
+    return ANALYZER_DB_FLOOR + (clamp_level(level) * abs(ANALYZER_DB_FLOOR))
+
+
+def display_level(level: float) -> float:
+    db_value = level_to_db(level)
+    if db_value < -70.0:
+        deflection = 0.0
+    elif db_value < -60.0:
+        deflection = (db_value + 70.0) * 0.25
+    elif db_value < -50.0:
+        deflection = ((db_value + 60.0) * 0.5) + 2.5
+    elif db_value < -40.0:
+        deflection = ((db_value + 50.0) * 0.75) + 7.5
+    elif db_value < -30.0:
+        deflection = ((db_value + 40.0) * 1.5) + 15.0
+    elif db_value < -20.0:
+        deflection = ((db_value + 30.0) * 2.0) + 30.0
+    elif db_value < 6.0:
+        deflection = ((db_value + 20.0) * 2.5) + 50.0
+    else:
+        deflection = 115.0
+    return max(0.0, min(1.0, deflection / 115.0))
 
 
 class FakeMiniEqControl:
@@ -68,9 +101,6 @@ class FakeMiniEqControl:
             "routed": GLib.Variant("b", self.routed),
             "preset_name": GLib.Variant("s", self.preset_name),
             "output_sink": GLib.Variant("s", "Demo Output"),
-            "analyzer_levels": GLib.Variant(
-                "ad", self.analyzer_levels if self.eq_enabled and self.routed else [0.0] * 10
-            ),
         }
 
     def emit_state_changed(self) -> None:
@@ -83,6 +113,21 @@ class FakeMiniEqControl:
             INTERFACE_NAME,
             "StateChanged",
             GLib.Variant("(a{sv})", (self.state(),)),
+        )
+
+    def emit_analyzer_levels_changed(self) -> None:
+        if self.connection is None:
+            return
+
+        levels = (
+            [display_level(level) for level in self.analyzer_levels] if self.eq_enabled and self.routed else [0.0] * 10
+        )
+        self.connection.emit_signal(
+            None,
+            OBJECT_PATH,
+            INTERFACE_NAME,
+            "AnalyzerLevelsChanged",
+            GLib.Variant("(ad)", (levels,)),
         )
 
     def on_method_call(
@@ -127,7 +172,7 @@ class FakeMiniEqControl:
         self.analyzer_levels = [
             max(0.04, min(1.0, 0.18 + (0.72 * ((math.sin(phase + (index * 0.72)) + 1.0) / 2.0)))) for index in range(10)
         ]
-        self.emit_state_changed()
+        self.emit_analyzer_levels_changed()
         return True
 
     def on_bus_acquired(self, connection: Gio.DBusConnection, _name: str) -> None:

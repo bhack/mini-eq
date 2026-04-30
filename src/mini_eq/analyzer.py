@@ -230,6 +230,11 @@ def analyzer_fft_window(fft_size: int):
     return np.hanning(max(2, int(fft_size))).astype(np.float32)
 
 
+@lru_cache(maxsize=16)
+def analyzer_fft_amplitude_normalizer(fft_size: int) -> float:
+    return max(float(analyzer_fft_window(fft_size).sum()) / 2.0, 1e-12)
+
+
 @lru_cache(maxsize=64)
 def analyzer_fft_band_bin_ranges(
     fft_size: int,
@@ -260,6 +265,30 @@ def analyzer_fft_band_bin_ranges(
     return tuple(ranges)
 
 
+@lru_cache(maxsize=64)
+def analyzer_fft_band_reduce_indexes(
+    fft_size: int,
+    sample_rate: float,
+    center_frequencies: tuple[float, ...] = ANALYZER_BAND_FREQUENCIES,
+):
+    np = require_numpy()
+    ranges = analyzer_fft_band_bin_ranges(fft_size, sample_rate, center_frequencies)
+    if not ranges:
+        indexes = np.array([], dtype=np.intp)
+        offsets = np.array([], dtype=np.intp)
+    else:
+        lengths = np.array([stop - start for start, stop in ranges], dtype=np.intp)
+        offsets = np.empty(len(lengths), dtype=np.intp)
+        offsets[0] = 0
+        if len(lengths) > 1:
+            np.cumsum(lengths[:-1], out=offsets[1:])
+        indexes = np.concatenate([np.arange(start, stop, dtype=np.intp) for start, stop in ranges])
+
+    indexes.setflags(write=False)
+    offsets.setflags(write=False)
+    return indexes, offsets
+
+
 def samples_to_log_band_powers(
     samples: array,
     *,
@@ -276,15 +305,17 @@ def samples_to_log_band_powers(
     window = analyzer_fft_window(size)
     windowed_samples = fft_samples * window
     spectrum = np.fft.rfft(windowed_samples)
-    amplitude_normalizer = max(float(window.sum()) / 2.0, 1e-12)
+    amplitude_normalizer = analyzer_fft_amplitude_normalizer(size)
     bin_powers = (np.abs(spectrum) / amplitude_normalizer) ** 2
     if len(bin_powers) > 0:
         bin_powers[0] = 0.0
 
-    return tuple(
-        float(bin_powers[start:stop].sum())
-        for start, stop in analyzer_fft_band_bin_ranges(size, sample_rate, center_frequencies)
-    )
+    indexes, offsets = analyzer_fft_band_reduce_indexes(size, sample_rate, center_frequencies)
+    if len(indexes) == 0:
+        return ()
+
+    band_powers = np.add.reduceat(bin_powers[indexes], offsets)
+    return tuple(float(power) for power in band_powers)
 
 
 def smooth_power_values(

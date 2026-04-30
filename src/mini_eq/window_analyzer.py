@@ -10,6 +10,7 @@ from .analyzer import (
     ANALYZER_BAND_FREQUENCIES,
     ANALYZER_DISPLAY_GAIN_MAX,
     ANALYZER_DISPLAY_GAIN_MIN,
+    analyzer_band_edges,
     analyzer_bin_center_frequencies,
     analyzer_level_to_display_norm,
 )
@@ -17,10 +18,11 @@ from .core import clamp
 from .glib_utils import destroy_glib_source
 
 ANALYZER_REDRAW_INTERVAL_S = 1.0 / 30.0
+ANALYZER_PREVIEW_INTERVAL_S = 1.0 / 30.0
 ANALYZER_PREVIEW_INTERVAL_MS = 33
 ANALYZER_ATTACK_SMOOTHING_MAX = 0.25
 ANALYZER_PIXEL_REDRAW_THRESHOLD = 1.0
-CONTROL_STATE_EMIT_INTERVAL_SECONDS = 0.10
+CONTROL_ANALYZER_EMIT_INTERVAL_SECONDS = 0.10
 
 
 class MiniEqWindowAnalyzerMixin:
@@ -47,18 +49,55 @@ class MiniEqWindowAnalyzerMixin:
             self.sync_ui_from_state()
             return
 
-        self.analyzer_preview_source_id = GLib.timeout_add(ANALYZER_PREVIEW_INTERVAL_MS, self.on_analyzer_preview_tick)
+        self.start_analyzer_preview_clock()
 
     def stop_analyzer_preview(self, *, stop_backend: bool = True) -> None:
         if stop_backend:
             self.controller.set_analyzer_enabled(False)
 
         if self.analyzer_preview_source_id > 0:
-            destroy_glib_source(self.analyzer_preview_source_id)
+            if getattr(self, "analyzer_preview_uses_tick_callback", False):
+                remove_tick_callback = getattr(self.analyzer_area, "remove_tick_callback", None)
+                if callable(remove_tick_callback):
+                    remove_tick_callback(self.analyzer_preview_source_id)
+            else:
+                destroy_glib_source(self.analyzer_preview_source_id)
             self.analyzer_preview_source_id = 0
+            self.analyzer_preview_uses_tick_callback = False
+
+    def start_analyzer_preview_clock(self) -> None:
+        add_tick_callback = getattr(self.analyzer_area, "add_tick_callback", None)
+        if callable(add_tick_callback):
+            self.analyzer_preview_source_id = add_tick_callback(self.on_analyzer_preview_frame)
+            self.analyzer_preview_uses_tick_callback = True
+            return
+
+        self.analyzer_preview_source_id = GLib.timeout_add(ANALYZER_PREVIEW_INTERVAL_MS, self.on_analyzer_preview_tick)
+        self.analyzer_preview_uses_tick_callback = False
+
+    def on_analyzer_preview_frame(self, _widget: Gtk.Widget, frame_clock: object) -> bool:
+        get_frame_time = getattr(frame_clock, "get_frame_time", None)
+        now = (
+            float(get_frame_time()) / 1_000_000.0
+            if callable(get_frame_time)
+            else GLib.get_monotonic_time() / 1_000_000.0
+        )
+
+        if self.ui_shutting_down:
+            return self.on_analyzer_preview_tick(now)
+
+        last_tick = getattr(self, "analyzer_preview_last_tick_time", 0.0)
+        if now - last_tick < ANALYZER_PREVIEW_INTERVAL_S:
+            return True
+
+        self.analyzer_preview_last_tick_time = now
+        return self.on_analyzer_preview_tick(now)
 
     def queue_analyzer_draw(self, *, force: bool = False) -> None:
         if not hasattr(self, "analyzer_area"):
+            return
+
+        if not self.analyzer_area_is_drawable():
             return
 
         now = GLib.get_monotonic_time() / 1_000_000.0
@@ -72,6 +111,21 @@ class MiniEqWindowAnalyzerMixin:
         self.analyzer_pending_pixel_heights = pixel_heights
         self.analyzer_last_redraw_time = now
         self.analyzer_area.queue_draw()
+
+    def analyzer_area_is_drawable(self) -> bool:
+        if not hasattr(self, "analyzer_area"):
+            return False
+
+        for widget in (self, self.analyzer_area):
+            is_drawable = getattr(widget, "is_drawable", None)
+            if callable(is_drawable) and not is_drawable():
+                return False
+
+            get_mapped = getattr(widget, "get_mapped", None)
+            if callable(get_mapped) and not get_mapped():
+                return False
+
+        return True
 
     def current_analyzer_pixel_heights(self) -> tuple[float, ...]:
         if not hasattr(self, "analyzer_area"):
@@ -140,21 +194,26 @@ class MiniEqWindowAnalyzerMixin:
             return self.graph_analyzer_geometry
 
         plot_right = max(left + 1.0, width - right)
-        plot_width = plot_right - left
         if count <= 0:
             self.graph_analyzer_geometry_key = cache_key
             self.graph_analyzer_geometry = []
             return []
 
-        bucket_width = plot_width / count
-        inner_gap = min(1.5, bucket_width * 0.35) if count > 1 else 0.0
+        if count == len(ANALYZER_BAND_FREQUENCIES):
+            frequencies = ANALYZER_BAND_FREQUENCIES
+        else:
+            frequencies = analyzer_bin_center_frequencies(count)
+        edges = analyzer_band_edges(frequencies)
+
         geometry: list[tuple[float, float, float]] = []
         for index in range(count):
-            raw_x0 = left + (bucket_width * index)
-            raw_x1 = left + (bucket_width * (index + 1))
-            x0 = left if index == 0 else max(left, raw_x0 + inner_gap / 2.0)
-            x1 = plot_right if index == count - 1 else min(plot_right, raw_x1 - inner_gap / 2.0)
-            center_x = (x0 + x1) / 2.0
+            raw_x0 = clamp(self.frequency_to_x(edges[index], width, left, right), left, plot_right)
+            raw_x1 = clamp(self.frequency_to_x(edges[index + 1], width, left, right), left, plot_right)
+            center_x = clamp(self.frequency_to_x(frequencies[index], width, left, right), left, plot_right)
+            bucket_width = raw_x1 - raw_x0
+            inner_gap = min(1.5, bucket_width * 0.35) if count > 1 else 0.0
+            x0 = raw_x0 + inner_gap / 2.0
+            x1 = raw_x1 - inner_gap / 2.0
 
             if x1 <= x0:
                 x0 = clamp(center_x - 0.5, left, max(left, plot_right - 1.0))
@@ -196,19 +255,22 @@ class MiniEqWindowAnalyzerMixin:
         now = GLib.get_monotonic_time() / 1_000_000.0
         self.analyzer_last_frame_time = now
         self.queue_analyzer_draw()
-        self.maybe_emit_control_state_changed(now)
+        self.maybe_emit_control_analyzer_levels_changed(now)
         return False
 
-    def on_analyzer_preview_tick(self) -> bool:
+    def on_analyzer_preview_tick(self, now: float | None = None) -> bool:
         if self.ui_shutting_down:
             self.analyzer_preview_source_id = 0
+            self.analyzer_preview_uses_tick_callback = False
             return False
 
         if not self.analyzer_enabled and not any(level > 0.01 for level in self.analyzer_levels):
             self.analyzer_preview_source_id = 0
+            self.analyzer_preview_uses_tick_callback = False
             return False
 
-        now = GLib.get_monotonic_time() / 1_000_000.0
+        if now is None:
+            now = GLib.get_monotonic_time() / 1_000_000.0
         age = now - getattr(self, "analyzer_last_frame_time", 0.0)
 
         if self.analyzer_enabled and not self.analyzer_frozen and age < 0.18:
@@ -223,7 +285,7 @@ class MiniEqWindowAnalyzerMixin:
 
         if still_visible:
             self.queue_analyzer_draw()
-            self.maybe_emit_control_state_changed(now)
+            self.maybe_emit_control_analyzer_levels_changed(now)
 
         return True
 
@@ -238,6 +300,7 @@ class MiniEqWindowAnalyzerMixin:
             self.stop_analyzer_preview()
             self.analyzer_levels = [0.0] * len(self.analyzer_levels)
             self.queue_analyzer_draw(force=True)
+            self.emit_control_analyzer_levels_changed()
         self.sync_ui_from_state()
         self.emit_control_state_changed()
 
@@ -292,15 +355,20 @@ class MiniEqWindowAnalyzerMixin:
         self.queue_graph_draw()
         self.queue_analyzer_draw(force=True)
 
-    def maybe_emit_control_state_changed(self, now: float) -> None:
-        last_emit = getattr(self, "control_state_last_emit_time", 0.0)
-        if now - last_emit < CONTROL_STATE_EMIT_INTERVAL_SECONDS:
+    def maybe_emit_control_analyzer_levels_changed(self, now: float) -> None:
+        last_emit = getattr(self, "control_analyzer_last_emit_time", 0.0)
+        if now - last_emit < CONTROL_ANALYZER_EMIT_INTERVAL_SECONDS:
             return
 
-        self.control_state_last_emit_time = now
-        self.emit_control_state_changed()
+        self.control_analyzer_last_emit_time = now
+        self.emit_control_analyzer_levels_changed()
 
     def emit_control_state_changed(self) -> None:
         application = self.get_application()
         if hasattr(application, "emit_control_state_changed"):
             application.emit_control_state_changed()
+
+    def emit_control_analyzer_levels_changed(self) -> None:
+        application = self.get_application()
+        if hasattr(application, "emit_control_analyzer_levels_changed"):
+            application.emit_control_analyzer_levels_changed()

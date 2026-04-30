@@ -105,6 +105,10 @@ class MiniEqApplication(Adw.Application):
         if self.dbus_control is not None:
             self.dbus_control.emit_state_changed()
 
+    def emit_control_analyzer_levels_changed(self) -> None:
+        if self.dbus_control is not None:
+            self.dbus_control.emit_analyzer_levels_changed()
+
     def emit_control_presets_changed(self) -> None:
         if self.dbus_control is not None:
             self.dbus_control.emit_presets_changed()

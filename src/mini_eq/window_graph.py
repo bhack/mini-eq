@@ -748,7 +748,7 @@ class MiniEqWindowGraphMixin:
         base_y = height_f - bottom
         usable_height = max(height_f - top - bottom, 1.0)
         display_gain_db = getattr(self, "analyzer_display_gain_db", 0.0)
-        cr.set_source_rgba(0.33, 0.78, 0.90, 0.20 if self.analyzer_enabled else 0.08)
+        cr.set_source_rgba(0.33, 0.78, 0.90, 0.15 if self.analyzer_enabled else 0.06)
         for level, (x0, bar_width, center_x) in zip(self.analyzer_levels, geometry, strict=False):
             normalized = analyzer_level_to_display_norm(level, display_gain_db)
             y = base_y - (usable_height * normalized)
@@ -761,8 +761,8 @@ class MiniEqWindowGraphMixin:
 
         if spectrum_points:
             spectrum_points.append((last_bar_edge, spectrum_points[-1][1]))
-            cr.set_source_rgba(0.58, 0.90, 0.98, 0.42 if self.analyzer_enabled else 0.20)
-            cr.set_line_width(1.6)
+            cr.set_source_rgba(0.58, 0.90, 0.98, 0.32 if self.analyzer_enabled else 0.14)
+            cr.set_line_width(1.3)
             cr.move_to(spectrum_points[0][0], spectrum_points[0][1])
             for x, y in spectrum_points[1:]:
                 cr.line_to(x, y)

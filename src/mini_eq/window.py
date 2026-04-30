@@ -92,11 +92,13 @@ class MiniEqWindow(
         self.analyzer_frozen = False
         self.analyzer_smoothing = 0.40
         self.analyzer_preview_source_id = 0
+        self.analyzer_preview_uses_tick_callback = False
+        self.analyzer_preview_last_tick_time = 0.0
         self.analyzer_levels = [0.0] * ANALYZER_BIN_COUNT
         self.analyzer_db_floor = ANALYZER_DB_FLOOR
         self.analyzer_display_gain_db = ANALYZER_DISPLAY_GAIN_DEFAULT
         self.analyzer_last_redraw_time = 0.0
-        self.control_state_last_emit_time = 0.0
+        self.control_analyzer_last_emit_time = 0.0
         self.curve_metadata_refresh_source_id = 0
         self.engine_control_refresh_source_id = 0
         self.pending_engine_band_indexes: set[int] = set()

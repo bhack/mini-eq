@@ -23,6 +23,10 @@ PACK_SCRIPT = ROOT / "tools" / "pack_gnome_shell_extension.sh"
 EXPECTED_ZIP_NAMES = {"extension.js", "metadata.json", "mini-eq-symbolic.svg"}
 
 DBUS_CALL_RE = re.compile(r"\bthis\._call\(\s*(['\"])(?P<method>[A-Za-z][A-Za-z0-9_]*)\1")
+DBUS_SIGNAL_SUBSCRIBE_RE = re.compile(
+    r"\bsignal_subscribe\([^)]*?(['\"])(?P<signal>[A-Za-z][A-Za-z0-9_]*)\1",
+    re.DOTALL,
+)
 STATE_FIELD_RE = re.compile(r"\bstate\.(?P<field>[A-Za-z_][A-Za-z0-9_]*)\b")
 STABLE_SHELL_VERSION_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
@@ -40,6 +44,11 @@ def extension_called_methods(source: str | None = None) -> set[str]:
     return {match.group("method") for match in DBUS_CALL_RE.finditer(source)}
 
 
+def extension_subscribed_signals(source: str | None = None) -> set[str]:
+    source = extension_source() if source is None else source
+    return {match.group("signal") for match in DBUS_SIGNAL_SUBSCRIBE_RE.finditer(source)}
+
+
 def extension_state_fields(source: str | None = None) -> set[str]:
     source = extension_source() if source is None else source
     return {match.group("field") for match in STATE_FIELD_RE.finditer(source)}
@@ -50,6 +59,13 @@ def dbus_exported_methods() -> set[str]:
 
     node = ElementTree.fromstring(dbus_control.INTROSPECTION_XML)
     return {method.attrib["name"] for method in node.findall("./interface/method")}
+
+
+def dbus_exported_signals() -> set[str]:
+    from mini_eq import dbus_control
+
+    node = ElementTree.fromstring(dbus_control.INTROSPECTION_XML)
+    return {signal.attrib["name"] for signal in node.findall("./interface/signal")}
 
 
 def dbus_exported_state_fields() -> set[str]:
@@ -70,6 +86,13 @@ def check_dbus_contract() -> None:
     if missing_methods:
         raise ExtensionCheckError(
             "GNOME Shell extension calls D-Bus method(s) not exported by Mini EQ: " + ", ".join(sorted(missing_methods))
+        )
+
+    missing_signals = extension_subscribed_signals() - dbus_exported_signals()
+    if missing_signals:
+        raise ExtensionCheckError(
+            "GNOME Shell extension subscribes to D-Bus signal(s) not exported by Mini EQ: "
+            + ", ".join(sorted(missing_signals))
         )
 
     missing_state_fields = extension_state_fields() - dbus_exported_state_fields()

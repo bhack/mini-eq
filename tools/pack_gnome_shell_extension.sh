@@ -7,6 +7,10 @@ extension_dir="$repo_root/extensions/gnome-shell/$uuid"
 out_dir="${1:-$repo_root/dist/gnome-shell-extension}"
 shell_icon_file="mini-eq-symbolic.svg"
 
+if [[ "$out_dir" != /* ]]; then
+    out_dir="$PWD/$out_dir"
+fi
+
 if [[ ! -d "$extension_dir" ]]; then
     echo "Extension source not found: $extension_dir" >&2
     exit 1

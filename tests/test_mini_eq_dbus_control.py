@@ -6,6 +6,7 @@ import pytest
 
 from tests._mini_eq_imports import core, import_mini_eq_module
 
+analyzer = import_mini_eq_module("analyzer")
 dbus_control = import_mini_eq_module("dbus_control")
 
 
@@ -37,6 +38,21 @@ class FakeSwitch:
         self.active = active
 
 
+class FakeConnection:
+    def __init__(self) -> None:
+        self.signals: list[tuple[str, object | None]] = []
+
+    def emit_signal(
+        self,
+        _destination: str | None,
+        _object_path: str,
+        _interface_name: str,
+        signal_name: str,
+        parameters: object | None,
+    ) -> None:
+        self.signals.append((signal_name, parameters))
+
+
 class FakeWindow:
     def __init__(self, controller: FakeController) -> None:
         self.current_preset_name: str | None = "Flat"
@@ -44,6 +60,7 @@ class FakeWindow:
         self.updating_ui = False
         self.analyzer_enabled = False
         self.analyzer_levels = [0.0] * dbus_control.PANEL_ANALYZER_BINS
+        self.analyzer_display_gain_db = 0.0
         self.controller = controller
         self.bypass_switch = FakeSwitch(controller.eq_enabled)
         self.route_switch = FakeSwitch(controller.routed)
@@ -100,41 +117,79 @@ def test_dbus_control_state_contains_shell_summary() -> None:
         "routed": False,
         "preset_name": "Flat",
         "output_sink": "alsa_output.test",
-        "analyzer_levels": [0.0] * dbus_control.PANEL_ANALYZER_BINS,
     }
 
 
-def test_dbus_control_state_compacts_analyzer_levels_for_shell() -> None:
+def test_dbus_control_compacts_analyzer_levels_for_shell_signal() -> None:
     control, _controller, window = make_control()
     window.analyzer_enabled = True
     window.analyzer_levels = [index / 29.0 for index in range(30)]
 
-    state = {key: value.unpack() for key, value in control.state().items()}
+    levels = control.analyzer_levels()
 
-    assert state["analyzer_levels"] == pytest.approx(
+    assert levels == pytest.approx(
         [
-            2 / 29.0,
-            5 / 29.0,
-            8 / 29.0,
-            11 / 29.0,
-            14 / 29.0,
-            17 / 29.0,
-            20 / 29.0,
-            23 / 29.0,
-            26 / 29.0,
-            1.0,
+            analyzer.analyzer_level_to_display_norm(2 / 29.0),
+            analyzer.analyzer_level_to_display_norm(5 / 29.0),
+            analyzer.analyzer_level_to_display_norm(8 / 29.0),
+            analyzer.analyzer_level_to_display_norm(11 / 29.0),
+            analyzer.analyzer_level_to_display_norm(14 / 29.0),
+            analyzer.analyzer_level_to_display_norm(17 / 29.0),
+            analyzer.analyzer_level_to_display_norm(20 / 29.0),
+            analyzer.analyzer_level_to_display_norm(23 / 29.0),
+            analyzer.analyzer_level_to_display_norm(26 / 29.0),
+            analyzer.analyzer_level_to_display_norm(1.0),
         ]
     )
 
 
-def test_dbus_control_state_hides_analyzer_levels_when_monitor_is_off() -> None:
+def test_dbus_control_applies_display_gain_to_shell_analyzer_levels() -> None:
+    control, _controller, window = make_control()
+    window.analyzer_enabled = True
+    window.analyzer_display_gain_db = 20.0
+    window.analyzer_levels = [analyzer.normalize_spectrum_db(-40.0)] * 30
+
+    levels = control.analyzer_levels()
+
+    assert levels == pytest.approx([analyzer.analyzer_db_to_display_norm(-20.0)] * dbus_control.PANEL_ANALYZER_BINS)
+
+
+def test_dbus_control_hides_analyzer_levels_when_monitor_is_off() -> None:
     control, _controller, window = make_control()
     window.analyzer_enabled = False
     window.analyzer_levels = [1.0] * 30
 
-    state = {key: value.unpack() for key, value in control.state().items()}
+    assert control.analyzer_levels() == [0.0] * dbus_control.PANEL_ANALYZER_BINS
 
-    assert state["analyzer_levels"] == [0.0] * dbus_control.PANEL_ANALYZER_BINS
+
+def test_dbus_control_emits_compact_analyzer_levels_signal() -> None:
+    control, _controller, window = make_control()
+    connection = FakeConnection()
+    control.connection = connection
+    window.analyzer_enabled = True
+    window.analyzer_levels = [index / 29.0 for index in range(30)]
+
+    control.emit_analyzer_levels_changed()
+
+    assert len(connection.signals) == 1
+    signal_name, parameters = connection.signals[0]
+    assert signal_name == "AnalyzerLevelsChanged"
+    assert parameters is not None
+    (levels,) = parameters.unpack()
+    assert levels == pytest.approx(
+        [
+            analyzer.analyzer_level_to_display_norm(2 / 29.0),
+            analyzer.analyzer_level_to_display_norm(5 / 29.0),
+            analyzer.analyzer_level_to_display_norm(8 / 29.0),
+            analyzer.analyzer_level_to_display_norm(11 / 29.0),
+            analyzer.analyzer_level_to_display_norm(14 / 29.0),
+            analyzer.analyzer_level_to_display_norm(17 / 29.0),
+            analyzer.analyzer_level_to_display_norm(20 / 29.0),
+            analyzer.analyzer_level_to_display_norm(23 / 29.0),
+            analyzer.analyzer_level_to_display_norm(26 / 29.0),
+            analyzer.analyzer_level_to_display_norm(1.0),
+        ]
+    )
 
 
 def test_dbus_control_set_eq_enabled_updates_controller_and_window() -> None:
@@ -219,6 +274,7 @@ def test_dbus_introspection_exposes_expected_interface() -> None:
         "PresentWindow",
     }
     assert {signal.name for signal in node_info.interfaces[0].signals} == {
+        "AnalyzerLevelsChanged",
         "StateChanged",
         "PresetsChanged",
     }

@@ -113,6 +113,31 @@ def test_samples_to_log_band_powers_use_fft_log_band_energy() -> None:
     assert bands[loudest_index] > bands[0] * 100.0
 
 
+def test_samples_to_log_band_powers_match_direct_band_sums() -> None:
+    fft_size = analyzer.analyzer_fft_size()
+    samples = array(
+        "f",
+        (
+            math.sin(2.0 * math.pi * 1000.0 * index / analyzer.SAMPLE_RATE)
+            + (0.25 * math.sin(2.0 * math.pi * 2500.0 * index / analyzer.SAMPLE_RATE))
+            for index in range(fft_size)
+        ),
+    )
+
+    np = analyzer.require_numpy()
+    fft_samples = analyzer.samples_to_numpy_window(samples, fft_size)
+    window = analyzer.analyzer_fft_window(fft_size)
+    amplitude_normalizer = max(float(window.sum()) / 2.0, 1e-12)
+    bin_powers = (np.abs(np.fft.rfft(fft_samples * window)) / amplitude_normalizer) ** 2
+    bin_powers[0] = 0.0
+    expected = tuple(
+        float(bin_powers[start:stop].sum())
+        for start, stop in analyzer.analyzer_fft_band_bin_ranges(fft_size, analyzer.SAMPLE_RATE)
+    )
+
+    assert analyzer.samples_to_log_band_powers(samples, fft_size=fft_size) == pytest.approx(expected)
+
+
 def test_samples_to_log_band_db_values_detects_sine_frequency() -> None:
     samples = array(
         "f",
@@ -127,6 +152,22 @@ def test_samples_to_log_band_db_values_detects_sine_frequency() -> None:
 
     assert analyzer.ANALYZER_BAND_FREQUENCIES[loudest_index] == pytest.approx(1000.0)
     assert bands[loudest_index] > bands[0] + 20.0
+
+
+@pytest.mark.parametrize("frequency", [5000.0, 8000.0, 12500.0, 16000.0])
+def test_samples_to_log_band_db_values_detects_high_sine_frequencies(frequency: float) -> None:
+    samples = array(
+        "f",
+        (
+            math.sin(2.0 * math.pi * frequency * index / analyzer.SAMPLE_RATE)
+            for index in range(analyzer.analyzer_fft_size())
+        ),
+    )
+
+    bands = analyzer.samples_to_log_band_db_values(samples, fft_size=analyzer.analyzer_fft_size())
+    loudest_index = max(range(len(bands)), key=lambda index: bands[index])
+
+    assert analyzer.ANALYZER_BAND_FREQUENCIES[loudest_index] == pytest.approx(frequency)
 
 
 def test_analyzer_response_speed_clamps_without_pipeline() -> None:

@@ -4,6 +4,7 @@ from typing import Protocol
 
 from gi.repository import Gio, GLib
 
+from .analyzer import analyzer_level_to_display_norm
 from .core import list_preset_names, sanitize_preset_name
 
 BUS_NAME = "io.github.bhack.mini-eq"
@@ -33,6 +34,9 @@ INTROSPECTION_XML = f"""
     <signal name="StateChanged">
       <arg name="state" type="a{{sv}}"/>
     </signal>
+    <signal name="AnalyzerLevelsChanged">
+      <arg name="levels" type="ad"/>
+    </signal>
     <signal name="PresetsChanged"/>
   </interface>
 </node>
@@ -59,6 +63,7 @@ class WindowProtocol(Protocol):
     updating_ui: bool
     analyzer_enabled: bool
     analyzer_levels: list[float]
+    analyzer_display_gain_db: float
     controller: ControllerProtocol
     bypass_switch: SwitchProtocol
     route_switch: SwitchProtocol
@@ -132,11 +137,13 @@ class MiniEqDbusControl:
                 "s", window.current_preset_name if window and window.current_preset_name else ""
             ),
             "output_sink": GLib.Variant("s", controller.output_sink if controller and controller.output_sink else ""),
-            "analyzer_levels": GLib.Variant("ad", panel_analyzer_levels(window)),
         }
 
     def list_presets(self) -> list[str]:
         return list_preset_names()
+
+    def analyzer_levels(self) -> list[float]:
+        return panel_analyzer_levels(self.app.window)
 
     def emit_state_changed(self) -> None:
         if self.connection is None:
@@ -148,6 +155,18 @@ class MiniEqDbusControl:
             INTERFACE_NAME,
             "StateChanged",
             GLib.Variant("(a{sv})", (self.state(),)),
+        )
+
+    def emit_analyzer_levels_changed(self) -> None:
+        if self.connection is None:
+            return
+
+        self.connection.emit_signal(
+            None,
+            OBJECT_PATH,
+            INTERFACE_NAME,
+            "AnalyzerLevelsChanged",
+            GLib.Variant("(ad)", (self.analyzer_levels(),)),
         )
 
     def emit_presets_changed(self) -> None:
@@ -296,6 +315,7 @@ def panel_analyzer_levels(window: WindowProtocol | None, target_count: int = PAN
     if window is None or not window.analyzer_enabled:
         return [0.0] * target_count
 
+    display_gain_db = float(getattr(window, "analyzer_display_gain_db", 0.0))
     source_levels = [clamp_level(level) for level in window.analyzer_levels]
     if not source_levels:
         return [0.0] * target_count
@@ -307,7 +327,7 @@ def panel_analyzer_levels(window: WindowProtocol | None, target_count: int = PAN
         end = int((index + 1) * source_count / target_count)
         if end <= start:
             end = min(source_count, start + 1)
-        compacted.append(max(source_levels[start:end]))
+        compacted.append(analyzer_level_to_display_norm(max(source_levels[start:end]), display_gain_db))
 
     return compacted
 
