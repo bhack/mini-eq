@@ -411,23 +411,6 @@ class MiniEqWindowGraphMixin:
         self.queue_response_draw()
         self.update_preset_state()
 
-    def on_band_fader_changed(self, scale: Gtk.Scale, index: int) -> None:
-        if self.updating_ui:
-            return
-
-        self.controller.set_band_gain(index, scale.get_value())
-        self.selected_band_index = index
-        self.updating_ui = True
-        try:
-            self.update_quick_fader_strip()
-            self.update_focus_summary()
-        finally:
-            self.updating_ui = False
-
-        self.update_status_summary()
-        self.invalidate_graph_response_cache()
-        self.queue_response_draw()
-
     def on_selected_band_type_changed(self, combo: Gtk.DropDown, _param: object) -> None:
         if self.updating_ui:
             return
@@ -821,7 +804,7 @@ class MiniEqWindowGraphMixin:
                 cr.arc(x, y, 12.0, 0.0, math.tau)
                 cr.fill()
 
-    def on_graph_draw(self, area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
+    def on_graph_draw(self, _area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
         if width <= 0 or height <= 0:
             return
 
@@ -833,7 +816,7 @@ class MiniEqWindowGraphMixin:
         cr.set_source_surface(background_surface, 0, 0)
         cr.paint()
 
-    def on_graph_response_draw(self, area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
+    def on_graph_response_draw(self, _area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
         if width <= 0 or height <= 0:
             return
 

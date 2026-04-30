@@ -12,7 +12,6 @@ from pathlib import Path
 import numpy as np
 
 APP_NAME = "Mini EQ"
-CONTROL_CLIENT_NAME = "Mini EQ Control"
 OUTPUT_CLIENT_NAME = "Mini EQ Output"
 VIRTUAL_SINK_BASE = "mini_eq_sink"
 VIRTUAL_SINK_DESCRIPTION = "Mini-EQ-Sink"
@@ -109,10 +108,6 @@ RE_INVALID_PRESET_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 
 class AudioBackendError(RuntimeError):
-    pass
-
-
-class PipeWireRoutingError(RuntimeError):
     pass
 
 
@@ -289,15 +284,6 @@ def sanitize_preset_name(name: str) -> str:
     return cleaned[:100]
 
 
-def display_user_path(path: Path) -> str:
-    home = str(Path.home())
-    path_text = str(path)
-    if path_text.startswith(home):
-        return f"~{path_text[len(home) :]}"
-
-    return path_text
-
-
 def ensure_json_suffix(path: Path) -> Path:
     if path.suffix.lower() == PRESET_FILE_SUFFIX:
         return path
@@ -374,13 +360,6 @@ def clamp(value: float, lower: float, upper: float) -> float:
 
 def db_to_linear(value_db: float) -> float:
     return math.pow(10.0, value_db / 20.0)
-
-
-def linear_to_db(value_linear: float) -> float:
-    if value_linear <= 0.0:
-        return -120.0
-
-    return 20.0 * math.log10(value_linear)
 
 
 def format_frequency(value: float) -> str:
@@ -651,11 +630,6 @@ def biquad_response_at_frequency(
         return 1.0 + 0.0j
 
     return numerator / denominator
-
-
-def band_response_at_frequency(band: EqBand, sample_rate: float, frequency: float) -> complex:
-    coefficients = band_biquad_coefficients(band, sample_rate)
-    return biquad_response_at_frequency(coefficients, sample_rate, frequency)
 
 
 def total_response_db(bands: list[EqBand], preamp_db: float, sample_rate: float, frequency: float) -> float:

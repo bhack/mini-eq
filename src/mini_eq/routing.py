@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from gi.repository import GLib
 
-from .analyzer import ANALYZER_RESPONSE_DEFAULT, ANALYZER_RESPONSE_MAX, ANALYZER_RESPONSE_MIN, OutputSpectrumAnalyzer
+from .analyzer import ANALYZER_RESPONSE_DEFAULT, OutputSpectrumAnalyzer
 from .core import (
     EQ_FREQUENCY_MAX_HZ,
     EQ_FREQUENCY_MIN_HZ,
@@ -195,11 +195,6 @@ class SystemWideEqController:
             return started
 
         return analyzer.set_enabled(enabled)
-
-    def set_analyzer_response_speed(self, speed: float) -> None:
-        self.analyzer_response_speed = clamp(float(speed), ANALYZER_RESPONSE_MIN, ANALYZER_RESPONSE_MAX)
-        if self.output_analyzer is not None:
-            self.output_analyzer.set_response_speed(self.analyzer_response_speed)
 
     def switch_output_sink(self, sink_name: str, explicit: bool) -> None:
         if not sink_name or sink_name == self.output_sink:

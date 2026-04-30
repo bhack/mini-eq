@@ -13,7 +13,6 @@ def make_node(
     application_name: str | None = None,
 ) -> wp_backend.WirePlumberNode:
     return wp_backend.WirePlumberNode(
-        local_id=bound_id,
         bound_id=bound_id,
         object_serial=str(bound_id + 1000),
         media_class=media_class,
@@ -35,7 +34,6 @@ class FakeWirePlumberBackend:
         self.moves: list[tuple[int, str]] = []
         self.connected = False
         self.closed = False
-        self.object_added_callback = None
         self.disconnected_handlers: list[int] = []
         self.missing_stream_ids: set[int] = set()
 
@@ -61,8 +59,7 @@ class FakeWirePlumberBackend:
     def node_from_proxy(self, node):
         return node
 
-    def connect_object_added(self, callback) -> int:
-        self.object_added_callback = callback
+    def connect_object_added(self, _callback) -> int:
         return 42
 
     def disconnect_node_manager_handler(self, handler_id: int) -> None:

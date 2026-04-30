@@ -44,6 +44,18 @@ Use the repo virtualenv when it exists:
 .venv/bin/python tools/check_gnome_shell_extension.py --no-package
 ```
 
+For periodic cleanup and legacy-code checks, use:
+
+```bash
+.venv/bin/python -m vulture src tests tools --min-confidence 80
+.venv/bin/python -m pytest --dead-fixtures -q
+.venv/bin/python -m pytest --cov=mini_eq --cov-report=term-missing:skip-covered -q
+```
+
+Treat Vulture reports below 80% confidence as review prompts, not automatic
+deletions. GTK virtual methods, signal callbacks, property bindings, and other
+framework entry points often look unused to static analysis.
+
 For release/package checks:
 
 ```bash

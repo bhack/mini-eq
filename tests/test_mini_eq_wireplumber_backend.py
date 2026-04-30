@@ -150,7 +150,6 @@ def test_parse_bool_property_accepts_wireplumber_truthy_values() -> None:
 
 def test_node_sample_rate_uses_audio_rate_and_latency_fallbacks() -> None:
     direct_rate = wp_backend.WirePlumberNode(
-        local_id=1,
         bound_id=39,
         object_serial="67",
         media_class=wp_backend.AUDIO_SINK,
@@ -161,7 +160,6 @@ def test_node_sample_rate_uses_audio_rate_and_latency_fallbacks() -> None:
         properties={"audio.rate": "48000", "node.max-latency": "1024/44100"},
     )
     max_latency_rate = wp_backend.WirePlumberNode(
-        local_id=2,
         bound_id=40,
         object_serial="68",
         media_class=wp_backend.AUDIO_SINK,
@@ -172,7 +170,6 @@ def test_node_sample_rate_uses_audio_rate_and_latency_fallbacks() -> None:
         properties={"node.max-latency": "1024/44100"},
     )
     latency_rate = wp_backend.WirePlumberNode(
-        local_id=3,
         bound_id=41,
         object_serial="69",
         media_class=wp_backend.AUDIO_SINK,
@@ -191,7 +188,6 @@ def test_node_sample_rate_uses_audio_rate_and_latency_fallbacks() -> None:
 
 def test_node_classification_and_display_name() -> None:
     sink = wp_backend.WirePlumberNode(
-        local_id=1,
         bound_id=39,
         object_serial="67",
         media_class=wp_backend.AUDIO_SINK,
@@ -201,7 +197,6 @@ def test_node_classification_and_display_name() -> None:
         node_dont_move=False,
     )
     stream = wp_backend.WirePlumberNode(
-        local_id=2,
         bound_id=126,
         object_serial="300",
         media_class=wp_backend.STREAM_OUTPUT_AUDIO,
@@ -235,7 +230,6 @@ def test_sync_core_removes_timeout_source_after_success() -> None:
 def test_stream_targets_node_matches_target_object_metadata() -> None:
     backend = wp_backend.WirePlumberBackend()
     sink = wp_backend.WirePlumberNode(
-        local_id=1,
         bound_id=39,
         object_serial="67",
         media_class=wp_backend.AUDIO_SINK,
@@ -254,7 +248,6 @@ def test_stream_targets_node_matches_target_object_metadata() -> None:
 def test_stream_targets_node_rejects_different_target_object_metadata() -> None:
     backend = wp_backend.WirePlumberBackend()
     sink = wp_backend.WirePlumberNode(
-        local_id=1,
         bound_id=39,
         object_serial="67",
         media_class=wp_backend.AUDIO_SINK,

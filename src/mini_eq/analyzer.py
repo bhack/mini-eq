@@ -355,12 +355,6 @@ def samples_to_log_band_db_values(
     )
 
 
-def samples_to_levels(samples: array, sample_rate: float = SAMPLE_RATE, fft_size: int | None = None) -> list[float]:
-    return spectrum_db_values_to_levels(
-        samples_to_log_band_db_values(samples, sample_rate=sample_rate, fft_size=fft_size)
-    )
-
-
 def jack_port_name(port) -> str:
     return str(getattr(port, "name", port))
 

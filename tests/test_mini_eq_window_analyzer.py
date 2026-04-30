@@ -237,7 +237,7 @@ def test_analyzer_level_frames_emit_compact_control_signal() -> None:
     assert window.application.state_count == 0
 
 
-def test_analyzer_draw_skips_unmapped_area() -> None:
+def test_analyzer_redraw_skips_unmapped_area() -> None:
     window = AnalyzerDrawWindow()
 
     window.queue_analyzer_draw()

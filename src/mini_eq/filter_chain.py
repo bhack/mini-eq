@@ -36,10 +36,6 @@ def preamp_node_name(side: str) -> str:
     return f"preamp_{side}"
 
 
-def scaled_biquad_coefficients(coefficients: BiquadCoefficients) -> BiquadCoefficients:
-    return coefficients.scaled_for_control_range()
-
-
 def preamp_biquad_coefficients(preamp_db: float, eq_enabled: bool) -> BiquadCoefficients:
     if not eq_enabled:
         return identity_biquad_coefficients()

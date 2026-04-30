@@ -109,9 +109,7 @@ class MiniEqWindow(
         self.graph_selected_response_cache_key = None
         self.graph_selected_response_cache_points: list[tuple[float, float]] = []
         self.analyzer_last_frame_time = time.monotonic()
-        self.adaptive_narrow_breakpoint = None
         self.utility_pane_button: Gtk.ToggleButton | None = None
-        self.utility_pane_column: Gtk.Box | None = None
         self.utility_pane_binding: GObject.Binding | None = None
         self.headroom_panel: Gtk.Box | None = None
         self.headroom_fix_button: Gtk.Button | None = None

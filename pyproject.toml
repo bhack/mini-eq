@@ -51,7 +51,18 @@ Changelog = "https://github.com/bhack/mini-eq/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
-dev = ["build>=1.2", "packaging>=24.2", "Pillow>=10", "pytest>=8", "ruff>=0.12", "twine>=6.2"]
+dev = [
+    "build>=1.2",
+    "coverage>=7.13",
+    "packaging>=24.2",
+    "Pillow>=10",
+    "pytest>=8",
+    "pytest-cov>=7",
+    "pytest-deadfixtures>=2.2",
+    "ruff>=0.12",
+    "twine>=6.2",
+    "vulture>=2.14",
+]
 
 [project.scripts]
 mini-eq = "mini_eq.__main__:console_main"

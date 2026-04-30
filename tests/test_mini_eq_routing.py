@@ -13,7 +13,6 @@ def make_node(
     properties: dict[str, str] | None = None,
 ) -> wp_backend.WirePlumberNode:
     return wp_backend.WirePlumberNode(
-        local_id=bound_id,
         bound_id=bound_id,
         object_serial=str(bound_id + 1000),
         media_class=media_class,

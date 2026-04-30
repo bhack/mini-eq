@@ -83,8 +83,6 @@ class EqBandFader(Gtk.DrawingArea):
         self.solo_active = False
         self.hovered = False
         self.focused = False
-        self.pointer_x = 0.0
-        self.pointer_y = 0.0
         self.drag_start_gain_db = 0.0
         self.dragging_gain = False
 
@@ -106,7 +104,6 @@ class EqBandFader(Gtk.DrawingArea):
 
         motion = Gtk.EventControllerMotion()
         motion.connect("enter", self.on_motion_enter)
-        motion.connect("motion", self.on_motion)
         motion.connect("leave", self.on_motion_leave)
         self.add_controller(motion)
 
@@ -213,10 +210,6 @@ class EqBandFader(Gtk.DrawingArea):
     def gain_to_y(self, gain_db: float, top: float, bottom: float) -> float:
         normalized = (clamp(gain_db, GAIN_MIN_DB, GAIN_MAX_DB) - GAIN_MIN_DB) / GAIN_RANGE_DB
         return bottom - ((bottom - top) * normalized)
-
-    def y_to_gain(self, y: float, top: float, bottom: float) -> float:
-        normalized = clamp((bottom - y) / max(bottom - top, 1.0), 0.0, 1.0)
-        return round(((normalized * GAIN_RANGE_DB) + GAIN_MIN_DB) * 10.0) / 10.0
 
     def track_bounds(self, height: float) -> tuple[float, float]:
         track_top = 56.0
@@ -459,10 +452,8 @@ class EqBandFader(Gtk.DrawingArea):
         if gain != self.gain_db:
             self.gain_changed_callback(self.index, gain)
 
-    def on_drag_begin(self, _gesture: Gtk.GestureDrag, x: float, y: float) -> None:
+    def on_drag_begin(self, _gesture: Gtk.GestureDrag, _x: float, _y: float) -> None:
         self.grab_focus()
-        self.pointer_x = x
-        self.pointer_y = y
         self.drag_start_gain_db = self.gain_db
         self.dragging_gain = False
         self.select_callback(self.index)
@@ -491,10 +482,6 @@ class EqBandFader(Gtk.DrawingArea):
     def on_motion_enter(self, _controller: Gtk.EventControllerMotion, _x: float, _y: float) -> None:
         self.hovered = True
         self.queue_draw()
-
-    def on_motion(self, _controller: Gtk.EventControllerMotion, x: float, y: float) -> None:
-        self.pointer_x = x
-        self.pointer_y = y
 
     def on_motion_leave(self, _controller: Gtk.EventControllerMotion) -> None:
         self.hovered = False

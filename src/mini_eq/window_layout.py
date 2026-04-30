@@ -171,7 +171,6 @@ class MiniEqWindowLayoutMixin:
         workspace.set_sidebar_width_fraction(0.24)
         workspace.set_min_sidebar_width(248.0)
         workspace.set_max_sidebar_width(300.0)
-        self.utility_split_view = workspace
 
         left_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         left_column.set_hexpand(True)
@@ -186,7 +185,6 @@ class MiniEqWindowLayoutMixin:
         right_column.set_margin_start(8)
         right_column.set_margin_end(6)
         right_column.add_css_class("utility-pane-shell")
-        self.utility_pane_column = right_column
 
         workspace.set_content(left_column)
         workspace.set_sidebar(right_column)
@@ -219,7 +217,6 @@ class MiniEqWindowLayoutMixin:
         adaptive_breakpoint = Adw.Breakpoint.new(
             Adw.BreakpointCondition.parse(f"max-width: {ADAPTIVE_NARROW_BREAKPOINT_SP}sp")
         )
-        self.adaptive_narrow_breakpoint = adaptive_breakpoint
         self.add_breakpoint(adaptive_breakpoint)
         adaptive_breakpoint.add_setter(workspace, "collapsed", True)
         adaptive_breakpoint.add_setter(workspace, "pin-sidebar", False)
@@ -644,7 +641,6 @@ class MiniEqWindowLayoutMixin:
         state_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         state_box.add_css_class("band-editor-state")
         state_box.set_valign(Gtk.Align.CENTER)
-        self.band_editor_state_box = state_box
 
         self.selected_band_mute_button = Gtk.ToggleButton(label="M")
         self.selected_band_mute_button.add_css_class("band-editor-toggle")

@@ -40,7 +40,6 @@ class DemoController:
         self.analyzer_enabled = False
         self.route_enabled = False
         self.demo_sink = WirePlumberNode(
-            local_id=1,
             bound_id=101,
             object_serial="101",
             media_class="Audio/Sink",

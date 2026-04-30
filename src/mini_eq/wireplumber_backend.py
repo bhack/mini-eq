@@ -8,7 +8,6 @@ DEFAULT_METADATA_NAME = "default"
 DEFAULT_AUDIO_SINK_KEY = "default.audio.sink"
 DEFAULT_CONFIGURED_AUDIO_SINK_KEY = "default.configured.audio.sink"
 TARGET_OBJECT_KEY = "target.object"
-TARGET_NODE_KEY = "target.node"
 SPA_ID_TYPE = "Spa:Id"
 STREAM_OUTPUT_AUDIO = "Stream/Output/Audio"
 AUDIO_SINK = "Audio/Sink"
@@ -17,7 +16,6 @@ FILTER_CHAIN_MODULE_NAME = "libpipewire-module-filter-chain"
 
 @dataclass(frozen=True)
 class WirePlumberNode:
-    local_id: int
     bound_id: int
     object_serial: str | None
     media_class: str | None
@@ -382,60 +380,13 @@ class WirePlumberBackend:
         target_object, target_type = self.stream_target_object(stream_bound_id)
         return target_object == target.object_serial and target_type in {None, SPA_ID_TYPE}
 
-    def move_stream_to_default_audio_sink(self, stream_bound_id: int) -> None:
-        default_sink = self.defaults().default_audio_sink
-        if not default_sink:
-            raise WirePlumberError("default audio sink is not available")
-
-        self.move_stream_to_target(stream_bound_id, default_sink)
-
     def stream_target_object(self, stream_bound_id: int) -> tuple[str | None, str | None]:
         # WpMetadata reads from a cache. The upstream C API documents that this
         # cache is updated on a later PipeWire round-trip after set(). In Python
         # GI, repeated set()+find() on the same proxy can also expose stale
-        # internal strings. Use wait_for_metadata_value() for write acks.
+        # internal strings. Use set_metadata_and_wait() for write acks.
         value, type_name = self._default_metadata().find(stream_bound_id, TARGET_OBJECT_KEY)
         return value, type_name
-
-    def wait_for_metadata_value(
-        self,
-        subject: int,
-        key: str,
-        expected_value: str,
-        expected_type: str | None = None,
-    ) -> bool:
-        metadata = self._default_metadata()
-        loop = self._GLib.MainLoop()
-        matched = False
-
-        def on_changed(_metadata, changed_subject, changed_key, changed_type, changed_value) -> None:
-            nonlocal matched
-            if changed_subject != subject or changed_key != key:
-                return
-            if changed_value != expected_value:
-                return
-            if expected_type is not None and changed_type != expected_type:
-                return
-
-            matched = True
-            loop.quit()
-
-        def on_timeout() -> bool:
-            loop.quit()
-            return False
-
-        handler_id = self._GObject.Object.connect(metadata, "changed", on_changed)
-        timeout_id = self._GLib.timeout_add(self.timeout_ms, on_timeout)
-
-        try:
-            loop.run()
-        finally:
-            metadata.disconnect(handler_id)
-            source = self._GLib.MainContext.default().find_source_by_id(timeout_id)
-            if source is not None:
-                source.destroy()
-
-        return matched
 
     def set_metadata_and_wait(self, subject: int, key: str, type_name: str | None, value: str | None) -> bool:
         metadata = self._default_metadata()
@@ -541,7 +492,6 @@ class WirePlumberBackend:
     def _node_from_proxy(self, node) -> WirePlumberNode:
         properties = self._properties_dict(node)
         return WirePlumberNode(
-            local_id=int(node.get_id()),
             bound_id=int(node.get_bound_id()),
             object_serial=self._pw_property(node, "object.serial", properties),
             media_class=self._pw_property(node, "media.class", properties),
