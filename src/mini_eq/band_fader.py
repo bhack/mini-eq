@@ -28,6 +28,17 @@ GAIN_COARSE_STEP_DB = 3.0
 GAIN_PAGE_STEP_DB = 3.0
 GAIN_DRAG_FINE_MULTIPLIER = 0.20
 GAIN_DRAG_COARSE_MULTIPLIER = 2.0
+TICK_GAINS = (-24.0, -12.0, 0.0, 12.0, 24.0)
+TICK_ZERO_GAIN = 0.0
+TICK_INNER_OFFSET_PX = 9.0
+TICK_MINOR_OUTER_OFFSET_PX = 14.0
+TICK_ZERO_OUTER_OFFSET_PX = 20.0
+TICK_MINOR_LINE_WIDTH = 1.0
+TICK_ZERO_LINE_WIDTH = 1.15
+DARK_TICK_ZERO_ALPHA = 0.42
+DARK_TICK_MINOR_ALPHA = 0.20
+LIGHT_TICK_ZERO_ALPHA = 0.46
+LIGHT_TICK_MINOR_ALPHA = 0.32
 
 FOCUS_BLUE = (0.47, 0.72, 1.0)
 FOCUS_BLUE_LIGHT = (0.68, 0.84, 1.0)
@@ -304,6 +315,8 @@ class EqBandFader(Gtk.DrawingArea):
             selected_fill_gradient_colors = ((0.56, 0.69, 0.81, 0.56), (0.38, 0.51, 0.64, 0.56))
             fill_gradient_colors = ((0.58, 0.68, 0.78, 0.52), (0.38, 0.48, 0.60, 0.52))
             tick_color = (0.82, 0.88, 0.94)
+            tick_zero_alpha = DARK_TICK_ZERO_ALPHA
+            tick_minor_alpha = DARK_TICK_MINOR_ALPHA
             knob_shadow = (0.0, 0.0, 0.0, 0.28)
             knob_selected = (0.54, 0.72, 0.90)
             knob_normal = (0.70, 0.77, 0.84)
@@ -324,11 +337,13 @@ class EqBandFader(Gtk.DrawingArea):
             gain_color_selected = (0.12, 0.18, 0.24)
             gain_color_normal = (0.20, 0.27, 0.34)
             gain_color_disabled = (0.58, 0.63, 0.68)
-            track_shadow = (0.0, 0.0, 0.0, 0.16)
-            track_gradient_colors = ((0.62, 0.71, 0.80, 0.86), (0.43, 0.54, 0.65, 0.86))
-            selected_fill_gradient_colors = ((0.26, 0.54, 0.78, 0.70), (0.16, 0.38, 0.58, 0.70))
-            fill_gradient_colors = ((0.36, 0.52, 0.66, 0.62), (0.24, 0.38, 0.52, 0.62))
-            tick_color = (0.20, 0.27, 0.34)
+            track_shadow = (0.0, 0.0, 0.0, 0.20)
+            track_gradient_colors = ((0.54, 0.64, 0.74, 0.94), (0.32, 0.43, 0.55, 0.94))
+            selected_fill_gradient_colors = ((0.16, 0.45, 0.72, 0.84), (0.08, 0.30, 0.50, 0.84))
+            fill_gradient_colors = ((0.24, 0.43, 0.60, 0.76), (0.14, 0.28, 0.44, 0.76))
+            tick_color = (0.13, 0.19, 0.26)
+            tick_zero_alpha = LIGHT_TICK_ZERO_ALPHA
+            tick_minor_alpha = LIGHT_TICK_MINOR_ALPHA
             knob_shadow = (0.0, 0.0, 0.0, 0.18)
             knob_selected = (0.36, 0.61, 0.84)
             knob_normal = (0.52, 0.64, 0.75)
@@ -416,17 +431,19 @@ class EqBandFader(Gtk.DrawingArea):
         cr.set_source(fill_gradient)
         cr.fill()
 
-        for tick_gain in (-24.0, -12.0, 0.0, 12.0, 24.0):
+        for tick_gain in TICK_GAINS:
+            is_zero_tick = tick_gain == TICK_ZERO_GAIN
             tick_y = self.gain_to_y(tick_gain, track_top, track_bottom)
-            tick_alpha = 0.32 if tick_gain == 0.0 else 0.14
+            tick_alpha = tick_zero_alpha if is_zero_tick else tick_minor_alpha
             cr.set_source_rgba(*tick_color, tick_alpha * alpha)
-            cr.set_line_width(1.15 if tick_gain == 0.0 else 1.0)
-            cr.move_to(center_x + 9.0, tick_y)
-            cr.line_to(center_x + (20.0 if tick_gain == 0.0 else 14.0), tick_y)
+            cr.set_line_width(TICK_ZERO_LINE_WIDTH if is_zero_tick else TICK_MINOR_LINE_WIDTH)
+            cr.move_to(center_x + TICK_INNER_OFFSET_PX, tick_y)
+            outer_offset = TICK_ZERO_OUTER_OFFSET_PX if is_zero_tick else TICK_MINOR_OUTER_OFFSET_PX
+            cr.line_to(center_x + outer_offset, tick_y)
             cr.stroke()
-            if tick_gain == 0.0:
-                cr.move_to(center_x - 20.0, tick_y)
-                cr.line_to(center_x - 9.0, tick_y)
+            if is_zero_tick:
+                cr.move_to(center_x - TICK_ZERO_OUTER_OFFSET_PX, tick_y)
+                cr.line_to(center_x - TICK_INNER_OFFSET_PX, tick_y)
                 cr.stroke()
 
         knob_width = 26.0 if self.selected or self.dragging_gain else 24.0

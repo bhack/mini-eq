@@ -13,7 +13,7 @@
     --mini-graph-panel-bg: linear-gradient(180deg, rgba(244, 248, 252, 0.99), rgba(226, 236, 246, 0.98));
     --mini-fader-panel-bg: linear-gradient(180deg, rgba(249, 251, 253, 0.99), rgba(235, 241, 247, 0.98));
     --mini-graph-stage-bg: rgba(205, 216, 228, 0.88);
-    --mini-fader-scroller-bg: rgba(36, 48, 61, 0.035);
+    --mini-fader-scroller-bg: rgba(36, 48, 61, 0.055);
     --mini-utility-section-bg: rgba(25, 33, 43, 0.065);
     --mini-success-color: #20783b;
     --mini-purple-color: #5b4aa6;
@@ -435,7 +435,7 @@
 .fader-scroller {
     min-height: 176px;
     border-radius: 16px;
-    border: 1px solid var(--mini-border-subtle);
+    border: 1px solid var(--mini-border-soft);
     background-color: var(--mini-fader-scroller-bg);
 }
 
@@ -446,8 +446,8 @@
 .eq-band-box {
     padding: 4px 4px 5px 4px;
     border-radius: 12px;
-    background-color: alpha(var(--window-fg-color), 0.018);
-    border: 1px solid alpha(var(--window-fg-color), 0.042);
+    background-color: alpha(var(--window-fg-color), 0.028);
+    border: 1px solid alpha(var(--window-fg-color), 0.068);
 }
 
 .eq-band-box-selected {
@@ -456,8 +456,8 @@
 }
 
 .eq-band-box-muted {
-    background-color: alpha(var(--window-fg-color), 0.012);
-    border-color: alpha(var(--window-fg-color), 0.026);
+    background-color: alpha(var(--window-fg-color), 0.018);
+    border-color: alpha(var(--window-fg-color), 0.046);
 }
 
 .band-editor {
