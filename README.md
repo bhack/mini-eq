@@ -1,7 +1,7 @@
 # Mini EQ
 
 [![CI](https://github.com/bhack/mini-eq/actions/workflows/ci.yml/badge.svg)](https://github.com/bhack/mini-eq/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/mini-eq.svg)](https://pypi.org/project/mini-eq/)
+[![PyPI](https://img.shields.io/pypi/v/mini-eq.svg?cacheSeconds=3600)](https://pypi.org/project/mini-eq/)
 [![GitHub release](https://img.shields.io/github/v/release/bhack/mini-eq?sort=semver)](https://github.com/bhack/mini-eq/releases)
 [![License](https://img.shields.io/github/license/bhack/mini-eq.svg)](https://github.com/bhack/mini-eq/blob/main/LICENSE)
 
