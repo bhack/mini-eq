@@ -23,6 +23,8 @@ and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer.
 - Optional spectrum analyzer through the PipeWire JACK compatibility layer.
 - Per-output preset links for automatically using different saved presets with
   headphones, speakers, HDMI, and other outputs.
+- Optional GNOME Shell extension for quick panel access to routing, EQ,
+  analyzer status, presets, and output preset links.
 - Equalizer APO preset import from the UI or `--import-apo`, including
   compatible presets exported by [AutoEq](https://autoeq.app/).
 
@@ -129,6 +131,14 @@ Install the desktop launcher and icon for the current user:
 ```bash
 mini-eq --install-desktop
 ```
+
+## GNOME Shell Extension
+
+Mini EQ also has an optional GNOME Shell extension for quick panel access to
+routing, EQ, analyzer status, presets, and output preset links.
+
+Install it from GNOME Shell Extensions:
+https://extensions.gnome.org/extension/9803/mini-eq-controls/
 
 ## Test
 
