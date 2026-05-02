@@ -203,10 +203,24 @@ curl -fsSL https://pypi.org/pypi/mini-eq/json | jq -r '.info.version'
 git ls-remote --tags origin vX.Y.Z
 ```
 
-Publish the draft GitHub release after reviewing its notes and assets. Then use
-the published release tarball and SHA-256 for the Flathub repository update.
-The source archive SHA-256 used by Flathub should match the published release
-asset digest.
+Publish the draft GitHub release after reviewing its notes and assets. Fetch
+tags after publishing if the workflow created the release tag remotely:
+
+```bash
+git fetch --tags origin
+```
+
+Then run the post-publish verifier:
+
+```bash
+python3 tools/release_post_publish.py X.Y.Z
+```
+
+This confirms that the GitHub release is no longer a draft, asset URLs use the
+stable `vX.Y.Z` tag instead of temporary `untagged-*` draft URLs, the remote tag
+exists, PyPI can see the version, and the downloaded source archive SHA-256
+matches the GitHub release asset digest. Use the printed source archive SHA-256
+for the Flathub repository update.
 
 ## Flathub Handoff
 
@@ -227,3 +241,6 @@ handoff is:
    ```
 
 6. Open a Flathub PR against `flathub/io.github.bhack.mini-eq`.
+7. Wait for the PR status to reach `success / Build ready` before merging. A
+   temporary `pending / Committing build...` status after the build pipeline
+   succeeds is normal while Flathub commits the test build.
