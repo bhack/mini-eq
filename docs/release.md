@@ -23,6 +23,12 @@ version=X.Y.Z
 tag=v$version
 ```
 
+Mini EQ uses SemVer-style `X.Y.Z` versions, but it is still pre-`1.0.0`.
+Use patch releases for fixes and listing/package polish, and minor releases
+for user-facing features or workflow changes. Do not claim strict SemVer
+stability until the app behavior, D-Bus control state, preset data, and Shell
+extension contract are stable enough to document as a public API.
+
 Update every version-bearing file before building artifacts:
 
 - `pyproject.toml`

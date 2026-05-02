@@ -21,6 +21,8 @@ and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer.
 - WirePlumber routing and default-output tracking.
 - PipeWire filter-chain DSP using builtin biquad filters.
 - Optional spectrum analyzer through the PipeWire JACK compatibility layer.
+- Per-output preset links for automatically using different saved presets with
+  headphones, speakers, HDMI, and other outputs.
 - Equalizer APO preset import from the UI or `--import-apo`, including
   compatible presets exported by [AutoEq](https://autoeq.app/).
 

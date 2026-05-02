@@ -93,6 +93,9 @@ class DemoController:
             separators=(",", ":"),
         )
 
+    def default_state_signature(self) -> str:
+        return self.state_signature()
+
     def build_preset_payload(self, preset_name: str | None = None) -> dict[str, object]:
         payload: dict[str, object] = {
             "version": PRESET_VERSION,

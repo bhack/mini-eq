@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -35,10 +36,12 @@ def test_default_preset_storage_uses_standalone_config_namespace(
     config_dir = tmp_path / "config"
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir))
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", None)
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", None)
 
     assert core.app_config_dir() == config_dir / "mini-eq"
     assert core.default_preset_storage_dir() == config_dir / "mini-eq" / "output"
     assert core.preset_storage_dir() == core.default_preset_storage_dir()
+    assert core.output_preset_links_path() == config_dir / "mini-eq" / "output-presets.json"
 
 
 def test_user_config_dir_ignores_relative_xdg_config_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -65,6 +68,69 @@ def test_preset_roundtrip_and_listing_uses_storage_dir(monkeypatch: pytest.Monke
 
     assert core.list_preset_names() == ["Alpha", "beta"]
     assert core.load_mini_eq_preset_file(core.preset_path_for_name("beta")) == beta_payload
+
+
+def test_output_preset_links_roundtrip_and_sanitize_values(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    links_path = tmp_path / "output-presets.json"
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", links_path)
+
+    linked_name = core.set_output_preset_link("alsa_output.speakers", "../Headphones...")
+    core.set_output_preset_link("alsa_output.usb", "  USB  ")
+
+    assert linked_name == "Headphones"
+    assert core.get_output_preset_link("alsa_output.speakers") == "Headphones"
+    assert core.load_output_preset_links() == {
+        "alsa_output.speakers": "Headphones",
+        "alsa_output.usb": "USB",
+    }
+
+    payload = json.loads(links_path.read_text(encoding="utf-8"))
+    assert payload == {
+        "version": core.OUTPUT_PRESET_LINKS_VERSION,
+        "links": {
+            "alsa_output.speakers": "Headphones",
+            "alsa_output.usb": "USB",
+        },
+    }
+
+
+def test_output_preset_links_missing_file_returns_empty(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "missing.json")
+
+    assert core.load_output_preset_links() == {}
+    assert core.get_output_preset_link("alsa_output.speakers") is None
+
+
+def test_output_preset_links_reject_invalid_json(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    links_path = tmp_path / "output-presets.json"
+    links_path.write_text("{broken", encoding="utf-8")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", links_path)
+
+    with pytest.raises(ValueError, match="invalid output preset links"):
+        core.load_output_preset_links()
+
+
+def test_output_preset_links_reject_invalid_links_shape(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    links_path = tmp_path / "output-presets.json"
+    links_path.write_text('{"version": 1, "links": []}', encoding="utf-8")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", links_path)
+
+    with pytest.raises(ValueError, match="valid links object"):
+        core.load_output_preset_links()
+
+
+def test_clear_output_preset_link_keeps_other_outputs(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    core.write_output_preset_links(
+        {
+            "alsa_output.speakers": "Speakers",
+            "alsa_output.usb": "USB",
+        }
+    )
+
+    assert core.clear_output_preset_link("alsa_output.speakers") == "Speakers"
+    assert core.load_output_preset_links() == {"alsa_output.usb": "USB"}
+    assert core.clear_output_preset_link("missing") is None
 
 
 def test_delete_preset_file_removes_only_named_storage_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

@@ -88,6 +88,8 @@ class WindowProtocol(Protocol):
 
     def update_preset_state(self) -> None: ...
 
+    def output_preset_link_name(self) -> str | None: ...
+
 
 class ApplicationProtocol(Protocol):
     controller: ControllerProtocol | None
@@ -129,6 +131,12 @@ class MiniEqDbusControl:
     def state(self) -> dict[str, GLib.Variant]:
         controller = self.app.controller
         window = self.app.window
+        output_preset_name = ""
+        if window is not None:
+            output_preset_link_name = getattr(window, "output_preset_link_name", None)
+            if output_preset_link_name is not None:
+                output_preset_name = output_preset_link_name() or ""
+
         return {
             "running": GLib.Variant("b", controller is not None),
             "eq_enabled": GLib.Variant("b", bool(controller and controller.eq_enabled)),
@@ -137,6 +145,11 @@ class MiniEqDbusControl:
                 "s", window.current_preset_name if window and window.current_preset_name else ""
             ),
             "output_sink": GLib.Variant("s", controller.output_sink if controller and controller.output_sink else ""),
+            "output_preset_name": GLib.Variant("s", output_preset_name),
+            "output_preset_auto_applied": GLib.Variant(
+                "b",
+                bool(window and getattr(window, "output_preset_auto_applied", False)),
+            ),
         }
 
     def list_presets(self) -> list[str]:

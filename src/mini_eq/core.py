@@ -20,6 +20,8 @@ MAX_BANDS = 32
 DEFAULT_ACTIVE_BANDS = 10
 PRESET_VERSION = 1
 PRESET_FILE_SUFFIX = ".json"
+OUTPUT_PRESET_LINKS_VERSION = 1
+OUTPUT_PRESET_LINKS_FILE = "output-presets.json"
 EQ_MODE_APO = 6
 SAMPLE_RATE = 48000.0
 GRAPH_FREQ_MIN = 20.0
@@ -36,6 +38,7 @@ EQ_Q_MAX = 6.0
 EQ_PREAMP_MIN_DB = -24.0
 EQ_PREAMP_MAX_DB = 6.0
 PRESET_STORAGE_DIR: Path | None = None
+OUTPUT_PRESET_LINKS_PATH: Path | None = None
 
 EQ_MODES = {
     "Live PipeWire": 0,
@@ -278,6 +281,10 @@ def preset_storage_dir() -> Path:
     return PRESET_STORAGE_DIR or default_preset_storage_dir()
 
 
+def output_preset_links_path() -> Path:
+    return OUTPUT_PRESET_LINKS_PATH or app_config_dir() / OUTPUT_PRESET_LINKS_FILE
+
+
 def sanitize_preset_name(name: str) -> str:
     cleaned = RE_INVALID_PRESET_NAME.sub(" ", name).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
@@ -322,6 +329,87 @@ def list_preset_names() -> list[str]:
         if path.is_file() and path.suffix.lower() == PRESET_FILE_SUFFIX
     ]
     return sorted(dict.fromkeys(names), key=str.casefold)
+
+
+def normalize_output_preset_links(links: dict[object, object]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+
+    for sink_name, preset_name in links.items():
+        output_key = str(sink_name).strip()
+        linked_preset = sanitize_preset_name(str(preset_name))
+        if output_key and linked_preset:
+            normalized[output_key] = linked_preset
+
+    return normalized
+
+
+def load_output_preset_links() -> dict[str, str]:
+    links_path = output_preset_links_path()
+    if not links_path.exists():
+        return {}
+
+    try:
+        payload = json.loads(links_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid output preset links: {exc.msg}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("output preset links file must contain a JSON object")
+
+    version = int(payload.get("version", 0))
+    if version > OUTPUT_PRESET_LINKS_VERSION:
+        raise ValueError(f"output preset links version {version} is newer than this Mini EQ build")
+
+    links = payload.get("links", {})
+    if not isinstance(links, dict):
+        raise ValueError("output preset links file does not contain a valid links object")
+
+    return normalize_output_preset_links(links)
+
+
+def write_output_preset_links(links: dict[str, str]) -> None:
+    normalized = dict(sorted(normalize_output_preset_links(links).items(), key=lambda item: item[0].casefold()))
+    payload = {
+        "version": OUTPUT_PRESET_LINKS_VERSION,
+        "links": normalized,
+    }
+    links_path = output_preset_links_path()
+    links_path.parent.mkdir(parents=True, exist_ok=True)
+    links_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def get_output_preset_link(sink_name: str | None) -> str | None:
+    output_key = str(sink_name or "").strip()
+    if not output_key:
+        return None
+
+    return load_output_preset_links().get(output_key)
+
+
+def set_output_preset_link(sink_name: str, preset_name: str) -> str:
+    output_key = str(sink_name).strip()
+    if not output_key:
+        raise ValueError("output sink name is empty")
+
+    linked_preset = sanitize_preset_name(preset_name)
+    if not linked_preset:
+        raise ValueError("preset name is empty")
+
+    links = load_output_preset_links()
+    links[output_key] = linked_preset
+    write_output_preset_links(links)
+    return linked_preset
+
+
+def clear_output_preset_link(sink_name: str | None) -> str | None:
+    output_key = str(sink_name or "").strip()
+    if not output_key:
+        return None
+
+    links = load_output_preset_links()
+    removed = links.pop(output_key, None)
+    write_output_preset_links(links)
+    return removed
 
 
 def load_mini_eq_preset_file(path: str | Path) -> dict[str, object]:

@@ -7,7 +7,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gtk, Pango
 
-from .window_utils import set_accessible_label
+from .window_utils import bind_label_to_control, set_accessible_label
 
 
 class MiniEqWindowUtilityPaneMixin:
@@ -35,9 +35,28 @@ class MiniEqWindowUtilityPaneMixin:
 
         preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         preset_row.add_css_class("utility-row")
-        preset_row.append(Gtk.Label(label="Preset", xalign=0.0))
+        preset_label = Gtk.Label(label="Preset", xalign=0.0)
+        bind_label_to_control(preset_label, self.preset_combo)
+        preset_row.append(preset_label)
         preset_row.append(self.preset_combo)
         preset_section.append(preset_row)
+
+        self.output_preset_state_label.set_hexpand(True)
+        self.output_preset_state_label.add_css_class("dim-label")
+        self.output_preset_state_label.set_ellipsize(Pango.EllipsizeMode.END)
+        set_accessible_label(self.output_preset_state_label, "Output Preset Status")
+
+        output_preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        output_preset_row.add_css_class("utility-row")
+        output_preset_label = Gtk.Label(label="Output Preset", xalign=0.0)
+        bind_label_to_control(output_preset_label, self.output_preset_switch)
+        output_preset_row.append(output_preset_label)
+        output_preset_row.append(self.output_preset_state_label)
+        self.output_preset_switch.set_valign(Gtk.Align.CENTER)
+        set_accessible_label(self.output_preset_switch, "Output Preset")
+        self.output_preset_switch.connect("notify::active", self.on_output_preset_switch_changed)
+        output_preset_row.append(self.output_preset_switch)
+        preset_section.append(output_preset_row)
 
         self.preset_save_button = Gtk.Button(label="Save")
         self.preset_save_button.set_can_shrink(True)
@@ -50,6 +69,12 @@ class MiniEqWindowUtilityPaneMixin:
         preset_more_box.set_margin_bottom(8)
         preset_more_box.set_margin_start(8)
         preset_more_box.set_margin_end(8)
+
+        def append_preset_separator() -> None:
+            separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            separator.set_margin_top(3)
+            separator.set_margin_bottom(3)
+            preset_more_box.append(separator)
 
         def connect_preset_action(button: Gtk.Button, callback) -> None:
             def on_clicked(clicked_button: Gtk.Button) -> None:
@@ -65,24 +90,29 @@ class MiniEqWindowUtilityPaneMixin:
 
         self.preset_revert_button = Gtk.Button(label="Revert")
         self.preset_revert_button.add_css_class("popover-action")
-        self.preset_revert_button.set_tooltip_text("Reset to Loaded Preset")
+        self.preset_revert_button.set_tooltip_text("Loaded Preset")
         connect_preset_action(self.preset_revert_button, self.on_preset_revert_clicked)
         preset_more_box.append(self.preset_revert_button)
 
-        self.preset_delete_button = Gtk.Button(label="Delete")
-        self.preset_delete_button.add_css_class("popover-action")
-        connect_preset_action(self.preset_delete_button, self.on_preset_delete_clicked)
-        preset_more_box.append(self.preset_delete_button)
+        append_preset_separator()
 
-        self.preset_import_button = Gtk.Button(label="Import Mini EQ Preset…")
+        self.preset_import_button = Gtk.Button(label="Import Preset…")
         self.preset_import_button.add_css_class("popover-action")
         connect_preset_action(self.preset_import_button, self.on_preset_import_clicked)
         preset_more_box.append(self.preset_import_button)
 
-        self.preset_export_button = Gtk.Button(label="Export Mini EQ Preset…")
+        self.preset_export_button = Gtk.Button(label="Export Preset…")
         self.preset_export_button.add_css_class("popover-action")
         connect_preset_action(self.preset_export_button, self.on_preset_export_clicked)
         preset_more_box.append(self.preset_export_button)
+
+        append_preset_separator()
+
+        self.preset_delete_button = Gtk.Button(label="Delete")
+        self.preset_delete_button.add_css_class("popover-action")
+        self.preset_delete_button.add_css_class("destructive-action")
+        connect_preset_action(self.preset_delete_button, self.on_preset_delete_clicked)
+        preset_more_box.append(self.preset_delete_button)
 
         self.preset_more_popover.set_child(preset_more_box)
         preset_more_button = Gtk.MenuButton(label="More")
@@ -122,6 +152,7 @@ class MiniEqWindowUtilityPaneMixin:
         compare_panel.add_css_class("compare-row")
         compare_title = Gtk.Label(label="Compare", xalign=0.0)
         compare_title.add_css_class("metric-title")
+        bind_label_to_control(compare_title, self.bypass_switch)
         compare_panel.append(compare_title)
         compare_spacer = Gtk.Box()
         compare_spacer.set_hexpand(True)
@@ -133,7 +164,7 @@ class MiniEqWindowUtilityPaneMixin:
         self.bypass_state_label.set_size_request(92, -1)
         self.bypass_state_label.set_xalign(0.5)
         compare_panel.append(self.bypass_state_label)
-        self.bypass_switch.set_tooltip_text("Compare equalized audio with the original")
+        self.bypass_switch.set_tooltip_text("Compare Audio")
         self.bypass_switch.set_valign(Gtk.Align.CENTER)
         set_accessible_label(self.bypass_switch, "Equalized Audio")
         compare_panel.append(self.bypass_switch)
@@ -163,6 +194,7 @@ class MiniEqWindowUtilityPaneMixin:
         monitor_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         monitor_title = Gtk.Label(label="Monitor", xalign=0.0)
         monitor_title.add_css_class("metric-title")
+        bind_label_to_control(monitor_title, self.analyzer_switch)
         monitor_header.append(monitor_title)
         monitor_header_spacer = Gtk.Box()
         monitor_header_spacer.set_hexpand(True)
@@ -195,7 +227,7 @@ class MiniEqWindowUtilityPaneMixin:
         analyzer_settings_group.add(smoothing_row)
 
         display_gain_row = Adw.ActionRow(title="Display Gain")
-        display_gain_row.set_tooltip_text("Visual Gain for Monitor Bars")
+        display_gain_row.set_tooltip_text("Monitor Bar Gain")
         set_accessible_label(self.analyzer_display_gain_scale, "Monitor Display Gain")
         self.analyzer_display_gain_scale.set_size_request(116, -1)
         display_gain_row.add_suffix(self.analyzer_display_gain_scale)

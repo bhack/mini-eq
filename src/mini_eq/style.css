@@ -56,13 +56,13 @@
 
 .toolbar-button {
     padding: 3px 9px;
-    min-height: 30px;
+    min-height: 32px;
 }
 
 .toolbar-icon-button {
     padding: 0;
-    min-width: 32px;
-    min-height: 32px;
+    min-width: 36px;
+    min-height: 36px;
     border-radius: 999px;
 }
 
@@ -73,7 +73,7 @@
 }
 
 .toolbar-select {
-    min-height: 30px;
+    min-height: 32px;
 }
 
 .toolbar-compact-actions {
@@ -287,8 +287,8 @@
 }
 
 .monitor-settings-button {
-    min-width: 28px;
-    min-height: 28px;
+    min-width: 32px;
+    min-height: 32px;
     border-radius: 8px;
 }
 
@@ -302,7 +302,7 @@
 }
 
 .utility-pane-dense .toolbar-button {
-    min-height: 28px;
+    min-height: 32px;
     padding-top: 2px;
     padding-bottom: 2px;
 }
@@ -341,8 +341,8 @@
 }
 
 .utility-pane-dense .monitor-settings-button {
-    min-width: 26px;
-    min-height: 26px;
+    min-width: 32px;
+    min-height: 32px;
 }
 
 .headroom-state.headroom-safe {
@@ -384,8 +384,7 @@
 .metric-title {
     font-size: 9.5pt;
     font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    letter-spacing: 0;
     color: var(--mini-text-dim);
 }
 
@@ -523,20 +522,20 @@
 }
 
 .band-editor-compact-active .band-editor-input {
-    min-height: 26px;
+    min-height: 30px;
 }
 
 .band-editor-inline-compact .band-editor-input {
-    min-height: 24px;
+    min-height: 30px;
 }
 
 .band-editor-input {
-    min-height: 30px;
+    min-height: 32px;
 }
 
 .band-editor-toggle {
-    min-width: 30px;
-    min-height: 30px;
+    min-width: 34px;
+    min-height: 34px;
     padding: 0;
     border-radius: 9px;
     font-weight: 800;
@@ -552,13 +551,13 @@
 }
 
 .band-editor-compact-active .band-editor-toggle {
-    min-width: 26px;
-    min-height: 26px;
+    min-width: 32px;
+    min-height: 32px;
 }
 
 .band-editor-inline-compact .band-editor-toggle {
-    min-width: 26px;
-    min-height: 26px;
+    min-width: 32px;
+    min-height: 32px;
     border-radius: 8px;
 }
 

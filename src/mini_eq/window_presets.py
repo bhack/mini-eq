@@ -13,18 +13,127 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from .core import (
     PRESET_FILE_SUFFIX,
     PRESET_VERSION,
+    clear_output_preset_link,
     delete_preset_file,
     ensure_json_suffix,
     fader_band_count_for_profile,
+    get_output_preset_link,
     list_preset_names,
     load_mini_eq_preset_file,
     preset_path_for_name,
     sanitize_preset_name,
+    set_output_preset_link,
     write_mini_eq_preset_file,
 )
 
 
 class MiniEqWindowPresetMixin:
+    def output_preset_link_name(self) -> str | None:
+        try:
+            return get_output_preset_link(self.controller.output_sink)
+        except Exception:
+            return None
+
+    def output_preset_is_active(self) -> bool:
+        linked_preset = self.output_preset_link_name()
+        return bool(
+            linked_preset
+            and self.current_preset_name == linked_preset
+            and self.controller.state_signature() == self.saved_preset_signature
+        )
+
+    def has_unsaved_curve_changes(self) -> bool:
+        if self.current_preset_name is None:
+            return self.controller.state_signature() != self.default_preset_signature
+
+        return self.controller.state_signature() != self.saved_preset_signature
+
+    def update_output_preset_state(self) -> None:
+        label = getattr(self, "output_preset_state_label", None)
+        if label is None:
+            return
+
+        switch = getattr(self, "output_preset_switch", None)
+        self.output_preset_auto_applied = False
+
+        def sync_output_preset_switch(
+            *,
+            active: bool,
+            sensitive: bool,
+            tooltip: str,
+            status_text: str = "",
+            status_tooltip: str | None = None,
+        ) -> None:
+            label.set_text(status_text)
+            label.set_tooltip_text(status_tooltip or tooltip)
+
+            if switch is None:
+                return
+
+            self.updating_output_preset_switch = True
+            try:
+                switch.set_active(active)
+            finally:
+                self.updating_output_preset_switch = False
+            switch.set_sensitive(sensitive)
+            switch.set_tooltip_text(tooltip)
+
+        try:
+            linked_preset = get_output_preset_link(self.controller.output_sink)
+        except Exception as exc:
+            sync_output_preset_switch(
+                active=False,
+                sensitive=False,
+                tooltip="Output preset links are unavailable",
+                status_text="Unavailable",
+                status_tooltip=str(exc),
+            )
+            return
+
+        has_output = bool(self.controller.output_sink)
+        has_named_preset = self.current_preset_name is not None
+
+        if not linked_preset:
+            if not has_output:
+                tooltip = "Select an Output"
+            elif not has_named_preset:
+                tooltip = "Save a Preset First"
+            else:
+                tooltip = "Use Selected Preset for This Output"
+            sync_output_preset_switch(
+                active=False,
+                sensitive=has_output and has_named_preset,
+                tooltip=tooltip,
+            )
+            return
+
+        self.output_preset_auto_applied = self.output_preset_is_active()
+        if self.output_preset_auto_applied:
+            sync_output_preset_switch(
+                active=True,
+                sensitive=has_output,
+                tooltip="Clear Output Preset",
+            )
+            return
+
+        if has_named_preset:
+            sync_output_preset_switch(
+                active=True,
+                sensitive=has_output,
+                tooltip="Clear Output Preset",
+                status_text="Different",
+                status_tooltip=f"This output currently uses {linked_preset}",
+            )
+            return
+
+        sync_output_preset_switch(
+            active=True,
+            sensitive=has_output,
+            tooltip="Clear Output Preset",
+            status_text="Linked",
+            status_tooltip=f"This output uses {linked_preset}",
+        )
+
     def refresh_preset_actions(self) -> None:
         has_named_preset = self.current_preset_name is not None
         has_preset_changes = has_named_preset and self.controller.state_signature() != self.saved_preset_signature
@@ -34,6 +143,7 @@ class MiniEqWindowPresetMixin:
         self.preset_revert_button.set_sensitive(has_preset_changes)
         self.preset_save_button.set_sensitive(True)
         self.preset_save_as_button.set_sensitive(True)
+        self.update_output_preset_state()
 
     def refresh_preset_list(self) -> None:
         self.preset_names = list_preset_names()
@@ -89,18 +199,58 @@ class MiniEqWindowPresetMixin:
         self.notify_control_presets_changed()
         self.notify_control_state_changed()
 
-    def load_library_preset(self, name: str) -> None:
+    def load_library_preset(self, name: str, *, auto: bool = False) -> None:
         preset_name = sanitize_preset_name(name)
         payload = load_mini_eq_preset_file(preset_path_for_name(preset_name))
         self.controller.apply_preset_payload(payload)
-        self.selected_band_index = 0
+        self.selected_band_index = None
         self.set_visible_band_count(fader_band_count_for_profile(self.controller.bands))
         self.current_preset_name = preset_name
         self.saved_preset_signature = self.controller.state_signature()
         self.refresh_preset_list()
         self.sync_ui_from_state()
-        self.set_status(f"Loaded Preset: {preset_name}")
+        self.output_preset_auto_applied = auto or self.output_preset_is_active()
+        if auto:
+            self.set_status(f"Applied Output Preset: {preset_name}")
+        else:
+            self.set_status(f"Loaded Preset: {preset_name}")
         self.notify_control_state_changed()
+
+    def apply_output_preset_for_current_output(self) -> bool:
+        try:
+            linked_preset = get_output_preset_link(self.controller.output_sink)
+        except Exception as exc:
+            self.update_preset_state()
+            self.set_status(str(exc))
+            self.notify_control_state_changed()
+            return True
+
+        if not linked_preset:
+            self.output_preset_auto_applied = False
+            self.update_preset_state()
+            self.notify_control_state_changed()
+            return False
+
+        if self.has_unsaved_curve_changes():
+            self.output_preset_auto_applied = False
+            self.update_preset_state()
+            self.set_status("Skipped Output Preset: Unsaved Changes")
+            self.notify_control_state_changed()
+            return True
+
+        try:
+            self.load_library_preset(linked_preset, auto=True)
+        except Exception:
+            self.output_preset_auto_applied = False
+            self.update_preset_state()
+            self.set_status(f"Output Preset Unavailable: {linked_preset}")
+            self.notify_control_state_changed()
+            return True
+
+        self.output_preset_auto_applied = True
+        self.update_output_preset_state()
+        self.notify_control_state_changed()
+        return True
 
     def prompt_for_preset_name(
         self,
@@ -212,6 +362,44 @@ class MiniEqWindowPresetMixin:
         except Exception as exc:
             self.set_status(str(exc))
 
+    def on_use_preset_for_output_clicked(self, _button: Gtk.Widget) -> None:
+        if self.current_preset_name is None:
+            self.set_status("No Preset Selected")
+            return
+
+        try:
+            preset_name = set_output_preset_link(self.controller.output_sink, self.current_preset_name)
+            self.output_preset_auto_applied = self.output_preset_is_active()
+            self.update_preset_state()
+            self.set_status(f"Linked Output Preset: {preset_name}")
+            self.notify_control_state_changed()
+        except Exception as exc:
+            self.set_status(str(exc))
+
+    def on_clear_output_preset_link_clicked(self, _button: Gtk.Widget) -> None:
+        try:
+            removed = clear_output_preset_link(self.controller.output_sink)
+            self.output_preset_auto_applied = False
+            self.update_preset_state()
+            if removed:
+                self.set_status(f"Cleared Output Preset: {removed}")
+            else:
+                self.set_status("No Output Preset")
+            self.notify_control_state_changed()
+        except Exception as exc:
+            self.set_status(str(exc))
+
+    def on_output_preset_switch_changed(self, switch: Gtk.Switch, _param: object | None = None) -> None:
+        if self.updating_output_preset_switch:
+            return
+
+        if switch.get_active():
+            self.on_use_preset_for_output_clicked(switch)
+        else:
+            self.on_clear_output_preset_link_clicked(switch)
+
+        self.update_preset_state()
+
     def on_preset_delete_clicked(self, button: Gtk.Button) -> None:
         if self.current_preset_name is None:
             self.set_status("No Preset Selected")
@@ -287,7 +475,7 @@ class MiniEqWindowPresetMixin:
             stored_payload["name"] = preset_name
             write_mini_eq_preset_file(preset_path_for_name(preset_name), stored_payload)
             self.controller.apply_preset_payload(stored_payload)
-            self.selected_band_index = 0
+            self.selected_band_index = None
             self.set_visible_band_count(fader_band_count_for_profile(self.controller.bands))
             self.current_preset_name = preset_name
             self.saved_preset_signature = self.controller.state_signature()

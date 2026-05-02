@@ -88,14 +88,20 @@ class MiniEqWindowGraphMixin:
 
     def set_visible_band_count(self, count: int) -> None:
         self.visible_band_count = int(clamp(float(count), 1.0, float(MAX_BANDS)))
-        if self.selected_band_index >= self.visible_band_count:
-            self.selected_band_index = self.visible_band_count - 1
+        if self.selected_band_index is not None and self.selected_band_index >= self.visible_band_count:
+            self.selected_band_index = None
 
     def select_band(self, index: int) -> None:
         self.selected_band_index = max(0, min(MAX_BANDS - 1, index))
         if self.selected_band_index >= self.visible_band_count:
             self.set_visible_band_count(self.selected_band_index + 1)
         self.sync_ui_from_state()
+
+    def selected_band(self):
+        index = self.selected_band_index
+        if index is None or index < 0 or index >= len(self.controller.bands):
+            return None
+        return index, self.controller.bands[index]
 
     def update_quick_fader_strip(self) -> None:
         solo_active = bands_have_solo(self.controller.bands)
@@ -181,10 +187,20 @@ class MiniEqWindowGraphMixin:
         return False
 
     def update_focus_summary(self) -> None:
-        selected = self.controller.bands[self.selected_band_index]
+        selected_entry = self.selected_band()
+        if selected_entry is None:
+            self.focus_label.set_text("No band selected")
+            self.band_count_label.set_text("")
+            self.band_count_label.set_visible(False)
+            self.focus_label.set_tooltip_text("No band selected")
+            self.band_count_label.set_tooltip_text("")
+            self.inspector_summary_label.set_text("No Band")
+            return
+
+        selected_index, selected = selected_entry
         selected_filter_type = filter_type_label(selected.filter_type)
         self.focus_label.set_text(
-            f"Band {self.selected_band_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
+            f"Band {selected_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
         )
         self.band_count_label.set_text(selected_filter_type)
         self.band_count_label.set_visible(True)
@@ -198,8 +214,42 @@ class MiniEqWindowGraphMixin:
         )
 
     def update_selected_band_editor(self) -> None:
-        selected = self.controller.bands[self.selected_band_index]
-        band_title = f"Band {self.selected_band_index + 1}"
+        selected_entry = self.selected_band()
+        editor_groups = (
+            "selected_band_state_box",
+            "selected_band_type_box",
+            "selected_band_frequency_box",
+            "selected_band_q_box",
+            "selected_band_gain_box",
+        )
+        editor_controls = (
+            self.selected_band_type_combo,
+            self.selected_band_frequency_spin,
+            self.selected_band_q_spin,
+            self.selected_band_gain_spin,
+            self.selected_band_mute_button,
+            self.selected_band_solo_button,
+        )
+        if selected_entry is None:
+            self.selected_band_label.set_text("No Band")
+            self.selected_band_label.set_tooltip_text("No band selected")
+            for control in editor_controls:
+                control.set_sensitive(False)
+            for group_name in editor_groups:
+                group = getattr(self, group_name, None)
+                if group is not None:
+                    group.set_visible(False)
+            return
+
+        selected_index, selected = selected_entry
+        for control in editor_controls:
+            control.set_sensitive(True)
+        for group_name in editor_groups:
+            group = getattr(self, group_name, None)
+            if group is not None:
+                group.set_visible(True)
+
+        band_title = f"Band {selected_index + 1}"
         self.selected_band_label.set_text(band_title)
         filter_type = filter_type_label(selected.filter_type)
         full_summary = f"{band_title} • {filter_type} • {selected.frequency:.1f} Hz • Q {selected.q:.3f} • {selected.gain_db:+.1f} dB"
@@ -436,6 +486,8 @@ class MiniEqWindowGraphMixin:
             return
 
         index = self.selected_band_index
+        if index is None:
+            return
         self.controller.set_band_type(index, FILTER_TYPES[FILTER_TYPE_ORDER[selected]])
         self.updating_ui = True
         try:
@@ -454,10 +506,16 @@ class MiniEqWindowGraphMixin:
         if self.updating_ui:
             return
 
+        if self.selected_band_index is None:
+            return
+
         self.on_custom_band_frequency_changed(self.selected_band_index, spin.get_value())
 
     def on_selected_band_q_changed(self, spin: Gtk.SpinButton) -> None:
         if self.updating_ui:
+            return
+
+        if self.selected_band_index is None:
             return
 
         self.on_custom_band_q_changed(self.selected_band_index, spin.get_value())
@@ -466,16 +524,25 @@ class MiniEqWindowGraphMixin:
         if self.updating_ui:
             return
 
+        if self.selected_band_index is None:
+            return
+
         self.on_custom_band_fader_changed(self.selected_band_index, spin.get_value())
 
     def on_selected_band_mute_changed(self, button: Gtk.ToggleButton, _param: object) -> None:
         if self.updating_ui:
             return
 
+        if self.selected_band_index is None:
+            return
+
         self.on_custom_band_mute_toggled(self.selected_band_index, button.get_active())
 
     def on_selected_band_solo_changed(self, button: Gtk.ToggleButton, _param: object) -> None:
         if self.updating_ui:
+            return
+
+        if self.selected_band_index is None:
             return
 
         self.on_custom_band_solo_toggled(self.selected_band_index, button.get_active())
@@ -771,16 +838,19 @@ class MiniEqWindowGraphMixin:
         effective_point = (0.78, 0.85, 0.93) if dark else (0.18, 0.25, 0.32)
         inactive_point = (0.44, 0.50, 0.57) if dark else (0.50, 0.56, 0.62)
         response_amber = RESPONSE_AMBER if dark else (0.82, 0.34, 0.02)
-        selected_band = self.controller.bands[self.selected_band_index]
-        selected_x = self.frequency_to_x(selected_band.frequency, width_f, left, right)
+        selected_entry = self.selected_band()
+        selected_points = []
+        if selected_entry is not None:
+            _, selected_band = selected_entry
+            selected_x = self.frequency_to_x(selected_band.frequency, width_f, left, right)
 
-        cr.set_source_rgba(*selected_line)
-        cr.set_line_width(1.4)
-        cr.move_to(selected_x, top)
-        cr.line_to(selected_x, height_f - bottom)
-        cr.stroke()
+            cr.set_source_rgba(*selected_line)
+            cr.set_line_width(1.4)
+            cr.move_to(selected_x, top)
+            cr.line_to(selected_x, height_f - bottom)
+            cr.stroke()
 
-        selected_points = self.selected_response_points(width_f, height_f, left, right, top, bottom, selected_band)
+            selected_points = self.selected_response_points(width_f, height_f, left, right, top, bottom, selected_band)
         points = self.total_response_points(width_f, height_f, left, right, top, bottom)
 
         if points:

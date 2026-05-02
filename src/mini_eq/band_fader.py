@@ -104,7 +104,7 @@ class EqBandFader(Gtk.DrawingArea):
         self.set_focusable(True)
         self.set_accessible_role(Gtk.AccessibleRole.SLIDER)
         self.set_cursor_from_name("ns-resize")
-        self.set_tooltip_text("Drag gain. Select a band to edit type, frequency, Q, mute, and solo below.")
+        self.set_tooltip_text("Band Gain")
         self.set_draw_func(self.on_draw)
         self.update_accessible_state()
 
@@ -223,6 +223,10 @@ class EqBandFader(Gtk.DrawingArea):
                 self.gain_db,
                 f"{self.gain_db:+.1f} dB",
             ],
+        )
+        self.update_state(
+            [Gtk.AccessibleState.SELECTED, Gtk.AccessibleState.DISABLED],
+            [int(self.selected), not self.active],
         )
 
     def gain_to_y(self, gain_db: float, top: float, bottom: float) -> float:

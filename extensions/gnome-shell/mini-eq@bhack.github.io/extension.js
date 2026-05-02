@@ -78,6 +78,10 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._statusItem.setSensitive(false);
         this.menu.addMenuItem(this._statusItem);
 
+        this._outputPresetItem = new PopupMenu.PopupMenuItem(_('No output preset'));
+        this._outputPresetItem.setSensitive(false);
+        this.menu.addMenuItem(this._outputPresetItem);
+
         this._routingItem = new PopupMenu.PopupSwitchMenuItem(_('System-wide EQ'), false);
         this._routingItem.connect('toggled', (_item, state) => {
             if (!this._updating)
@@ -289,6 +293,8 @@ class MiniEqIndicator extends PanelMenu.Button {
         const eqEnabled = Boolean(unpackValue(state.eq_enabled));
         const routed = Boolean(unpackValue(state.routed));
         const presetName = unpackValue(state.preset_name) || _('Current State');
+        const outputPresetName = unpackValue(state.output_preset_name) || '';
+        const outputPresetAutoApplied = Boolean(unpackValue(state.output_preset_auto_applied));
 
         this._running = running;
         this._routed = routed;
@@ -311,6 +317,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsItem.setSensitive(running);
         this._presetsItem.label.text = running ? _('Preset: %s').format(presetName) : _('Presets');
         this._statusItem.label.text = this._statusText(running, routed, eqEnabled);
+        this._outputPresetItem.label.text = this._outputPresetText(running, outputPresetName, outputPresetAutoApplied);
     }
 
     _setDisconnectedState() {
@@ -332,6 +339,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsItem.setSensitive(false);
         this._presetsItem.label.text = _('Presets');
         this._statusItem.label.text = _('Mini EQ is not running');
+        this._outputPresetItem.label.text = _('No output preset');
         this._setAnalyzerLevels([]);
         this._setPresets([]);
     }
@@ -344,6 +352,14 @@ class MiniEqIndicator extends PanelMenu.Button {
         if (routed)
             return _('Original audio selected');
         return _('System-wide EQ is off');
+    }
+
+    _outputPresetText(running, presetName, autoApplied) {
+        if (!running || !presetName)
+            return _('No output preset');
+        if (autoApplied)
+            return _('Output preset: %s').format(presetName);
+        return _('Preset for output: %s').format(presetName);
     }
 
     _applyAnalyzerLevels(levels) {

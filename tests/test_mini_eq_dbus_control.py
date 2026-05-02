@@ -66,10 +66,14 @@ class FakeWindow:
         self.route_switch = FakeSwitch(controller.routed)
         self.loaded_presets: list[str] = []
         self.update_count = 0
+        self.output_preset_auto_applied = False
 
     def load_library_preset(self, name: str) -> None:
         self.current_preset_name = name
         self.loaded_presets.append(name)
+
+    def output_preset_link_name(self) -> str | None:
+        return "Headphones"
 
     def present(self) -> None:
         pass
@@ -117,6 +121,8 @@ def test_dbus_control_state_contains_shell_summary() -> None:
         "routed": False,
         "preset_name": "Flat",
         "output_sink": "alsa_output.test",
+        "output_preset_name": "Headphones",
+        "output_preset_auto_applied": False,
     }
 
 

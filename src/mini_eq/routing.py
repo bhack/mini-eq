@@ -636,6 +636,14 @@ class SystemWideEqController:
     def state_signature(self) -> str:
         return json.dumps(self.build_preset_payload(), sort_keys=True, separators=(",", ":"))
 
+    def default_state_signature(self) -> str:
+        payload = {
+            "version": PRESET_VERSION,
+            "preamp_db": 0.0,
+            "bands": [eq_band_to_dict(band) for band in self.default_bands],
+        }
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
     def apply_preset_payload(self, payload: dict[str, object]) -> None:
         version = int(payload.get("version", 0))
         if version > PRESET_VERSION:

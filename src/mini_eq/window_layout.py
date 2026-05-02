@@ -10,6 +10,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
+from . import __version__
 from .analyzer_widget import AnalyzerPlotWidget
 from .band_fader import EqBandFader
 from .core import (
@@ -23,8 +24,14 @@ from .core import (
     MAX_BANDS,
     clamp,
 )
+from .desktop_integration import APP_ICON_NAME
 from .window_graph import GRAPH_PLOT_BOTTOM, GRAPH_PLOT_LEFT, GRAPH_PLOT_RIGHT, GRAPH_PLOT_TOP
-from .window_utils import constrain_editor_label, set_accessible_description, set_accessible_label
+from .window_utils import (
+    bind_label_to_control,
+    constrain_editor_label,
+    set_accessible_description,
+    set_accessible_label,
+)
 
 ADAPTIVE_NARROW_BREAKPOINT_SP = 1320
 RESPONSIVE_COMFORTABLE_HEIGHT = 720
@@ -35,7 +42,7 @@ COMPACT_GRAPH_CONTENT_WIDTH = 760
 DEFAULT_GRAPH_CONTENT_HEIGHT = 196
 COMPACT_GRAPH_CONTENT_HEIGHT = 156
 ROOMY_GRAPH_CONTENT_HEIGHT = 280
-WORKSPACE_MAX_WIDTH = 1760
+WORKSPACE_MAX_WIDTH = 1480
 GRAPH_PLOT_HORIZONTAL_MARGINS = int(GRAPH_PLOT_LEFT + GRAPH_PLOT_RIGHT)
 GRAPH_PLOT_VERTICAL_MARGINS = int(GRAPH_PLOT_TOP + GRAPH_PLOT_BOTTOM)
 DEFAULT_ANALYZER_CONTENT_WIDTH = max(1, DEFAULT_GRAPH_CONTENT_WIDTH - GRAPH_PLOT_HORIZONTAL_MARGINS)
@@ -101,6 +108,7 @@ class MiniEqWindowLayoutMixin:
         self.output_combo.set_size_request(300, -1)
         self.output_combo.add_css_class("toolbar-select")
         set_accessible_label(self.output_combo, "Output")
+        bind_label_to_control(output_label, self.output_combo)
         output_inline.append(self.output_combo)
         primary_tools.append(output_inline)
         toolbar.append(primary_tools)
@@ -109,8 +117,8 @@ class MiniEqWindowLayoutMixin:
         tools_button.set_can_shrink(True)
         tools_button.set_icon_name("open-menu-symbolic")
         tools_button.add_css_class("toolbar-icon-button")
-        tools_button.set_tooltip_text("App Menu")
-        set_accessible_label(tools_button, "App Menu")
+        tools_button.set_tooltip_text("Main Menu")
+        set_accessible_label(tools_button, "Main Menu")
 
         def add_window_action(action_name: str, callback) -> None:
             action = Gio.SimpleAction.new(action_name, None)
@@ -119,6 +127,7 @@ class MiniEqWindowLayoutMixin:
 
         add_window_action("import-apo", lambda: self.on_import_apo_clicked(tools_button))
         add_window_action("reset-eq", lambda: self.on_clear_clicked(tools_button))
+        add_window_action("about", self.show_about_dialog)
         self.appearance_action = Gio.SimpleAction.new_stateful(
             "appearance",
             GLib.VariantType.new("s"),
@@ -132,26 +141,27 @@ class MiniEqWindowLayoutMixin:
         tools_menu.append("Reset EQ", "win.reset-eq")
 
         appearance_menu = Gio.Menu()
-        appearance_menu.append("System", "win.appearance::system")
-        appearance_menu.append("Light", "win.appearance::light")
-        appearance_menu.append("Dark", "win.appearance::dark")
-        tools_menu.append_submenu("Appearance", appearance_menu)
+        appearance_menu.append("Follow System", "win.appearance::system")
+        appearance_menu.append("Light Appearance", "win.appearance::light")
+        appearance_menu.append("Dark Appearance", "win.appearance::dark")
+        tools_menu.append_section("Appearance", appearance_menu)
 
         app_menu = Gio.Menu()
-        app_menu.append("Quit", "app.quit")
+        app_menu.append("About Mini EQ", "win.about")
         tools_menu.append_section(None, app_menu)
 
         tools_button.set_menu_model(tools_menu)
-        header_bar.pack_start(tools_button)
+        header_bar.pack_end(tools_button)
 
         route_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         route_box.add_css_class("route-box")
-        route_box.set_tooltip_text("Apply this curve to system audio")
+        route_box.set_tooltip_text("System Audio")
         route_label = Gtk.Label(label="System-wide EQ", xalign=0.0)
         route_box.append(route_label)
-        self.route_switch.set_tooltip_text("Apply this curve to system audio")
+        self.route_switch.set_tooltip_text("System Audio")
         self.route_switch.set_valign(Gtk.Align.CENTER)
         set_accessible_label(self.route_switch, "System-wide EQ")
+        bind_label_to_control(route_label, self.route_switch)
         route_box.append(self.route_switch)
 
         utility_pane_button = Gtk.ToggleButton()
@@ -392,7 +402,7 @@ class MiniEqWindowLayoutMixin:
         fader_section.set_margin_end(12)
         self.fader_title_label = Gtk.Label(label=f"{DEFAULT_ACTIVE_BANDS} Bands", xalign=0.0)
         self.fader_title_label.add_css_class("heading")
-        self.fader_title_label.set_tooltip_text("Drag Gain; Edit the Selected Band Below")
+        self.fader_title_label.set_tooltip_text("Band Gains")
         fader_section.append(self.fader_title_label)
 
         self.fader_scroller = Gtk.ScrolledWindow()
@@ -481,6 +491,7 @@ class MiniEqWindowLayoutMixin:
         state_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         state_box.add_css_class("band-editor-state")
         state_box.set_valign(Gtk.Align.CENTER)
+        self.selected_band_state_box = state_box
 
         self.selected_band_mute_button = Gtk.ToggleButton(label="M")
         self.selected_band_mute_button.add_css_class("band-editor-toggle")
@@ -498,6 +509,7 @@ class MiniEqWindowLayoutMixin:
         type_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         type_box.add_css_class("band-editor-field")
         type_box.set_valign(Gtk.Align.CENTER)
+        self.selected_band_type_box = type_box
         type_label = Gtk.Label(label="Type", xalign=0.0)
         type_label.add_css_class("metric-title")
         type_box.append(type_label)
@@ -506,12 +518,14 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_type_combo.add_css_class("toolbar-select")
         self.selected_band_type_combo.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_type_combo, "Selected Band Filter Type")
+        bind_label_to_control(type_label, self.selected_band_type_combo)
         type_box.append(self.selected_band_type_combo)
         band_editor.append(type_box)
 
         frequency_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         frequency_box.add_css_class("band-editor-field")
         frequency_box.set_valign(Gtk.Align.CENTER)
+        self.selected_band_frequency_box = frequency_box
         frequency_label = Gtk.Label(label="Frequency", xalign=0.0)
         frequency_label.add_css_class("metric-title")
         frequency_box.append(frequency_label)
@@ -524,12 +538,14 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_frequency_spin.set_size_request(110, -1)
         self.selected_band_frequency_spin.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_frequency_spin, "Selected Band Frequency")
+        bind_label_to_control(frequency_label, self.selected_band_frequency_spin)
         frequency_box.append(self.selected_band_frequency_spin)
         band_editor.append(frequency_box)
 
         q_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         q_box.add_css_class("band-editor-field")
         q_box.set_valign(Gtk.Align.CENTER)
+        self.selected_band_q_box = q_box
         q_label = Gtk.Label(label="Q", xalign=0.0)
         q_label.add_css_class("metric-title")
         q_box.append(q_label)
@@ -538,12 +554,14 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_q_spin.set_size_request(82, -1)
         self.selected_band_q_spin.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_q_spin, "Selected Band Q")
+        bind_label_to_control(q_label, self.selected_band_q_spin)
         q_box.append(self.selected_band_q_spin)
         band_editor.append(q_box)
 
         gain_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         gain_box.add_css_class("band-editor-field")
         gain_box.set_valign(Gtk.Align.CENTER)
+        self.selected_band_gain_box = gain_box
         gain_label = Gtk.Label(label="Gain", xalign=0.0)
         gain_label.add_css_class("metric-title")
         gain_box.append(gain_label)
@@ -551,6 +569,7 @@ class MiniEqWindowLayoutMixin:
         self.selected_band_gain_spin.set_size_request(96, -1)
         self.selected_band_gain_spin.add_css_class("band-editor-input")
         set_accessible_label(self.selected_band_gain_spin, "Selected Band Gain")
+        bind_label_to_control(gain_label, self.selected_band_gain_spin)
         gain_box.append(self.selected_band_gain_spin)
         band_editor.append(gain_box)
 
@@ -750,3 +769,16 @@ class MiniEqWindowLayoutMixin:
                 provider,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
+
+    def show_about_dialog(self) -> None:
+        dialog = Adw.AboutDialog(
+            application_icon=APP_ICON_NAME,
+            application_name=APP_NAME,
+            developer_name="bhack",
+            developers=["bhack"],
+            issue_url="https://github.com/bhack/mini-eq/issues",
+            license_type=Gtk.License.GPL_3_0,
+            version=__version__,
+            website="https://github.com/bhack/mini-eq",
+        )
+        dialog.present(self)

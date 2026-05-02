@@ -8,7 +8,7 @@ from gi.repository import Gtk, Pango
 
 from .appearance import style_manager_is_dark
 from .core import EQ_PREAMP_MAX_DB, EQ_PREAMP_MIN_DB, clamp
-from .window_utils import set_accessible_label
+from .window_utils import bind_label_to_control, set_accessible_label
 
 
 class MiniEqWindowHeadroomMixin:
@@ -28,7 +28,7 @@ class MiniEqWindowHeadroomMixin:
 
         self.headroom_fix_button = Gtk.Button(label="Set Safe")
         self.headroom_fix_button.add_css_class("headroom-fix-button")
-        self.headroom_fix_button.set_tooltip_text("Lower Preamp to Restore Headroom")
+        self.headroom_fix_button.set_tooltip_text("Restore Headroom")
         self.headroom_fix_button.set_visible(False)
         self.headroom_fix_button.connect("clicked", self.on_set_safe_preamp_clicked)
         header.append(self.headroom_fix_button)
@@ -78,6 +78,7 @@ class MiniEqWindowHeadroomMixin:
         self.preamp_scale.set_draw_value(False)
         self.preamp_scale.set_hexpand(True)
         set_accessible_label(self.preamp_scale, "Preamp")
+        bind_label_to_control(preamp_title, self.preamp_scale)
         self.preamp_scale.connect("value-changed", self.on_preamp_changed)
         preamp_row.append(self.preamp_scale)
 

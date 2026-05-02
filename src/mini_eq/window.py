@@ -93,7 +93,7 @@ class MiniEqWindow(
         self.set_default_size(1360, DEFAULT_WINDOW_HEIGHT)
         self.set_size_request(self.min_window_width, self.compact_min_window_height)
         self.updating_ui = False
-        self.selected_band_index = 0
+        self.selected_band_index: int | None = None
         self.visible_band_count = DEFAULT_ACTIVE_BANDS
         self.band_fader_boxes: list[Gtk.Box] = []
         self.band_fader_widgets: list[EqBandFader] = []
@@ -107,6 +107,10 @@ class MiniEqWindow(
         self.ui_shutting_down = False
         self.current_preset_name: str | None = None
         self.saved_preset_signature = self.controller.state_signature()
+        self.default_preset_signature = self.controller.default_state_signature()
+        self.output_preset_auto_applied = False
+        self.updating_output_preset_switch = False
+        self.last_output_preset_sink_name: str | None = None
         self.preset_monitor: Gio.FileMonitor | None = None
         self.preset_refresh_source_id = 0
         self.analyzer_enabled = False
@@ -177,6 +181,8 @@ class MiniEqWindow(
         self.graph_title_label = Gtk.Label(xalign=0.0)
         self.graph_title_label.set_wrap(True)
         self.preset_state_label = Gtk.Label(xalign=1.0)
+        self.output_preset_state_label = Gtk.Label(xalign=0.0)
+        self.output_preset_switch = Gtk.Switch()
         self.headroom_peak_db: float | None = None
         self.headroom_state_kind = "bypass"
 
@@ -222,6 +228,7 @@ class MiniEqWindow(
         self.post_present_ready = True
         self.start_preset_monitoring()
         self.start_analyzer_preview()
+        self.apply_output_preset_for_current_output()
 
         if self.ui_shutting_down:
             return False
@@ -631,11 +638,12 @@ class MiniEqWindow(
             self.system_state_label.set_text("Standby")
             self.system_state_label.add_css_class("system-state-idle")
 
-    def refresh_output_sinks(self) -> None:
+    def refresh_output_sinks(self, *, auto_apply_output_preset: bool = True) -> None:
         if self.ui_shutting_down:
             return
 
         active = self.controller.output_sink
+        previous_output = self.last_output_preset_sink_name
         default_sink_name = self.controller.get_default_output_sink_name()
         visible_sinks = self.list_visible_output_sinks()
         visible_sink_names = [sink.node_name for sink in visible_sinks if sink.node_name is not None]
@@ -659,8 +667,14 @@ class MiniEqWindow(
         finally:
             self.updating_output_combo = False
 
+        output_changed = previous_output is not None and previous_output != active
+        self.last_output_preset_sink_name = active
+        self.update_preset_state()
         self.update_info_label()
         self.update_status_summary()
+
+        if self.post_present_ready and auto_apply_output_preset and output_changed:
+            self.apply_output_preset_for_current_output()
 
     def update_info_label(self) -> None:
         return
@@ -690,7 +704,7 @@ class MiniEqWindow(
 
         try:
             imported_count = self.controller.import_apo_preset(path)
-            self.selected_band_index = 0
+            self.selected_band_index = None
             self.set_visible_band_count(imported_count)
             self.sync_ui_from_state()
         except Exception as exc:
@@ -698,7 +712,7 @@ class MiniEqWindow(
 
     def on_clear_clicked(self, button: Gtk.Button) -> None:
         self.controller.reset_state()
-        self.selected_band_index = 0
+        self.selected_band_index = None
         self.set_visible_band_count(DEFAULT_ACTIVE_BANDS)
         self.sync_ui_from_state()
         self.set_status("Equalizer Reset")
@@ -716,13 +730,15 @@ class MiniEqWindow(
         try:
             if sink_name is None:
                 self.controller.follow_system_default_output()
-                self.refresh_output_sinks()
-                self.set_status("Output Target Set to System Default")
+                self.refresh_output_sinks(auto_apply_output_preset=False)
+                if not self.apply_output_preset_for_current_output():
+                    self.set_status("Output Target Set to System Default")
                 return
 
             self.controller.change_output_sink(sink_name)
-            self.refresh_output_sinks()
-            self.set_status("Output Target Updated")
+            self.refresh_output_sinks(auto_apply_output_preset=False)
+            if not self.apply_output_preset_for_current_output():
+                self.set_status("Output Target Updated")
         except Exception as exc:
             self.set_status(str(exc))
 

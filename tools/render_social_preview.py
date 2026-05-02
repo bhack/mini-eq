@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 CANVAS_SIZE = (1280, 640)
+SAFE_MARGIN = 40
 BACKGROUND = "#071018"
 TITLE = "Mini EQ"
 SUBTITLE_LINES = (
@@ -66,20 +67,20 @@ def render_social_preview(screenshot_path: Path, output_path: Path) -> None:
     subtitle_font = _load_font(39)
     footer_font = _load_font(29)
 
-    draw.text((70, 62), TITLE, font=title_font, fill="#F1F5FB")
-    draw.text((70, 210), "\n".join(SUBTITLE_LINES[:2]), font=subtitle_font, spacing=6, fill="#95D5FF")
-    draw.text((70, 318), SUBTITLE_LINES[2], font=subtitle_font, fill="#D4DBE8")
-    draw.text((70, 382), "\n".join(FOOTER_LINES), font=footer_font, spacing=8, fill="#92A2B9")
+    draw.text((70, 82), TITLE, font=title_font, fill="#F1F5FB")
+    draw.text((70, 230), "\n".join(SUBTITLE_LINES[:2]), font=subtitle_font, spacing=6, fill="#95D5FF")
+    draw.text((70, 338), SUBTITLE_LINES[2], font=subtitle_font, fill="#D4DBE8")
+    draw.text((70, 402), "\n".join(FOOTER_LINES), font=footer_font, spacing=8, fill="#92A2B9")
 
     screenshot = Image.open(screenshot_path).convert("RGBA")
-    screenshot = _fit_screenshot(screenshot, (720, 420))
+    screenshot = _fit_screenshot(screenshot, (680, 380))
 
     frame_padding = 12
     frame_size = (
         screenshot.width + frame_padding * 2,
         screenshot.height + frame_padding * 2,
     )
-    frame_pos = (518, 58)
+    frame_pos = (CANVAS_SIZE[0] - SAFE_MARGIN - frame_size[0], 102)
     shadow_offset = (10, 14)
 
     shadow = Image.new("RGBA", CANVAS_SIZE, (0, 0, 0, 0))

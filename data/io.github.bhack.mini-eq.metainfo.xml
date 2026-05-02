@@ -29,16 +29,16 @@
   </keywords>
   <description>
     <p>Mini EQ lets you adjust the sound from your desktop before it reaches your speakers or headphones.</p>
-    <p>Use ten compact bands to shape bass, mids, and treble, save presets, compare the processed sound with the original, and monitor levels while you listen.</p>
+    <p>Use ten compact bands to shape bass, mids, and treble, save presets for different outputs, compare the processed sound with the original, and monitor levels while you listen.</p>
     <p>Import Equalizer APO and AutoEq presets when you want to start from an existing correction for your headphones or speakers.</p>
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.8/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.2.0/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.8/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.2.0/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -46,6 +46,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.2.0" date="2026-05-02">
+      <description>
+        <ul>
+          <li>Add per-output preset links for automatically using different saved presets with different outputs.</li>
+          <li>Protect unsaved curve edits when an output changes instead of replacing them with an automatic preset.</li>
+          <li>Show output preset link status in the GNOME Shell extension.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.8" date="2026-05-02">
       <description>
         <ul>

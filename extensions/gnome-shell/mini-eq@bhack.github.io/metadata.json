@@ -1,7 +1,7 @@
 {
   "uuid": "mini-eq@bhack.github.io",
   "name": "Mini EQ Controls",
-  "description": "Control Mini EQ from the panel: open the app, toggle system-wide routing and EQ, view analyzer activity, and switch saved presets.",
+  "description": "Control Mini EQ from the panel: open the app, toggle system-wide routing and EQ, view analyzer activity, switch saved presets, and see output preset links.",
   "shell-version": ["50"],
   "url": "https://github.com/bhack/mini-eq"
 }

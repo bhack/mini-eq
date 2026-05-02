@@ -31,8 +31,8 @@ class FakeSwitch:
 
 
 class FocusSummaryWindow(window_graph.MiniEqWindowGraphMixin):
-    def __init__(self, *, route_active: bool) -> None:
-        self.selected_band_index = 0
+    def __init__(self, *, route_active: bool, selected_band_index: int | None = 0) -> None:
+        self.selected_band_index = selected_band_index
         self.controller = type(
             "Controller",
             (),
@@ -58,3 +58,13 @@ def test_focus_summary_keeps_selected_band_visible_when_system_eq_is_off() -> No
     assert window.band_count_label.text == "Bell"
     assert window.band_count_label.visible is True
     assert "System-wide EQ is off." in window.focus_label.tooltip
+
+
+def test_focus_summary_handles_no_selected_band() -> None:
+    window = FocusSummaryWindow(route_active=True, selected_band_index=None)
+
+    window.update_focus_summary()
+
+    assert window.focus_label.text == "No band selected"
+    assert window.band_count_label.visible is False
+    assert window.inspector_summary_label.text == "No Band"

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 - 2026-05-02
+
+- Add per-output preset links so headphones, speakers, HDMI, and other outputs can automatically use different saved presets.
+- Add preset actions to use the current preset for the selected output or clear that output link.
+- Protect unsaved curve edits when an output changes instead of replacing them with an automatic preset.
+- Show output preset link status in the GNOME Shell extension.
+- Keep the SVG icon and package asset cleanup from the post-0.1.8 review work.
+
 ## 0.1.8 - 2026-05-02
 
 - Improve Flathub presentation metadata, screenshots, and SVG app icon assets.
