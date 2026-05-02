@@ -150,7 +150,7 @@ class MiniEqWindowUtilityPaneMixin:
         analyzer_settings_popover.set_child(analyzer_settings_group)
         analyzer_settings_button = Gtk.MenuButton()
         analyzer_settings_button.set_can_shrink(True)
-        analyzer_settings_button.set_icon_name("mini-eq-monitor-settings-symbolic")
+        analyzer_settings_button.set_icon_name("preferences-system-symbolic")
         analyzer_settings_button.set_tooltip_text("Monitor Settings")
         set_accessible_label(analyzer_settings_button, "Monitor Settings")
         analyzer_settings_button.set_valign(Gtk.Align.CENTER)

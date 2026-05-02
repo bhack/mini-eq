@@ -6,7 +6,6 @@ include python3-dependencies.yaml
 include src/mini_eq/style.css
 include src/mini_eq/assets/icons/hicolor/scalable/apps/*.svg
 include src/mini_eq/assets/icons/hicolor/symbolic/apps/*.svg
-include src/mini_eq/assets/icons/hicolor/scalable/actions/*.svg
 include data/*.desktop
 include data/*.metainfo.xml
 include docs/flathub.md
