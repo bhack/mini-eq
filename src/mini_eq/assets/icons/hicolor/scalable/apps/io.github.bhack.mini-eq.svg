@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Mini EQ">
+  <g transform="translate(512 562) scale(1.11) translate(-512 -512)">
+    <rect x="162" y="146" width="700" height="732" rx="118" fill="#38545f" stroke="#8bd2dc" stroke-width="24"/>
+    <path d="M280 178h464c64 0 86 22 86 86v86c-76-48-180-72-318-72s-242 24-318 72v-86c0-64 22-86 86-86Z" fill="#5f7c86" opacity="0.24"/>
+    <rect x="194" y="180" width="636" height="664" rx="92" fill="none" stroke="#18303a" stroke-width="8" opacity="0.60"/>
+
+    <g fill="#0a151d">
+      <rect x="314" y="332" width="50" height="294" rx="25"/>
+      <rect x="487" y="276" width="50" height="344" rx="25"/>
+      <rect x="660" y="354" width="50" height="276" rx="25"/>
+    </g>
+
+    <path d="M234 612 C302 612 336 564 376 496 C418 423 454 383 512 378 C582 372 625 430 668 510 C704 577 738 610 790 610 L790 632 C724 632 681 590 646 524 C606 449 571 396 516 399 C468 402 438 435 394 507 C348 582 304 634 234 634 Z" fill="#ffb13a"/>
+    <circle cx="234" cy="623" r="21" fill="#ffb13a"/>
+    <circle cx="790" cy="621" r="21" fill="#ffb13a"/>
+
+    <g stroke="#a5bec6" stroke-width="8">
+      <rect x="284" y="516" width="110" height="108" rx="38" fill="#405965"/>
+      <rect x="452" y="332" width="120" height="118" rx="42" fill="#405965"/>
+      <rect x="630" y="530" width="108" height="104" rx="38" fill="#405965"/>
+    </g>
+
+    <g fill="#ffb13a">
+      <rect x="320" y="564" width="38" height="16" rx="8"/>
+      <rect x="493" y="383" width="38" height="16" rx="8"/>
+      <rect x="665" y="577" width="38" height="16" rx="8"/>
+    </g>
+
+    <g fill="#5bdfe9">
+      <rect x="400" y="742" width="24" height="40" rx="12" opacity="0.72"/>
+      <rect x="450" y="722" width="24" height="60" rx="12" opacity="0.86"/>
+      <rect x="500" y="696" width="24" height="86" rx="12"/>
+      <rect x="550" y="722" width="24" height="60" rx="12" opacity="0.86"/>
+      <rect x="600" y="742" width="24" height="40" rx="12" opacity="0.72"/>
+    </g>
+  </g>
+</svg>

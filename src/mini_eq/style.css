@@ -121,7 +121,7 @@
 }
 
 .utility-section {
-    padding: 8px 9px;
+    padding: 9px 10px;
     border-radius: 12px;
     border: 1px solid var(--mini-border-soft);
     background-color: var(--mini-utility-section-bg);
@@ -132,15 +132,15 @@
 }
 
 .utility-row {
-    padding: 8px 9px;
-    border-radius: 8px;
-    background-color: var(--mini-quiet-bg);
+    padding: 6px 0;
+    border-radius: 0;
+    background-color: transparent;
 }
 
 .compare-row {
-    padding: 8px 9px;
-    border-radius: 8px;
-    background-color: var(--mini-quiet-bg);
+    padding: 6px 0;
+    border-radius: 0;
+    background-color: transparent;
 }
 
 .compare-state-chip {
@@ -222,12 +222,14 @@
 }
 
 .headroom-panel {
-    padding: 8px 9px 8px 9px;
+    padding: 6px 0;
     border-radius: 8px;
-    background-color: var(--mini-quiet-bg);
+    background-color: transparent;
 }
 
 .headroom-panel-risk {
+    padding-left: 8px;
+    padding-right: 8px;
     background-color: rgba(255, 92, 80, 0.055);
 }
 
@@ -394,13 +396,13 @@
 }
 
 .graph-shell-panel {
-    padding: 8px;
-    border-color: var(--mini-border-soft);
-    background-image: var(--mini-graph-panel-bg);
+    padding: 0;
+    border-color: transparent;
+    background-image: none;
 }
 
 .graph-header {
-    padding: 2px 2px 0 2px;
+    padding: 0 4px;
 }
 
 .graph-header-title {
@@ -434,9 +436,9 @@
 
 .fader-scroller {
     min-height: 176px;
-    border-radius: 16px;
-    border: 1px solid var(--mini-border-soft);
-    background-color: var(--mini-fader-scroller-bg);
+    border-radius: 0;
+    border: 1px solid transparent;
+    background-color: transparent;
 }
 
 .fader-scroller-compact {

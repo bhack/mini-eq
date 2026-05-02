@@ -151,33 +151,38 @@ class AnalyzerToggleWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
 
 def test_analyzer_bars_follow_log_frequency_edges() -> None:
     width = 640.0
-    left = 58.0
-    right = 52.0
+    left = window_graph.GRAPH_PLOT_LEFT
+    right = window_graph.GRAPH_PLOT_RIGHT
     plot_right = width - right
     count = len(analyzer.ANALYZER_BAND_FREQUENCIES)
 
     geometry = analyzer_widget.analyzer_bar_geometry(width, left, right, count)
     edges = analyzer.analyzer_band_edges(analyzer.ANALYZER_BAND_FREQUENCIES)
+    axis_min = edges[0]
+    axis_max = edges[-1]
 
-    assert geometry[0][0] > left
-    assert geometry[-1][0] + geometry[-1][1] <= plot_right
+    assert geometry[0][0] == pytest.approx(left)
+    assert geometry[-1][0] + geometry[-1][1] == pytest.approx(plot_right)
     assert all(x0 >= left for x0, _bar_width, _center_x in geometry)
     assert all(x0 + bar_width <= plot_right for x0, bar_width, _center_x in geometry)
     assert all(left <= center_x <= plot_right for _x0, _bar_width, center_x in geometry)
 
-    assert geometry[0][0] == pytest.approx(
-        analyzer_widget.analyzer_frequency_to_x(edges[0], width, left, right) + 0.75,
+    assert geometry[1][0] == pytest.approx(
+        analyzer_widget.analyzer_frequency_to_x(edges[1], width, left, right, axis_min, axis_max) + 0.75,
     )
+    assert geometry[0][1] == pytest.approx(geometry[-1][1], abs=0.65)
     for frequency, (_x0, _bar_width, center_x) in zip(
         analyzer.ANALYZER_BAND_FREQUENCIES,
         geometry,
         strict=True,
     ):
-        assert center_x == pytest.approx(analyzer_widget.analyzer_frequency_to_x(frequency, width, left, right))
+        assert center_x == pytest.approx(
+            analyzer_widget.analyzer_frequency_to_x(frequency, width, left, right, axis_min, axis_max)
+        )
 
     band_5k_index = analyzer.ANALYZER_BAND_FREQUENCIES.index(5000.0)
     assert geometry[band_5k_index][2] == pytest.approx(
-        analyzer_widget.analyzer_frequency_to_x(5000.0, width, left, right)
+        analyzer_widget.analyzer_frequency_to_x(5000.0, width, left, right, axis_min, axis_max)
     )
 
 

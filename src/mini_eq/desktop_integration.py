@@ -41,7 +41,9 @@ def install_desktop_integration() -> None:
     desktop_file.write_text(build_desktop_file(), encoding="utf-8")
     desktop_file.chmod(0o644)
 
-    for source_icon in hicolor_source_dir.glob(f"*/apps/{APP_ICON_NAME}.png"):
+    remove_legacy_raster_app_icons(hicolor_target_dir)
+
+    for source_icon in hicolor_source_dir.glob(f"*/apps/{APP_ICON_NAME}*.svg"):
         target_icon = hicolor_target_dir / source_icon.relative_to(hicolor_source_dir)
         target_icon.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_icon, target_icon)
@@ -84,6 +86,14 @@ def build_desktop_file() -> str:
 def quote_desktop_exec_arg(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
     return f'"{escaped}"'
+
+
+def remove_legacy_raster_app_icons(hicolor_dir: Path) -> None:
+    for target_icon in hicolor_dir.glob(f"*/apps/{APP_ICON_NAME}.png"):
+        try:
+            target_icon.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def refresh_desktop_database(applications_dir: Path) -> None:

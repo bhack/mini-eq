@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.bhack.mini-eq</id>
   <name>Mini EQ</name>
-  <summary>Tune all desktop audio</summary>
+  <summary>Tune your sound output</summary>
   <developer id="io.github.bhack">
     <name>bhack</name>
   </developer>
@@ -20,23 +20,41 @@
   <keywords>
     <keyword>equalizer</keyword>
     <keyword>audio</keyword>
+    <keyword>headphones</keyword>
+    <keyword>speakers</keyword>
+    <keyword>presets</keyword>
     <keyword>pipewire</keyword>
     <keyword>jack</keyword>
+    <keyword>autoeq</keyword>
   </keywords>
   <description>
-    <p>Mini EQ provides a compact GTK interface for a system-wide parametric equalizer on PipeWire desktops.</p>
-    <p>It creates a PipeWire filter-chain sink using builtin biquad filters and can route output streams through the processed sink.</p>
+    <p>Mini EQ lets you adjust the sound from your desktop before it reaches your speakers or headphones.</p>
+    <p>Use ten compact bands to shape bass, mids, and treble, save presets, compare the processed sound with the original, and monitor levels while you listen.</p>
+    <p>Import Equalizer APO and AutoEq presets when you want to start from an existing correction for your headphones or speakers.</p>
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.7/docs/screenshots/mini-eq.png</image>
-      <caption>Main equalizer window</caption>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.8/docs/screenshots/mini-eq.png</image>
+      <caption>Adjust sound output with equalizer controls</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.1.8/docs/screenshots/mini-eq-dark.png</image>
+      <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
   <url type="homepage">https://github.com/bhack/mini-eq</url>
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.1.8" date="2026-05-02">
+      <description>
+        <ul>
+          <li>Improve Flathub presentation metadata, screenshots, and app icon assets.</li>
+          <li>Add a second dark-style screenshot while keeping the default light screenshot first.</li>
+          <li>Refine graph, analyzer, fader, and utility-pane spacing for the public screenshot.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.7" date="2026-04-30">
       <description>
         <ul>

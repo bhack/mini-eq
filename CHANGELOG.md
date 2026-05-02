@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.8 - 2026-05-02
+
+- Improve Flathub presentation metadata, screenshots, and SVG app icon assets.
+- Switch local and packaged app icon installation to scalable SVG plus symbolic SVG.
+- Add a second dark-style screenshot while keeping the default light screenshot first.
+- Refine graph, analyzer, fader, and utility-pane spacing for the public screenshot.
+
 ## 0.1.7 - 2026-04-30
 
 - Add System, Light, and Dark appearance modes.

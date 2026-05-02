@@ -18,3 +18,20 @@ def test_desktop_file_launches_installed_module(monkeypatch) -> None:
     assert 'Exec="/opt/Mini EQ/python" -m mini_eq' in desktop_file
     assert "Icon=io.github.bhack.mini-eq" in desktop_file
     assert "StartupWMClass=io.github.bhack.mini-eq" in desktop_file
+
+
+def test_remove_legacy_raster_app_icons_only_removes_mini_eq_pngs(tmp_path) -> None:
+    mini_eq_png = tmp_path / "64x64/apps/io.github.bhack.mini-eq.png"
+    other_png = tmp_path / "64x64/apps/other-app.png"
+    mini_eq_svg = tmp_path / "scalable/apps/io.github.bhack.mini-eq.svg"
+    mini_eq_png.parent.mkdir(parents=True)
+    mini_eq_svg.parent.mkdir(parents=True)
+    mini_eq_png.write_bytes(b"png")
+    other_png.write_bytes(b"png")
+    mini_eq_svg.write_text("<svg/>", encoding="utf-8")
+
+    desktop_integration.remove_legacy_raster_app_icons(tmp_path)
+
+    assert not mini_eq_png.exists()
+    assert other_png.exists()
+    assert mini_eq_svg.exists()

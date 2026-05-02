@@ -72,7 +72,7 @@ def color_scheme_for_appearance(appearance: str):
     if normalized == APPEARANCE_DARK:
         return Adw.ColorScheme.FORCE_DARK
 
-    return Adw.ColorScheme.PREFER_LIGHT
+    return Adw.ColorScheme.DEFAULT
 
 
 def apply_appearance_preference(appearance: str, style_manager=None) -> str:

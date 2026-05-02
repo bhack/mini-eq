@@ -183,12 +183,13 @@ class MiniEqWindowLayoutMixin:
         workspace.set_enable_hide_gesture(True)
         workspace.set_sidebar_position(Gtk.PackType.END)
         workspace.set_sidebar_width_fraction(0.24)
-        workspace.set_min_sidebar_width(248.0)
-        workspace.set_max_sidebar_width(300.0)
+        workspace.set_min_sidebar_width(268.0)
+        workspace.set_max_sidebar_width(320.0)
 
         left_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         left_column.set_hexpand(True)
         left_column.set_vexpand(True)
+        left_column.set_margin_end(8)
 
         left_scroller = Gtk.ScrolledWindow()
         left_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -198,19 +199,19 @@ class MiniEqWindowLayoutMixin:
         left_scroller.set_child(left_column)
 
         right_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        right_column.set_size_request(286, -1)
+        right_column.set_size_request(292, -1)
         right_column.set_vexpand(False)
         right_column.set_valign(Gtk.Align.START)
         right_column.set_margin_top(4)
         right_column.set_margin_bottom(2)
-        right_column.set_margin_start(8)
-        right_column.set_margin_end(6)
+        right_column.set_margin_start(14)
+        right_column.set_margin_end(10)
         right_column.add_css_class("utility-pane-shell")
 
         right_scroller = Gtk.ScrolledWindow()
         right_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         right_scroller.set_propagate_natural_height(False)
-        right_scroller.set_size_request(286, -1)
+        right_scroller.set_size_request(310, -1)
         right_scroller.set_vexpand(True)
         right_scroller.set_child(right_column)
 
@@ -284,7 +285,6 @@ class MiniEqWindowLayoutMixin:
         right_column.append(system_section)
 
         graph_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        graph_shell.add_css_class("panel-card")
         graph_shell.add_css_class("graph-shell-panel")
         graph_shell.set_vexpand(False)
         graph_shell.set_valign(Gtk.Align.START)
@@ -359,16 +359,22 @@ class MiniEqWindowLayoutMixin:
         self.graph_response_area.set_draw_func(self.on_graph_response_draw)
         graph_overlay.add_overlay(self.graph_response_area)
 
-        graph_frame.set_child(graph_overlay)
-        graph_shell.append(graph_frame)
-
         graph_meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.focus_label.add_css_class("heading")
         self.band_count_label.add_css_class("dim-label")
         self.band_count_label.add_css_class("numeric")
         graph_meta.append(self.focus_label)
         graph_meta.append(self.band_count_label)
-        graph_shell.append(graph_meta)
+        graph_meta.set_margin_start(12)
+        graph_meta.set_margin_end(12)
+        graph_meta.set_margin_bottom(2)
+
+        graph_stage_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        graph_stage_box.append(graph_overlay)
+        graph_stage_box.append(graph_meta)
+
+        graph_frame.set_child(graph_stage_box)
+        graph_shell.append(graph_frame)
         left_column.append(graph_shell)
 
         fader_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -610,6 +616,8 @@ class MiniEqWindowLayoutMixin:
                 right_column.remove_css_class("utility-pane-dense")
 
             if compact:
+                right_column.set_margin_start(18)
+                right_column.set_margin_end(12)
                 graph_shell.set_spacing(4 if not dense else 2)
                 self.graph_area.set_content_height(graph_height)
                 self.analyzer_area.set_content_height(analyzer_height)
@@ -650,6 +658,8 @@ class MiniEqWindowLayoutMixin:
                 move_if_needed(band_editor, fader_section)
                 return
 
+            right_column.set_margin_start(14)
+            right_column.set_margin_end(10)
             graph_shell.set_spacing(2 if dense else 6)
             self.graph_area.set_content_height(graph_height)
             self.analyzer_area.set_content_height(analyzer_height)

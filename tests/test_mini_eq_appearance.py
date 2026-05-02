@@ -32,7 +32,7 @@ def test_invalid_appearance_preference_falls_back_to_system(tmp_path, monkeypatc
 
 def test_style_switcher_uses_libadwaita_recommended_color_schemes(monkeypatch) -> None:
     selected_scheme = None
-    prefer_light = object()
+    default = object()
     force_light = object()
     force_dark = object()
 
@@ -44,7 +44,7 @@ def test_style_switcher_uses_libadwaita_recommended_color_schemes(monkeypatch) -
     fake_adw = SimpleNamespace(
         StyleManager=SimpleNamespace(get_default=lambda: FakeStyleManager()),
         ColorScheme=SimpleNamespace(
-            PREFER_LIGHT=prefer_light,
+            DEFAULT=default,
             FORCE_LIGHT=force_light,
             FORCE_DARK=force_dark,
         ),
@@ -52,7 +52,7 @@ def test_style_switcher_uses_libadwaita_recommended_color_schemes(monkeypatch) -
     monkeypatch.setattr(appearance, "Adw", fake_adw)
 
     assert appearance.apply_appearance_preference(appearance.APPEARANCE_SYSTEM) == appearance.APPEARANCE_SYSTEM
-    assert selected_scheme is prefer_light
+    assert selected_scheme is default
 
     assert appearance.apply_appearance_preference(appearance.APPEARANCE_LIGHT) == appearance.APPEARANCE_LIGHT
     assert selected_scheme is force_light

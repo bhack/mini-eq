@@ -55,10 +55,19 @@ def analyzer_plot_palette(
     return (*bar_color, bar_alpha), (*line_color, line_alpha)
 
 
-def analyzer_frequency_to_x(frequency: float, width: float, left: float, right: float) -> float:
+def analyzer_frequency_to_x(
+    frequency: float,
+    width: float,
+    left: float,
+    right: float,
+    freq_min: float = GRAPH_FREQ_MIN,
+    freq_max: float = GRAPH_FREQ_MAX,
+) -> float:
     usable = max(width - left - right, 1.0)
-    position = (math.log10(clamp(frequency, GRAPH_FREQ_MIN, GRAPH_FREQ_MAX)) - math.log10(GRAPH_FREQ_MIN)) / (
-        math.log10(GRAPH_FREQ_MAX) - math.log10(GRAPH_FREQ_MIN)
+    freq_min = max(float(freq_min), 1.0)
+    freq_max = max(float(freq_max), freq_min + 1.0)
+    position = (math.log10(clamp(frequency, freq_min, freq_max)) - math.log10(freq_min)) / (
+        math.log10(freq_max) - math.log10(freq_min)
     )
     return left + (usable * position)
 
@@ -79,16 +88,22 @@ def cached_analyzer_bar_geometry(
     else:
         frequencies = analyzer_bin_center_frequencies(count)
     edges = analyzer_band_edges(frequencies)
+    axis_min = edges[0]
+    axis_max = edges[-1]
 
     geometry: list[tuple[float, float, float]] = []
     for index in range(count):
-        raw_x0 = clamp(analyzer_frequency_to_x(edges[index], width, left, right), left, plot_right)
-        raw_x1 = clamp(analyzer_frequency_to_x(edges[index + 1], width, left, right), left, plot_right)
-        center_x = clamp(analyzer_frequency_to_x(frequencies[index], width, left, right), left, plot_right)
+        raw_x0 = clamp(analyzer_frequency_to_x(edges[index], width, left, right, axis_min, axis_max), left, plot_right)
+        raw_x1 = clamp(
+            analyzer_frequency_to_x(edges[index + 1], width, left, right, axis_min, axis_max), left, plot_right
+        )
+        center_x = clamp(
+            analyzer_frequency_to_x(frequencies[index], width, left, right, axis_min, axis_max), left, plot_right
+        )
         bucket_width = raw_x1 - raw_x0
         inner_gap = min(1.5, bucket_width * 0.35) if count > 1 else 0.0
-        x0 = raw_x0 + inner_gap / 2.0
-        x1 = raw_x1 - inner_gap / 2.0
+        x0 = left if index == 0 else raw_x0 + inner_gap / 2.0
+        x1 = plot_right if index == count - 1 else raw_x1 - inner_gap / 2.0
 
         if x1 <= x0:
             x0 = clamp(center_x - 0.5, left, max(left, plot_right - 1.0))

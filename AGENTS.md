@@ -105,22 +105,30 @@ are unavailable.
 
 ## Screenshot Rules
 
-The README should show the public screenshot, not instructions for generating
-release assets.
+The README should show the public app screenshot, not instructions for
+generating release assets. Use `docs/screenshots/mini-eq.png` as the primary
+README and default AppStream/Flathub screenshot. Keep it as just the app window
+in the platform-default light appearance. Use `docs/screenshots/mini-eq-dark.png`
+only as an optional second AppStream/Flathub screenshot to demonstrate dark style
+support.
+
+Use `docs/social-preview.png` for GitHub and social link previews. This is not a
+Flathub quality-check input, so it may use branded/dark promotional composition,
+but it should be refreshed when the public screenshot changes materially.
 
 Generate the public release screenshot with deterministic demo data:
 
 ```bash
 PYTHONPATH=src python3 tools/render_demo_screenshot.py docs/screenshots/mini-eq.png
+PYTHONPATH=src python3 tools/render_demo_screenshot.py docs/screenshots/mini-eq-dark.png --appearance dark
 ```
-
-When the public screenshot changes materially, refresh `docs/social-preview.png`
-so repository/package presentation stays visually consistent.
 
 Do not commit screenshots that show personal device names, Bluetooth device
 names, usernames, hostnames, local paths, or private preset names. Prefer
 `tools/render_demo_screenshot.py` over desktop screenshots because it renders
-only the Mini EQ window from deterministic demo data.
+only the Mini EQ window from deterministic demo data. Keep the public release
+screenshot in the platform-default light appearance unless you are adding
+additional screenshots that intentionally demonstrate other appearance modes.
 
 For visual or adaptive-layout changes, inspect deterministic screenshot
 matrices before considering the work done. Cover the minimum, default, narrow,
@@ -129,6 +137,17 @@ Check the actual PNG dimensions as well as the rendered image, because GTK can
 raise a requested size to the current minimum. Pay particular attention to
 collapsed/expanded transitions, clipped controls, wasted space, and whether the
 graph, analyzer, faders, and utility pane still share space deliberately.
+
+## Icon Asset Rules
+
+Use `src/mini_eq/assets/icons/hicolor/scalable/apps/io.github.bhack.mini-eq.svg`
+as the full-color app icon. Do not add generated PNG app icons unless a target
+platform specifically needs them; GNOME and Flathub can use the scalable SVG.
+
+Keep `src/mini_eq/assets/icons/hicolor/symbolic/apps/io.github.bhack.mini-eq-symbolic.svg`
+as the symbolic app icon. Before considering icon changes done, inspect the
+full-color icon against the GNOME app icon template and check 128, 64, and 32 px
+renders on light and dark backgrounds.
 
 ## Release And Security
 

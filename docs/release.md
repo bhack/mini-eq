@@ -32,12 +32,24 @@ Update every version-bearing file before building artifacts:
 `mini_eq.__version__` is derived from release metadata and should not be bumped
 manually.
 
-If the public screenshot changed, make the AppStream screenshot URL point at the
-same release tag. Then run the version metadata test:
+If the public app screenshot changed, make the AppStream screenshot URL point at
+the same release tag. `docs/screenshots/mini-eq.png` is the README and
+AppStream/Flathub screenshot, so it should remain a light/default app-window
+screenshot. `docs/screenshots/mini-eq-dark.png` may be listed as a second
+AppStream/Flathub screenshot to preview dark style support, but it should not
+replace the light/default screenshot as the first/default image.
+`docs/social-preview.png` is only for GitHub/social previews and may use branded
+promotional styling. Then run the version metadata test:
 
 ```bash
 python3 -m pytest tests/test_version_metadata.py -q
 ```
+
+If the app icon SVG changed, visually inspect its 128, 64, and 32 px renders
+on light and dark backgrounds before building the release.
+
+The app icon is installed as a scalable SVG plus a symbolic SVG. Do not add
+generated PNG app icons unless a target platform specifically needs them.
 
 For the full local release preflight, run:
 

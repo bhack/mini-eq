@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mini-eq"
-version = "0.1.7"
+version = "0.1.8"
 description = "Compact PipeWire system-wide parametric equalizer for Linux desktops."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -76,7 +76,8 @@ where = ["src"]
 [tool.setuptools.package-data]
 mini_eq = [
     "style.css",
-    "assets/icons/hicolor/*/apps/*.png",
+    "assets/icons/hicolor/scalable/apps/*.svg",
+    "assets/icons/hicolor/symbolic/apps/*.svg",
     "assets/icons/hicolor/scalable/actions/*.svg",
     "assets/source/*.png",
 ]

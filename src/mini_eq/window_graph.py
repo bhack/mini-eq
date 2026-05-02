@@ -35,9 +35,19 @@ FOCUS_BLUE = (0.47, 0.72, 1.0)
 FOCUS_BLUE_LIGHT = (0.68, 0.84, 1.0)
 RESPONSE_AMBER = (0.84, 0.46, 0.12)
 GRAPH_PLOT_LEFT = 58.0
-GRAPH_PLOT_RIGHT = 52.0
+GRAPH_PLOT_RIGHT = 62.0
 GRAPH_PLOT_TOP = 26.0
 GRAPH_PLOT_BOTTOM = 34.0
+
+
+def rounded_rectangle_path(cr, x: float, y: float, width: float, height: float, radius: float) -> None:
+    radius = min(radius, width / 2.0, height / 2.0)
+    cr.new_sub_path()
+    cr.arc(x + width - radius, y + radius, radius, -math.pi / 2.0, 0.0)
+    cr.arc(x + width - radius, y + height - radius, radius, 0.0, math.pi / 2.0)
+    cr.arc(x + radius, y + height - radius, radius, math.pi / 2.0, math.pi)
+    cr.arc(x + radius, y + radius, radius, math.pi, math.pi * 1.5)
+    cr.close_path()
 
 
 def filter_type_label(filter_type: int) -> str:
@@ -173,16 +183,16 @@ class MiniEqWindowGraphMixin:
     def update_focus_summary(self) -> None:
         selected = self.controller.bands[self.selected_band_index]
         selected_filter_type = filter_type_label(selected.filter_type)
-        route_enabled = self.route_switch.get_active()
-        if route_enabled:
-            self.focus_label.set_text(
-                f"Band {self.selected_band_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
-            )
-            self.band_count_label.set_text(selected_filter_type)
-            self.band_count_label.set_visible(True)
-        else:
-            self.focus_label.set_text("EQ curve is not applied to system audio")
-            self.band_count_label.set_visible(False)
+        self.focus_label.set_text(
+            f"Band {self.selected_band_index + 1} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
+        )
+        self.band_count_label.set_text(selected_filter_type)
+        self.band_count_label.set_visible(True)
+        tooltip = f"{selected_filter_type} band at {format_frequency(selected.frequency)}, {selected.gain_db:+.1f} dB"
+        if not self.route_switch.get_active():
+            tooltip = f"{tooltip}. System-wide EQ is off."
+        self.focus_label.set_tooltip_text(tooltip)
+        self.band_count_label.set_tooltip_text(tooltip)
         self.inspector_summary_label.set_text(
             f"{selected_filter_type} • {format_frequency(selected.frequency)} • {selected.gain_db:+.1f} dB"
         )
@@ -636,7 +646,6 @@ class MiniEqWindowGraphMixin:
         dark = self.is_dark_appearance()
 
         if dark:
-            canvas_bg = (0.026, 0.039, 0.056)
             plot_top_color = (0.105, 0.155, 0.225, 0.98)
             plot_bottom_color = (0.045, 0.070, 0.108, 0.98)
             major_grid = (0.72, 0.80, 0.88, 0.28)
@@ -649,7 +658,6 @@ class MiniEqWindowGraphMixin:
             analyzer_label = (0.45, 0.78, 0.86)
             monitor_label = (0.50, 0.86, 0.98)
         else:
-            canvas_bg = (0.74, 0.81, 0.88)
             plot_top_color = (0.95, 0.97, 0.99, 0.98)
             plot_bottom_color = (0.81, 0.87, 0.93, 0.98)
             major_grid = (0.18, 0.25, 0.32, 0.34)
@@ -662,15 +670,11 @@ class MiniEqWindowGraphMixin:
             analyzer_label = (0.02, 0.34, 0.50)
             monitor_label = (0.02, 0.36, 0.54)
 
-        cr.set_source_rgb(*canvas_bg)
-        cr.rectangle(0, 0, width_f, height_f)
-        cr.fill()
-
         background = cairo.LinearGradient(0, top, 0, height_f - bottom)
         background.add_color_stop_rgba(0.0, *plot_top_color)
         background.add_color_stop_rgba(1.0, *plot_bottom_color)
         cr.set_source(background)
-        cr.rectangle(left, top, plot_width, plot_height)
+        rounded_rectangle_path(cr, left, top, plot_width, plot_height, 7.0)
         cr.fill()
 
         db_lines = [-24, -18, -12, -6, 0, 6, 12, 18, 24]
@@ -713,7 +717,7 @@ class MiniEqWindowGraphMixin:
 
         cr.set_source_rgba(*border)
         cr.set_line_width(1.0)
-        cr.rectangle(left, top, plot_width, plot_height)
+        rounded_rectangle_path(cr, left + 0.5, top + 0.5, plot_width - 1.0, plot_height - 1.0, 6.5)
         cr.stroke()
 
         self.draw_text(cr, "20 Hz", left, 18, edge_label, 11.5)

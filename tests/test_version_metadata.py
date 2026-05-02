@@ -39,6 +39,14 @@ def appstream_screenshot_url() -> str:
     return image.text
 
 
+def appstream_screenshot_urls() -> list[str]:
+    urls = []
+    for image in appstream_metadata().findall("./screenshots/screenshot/image"):
+        assert image.text is not None
+        urls.append(image.text)
+    return urls
+
+
 def test_release_versions_are_in_sync() -> None:
     version = project_version()
 
@@ -51,3 +59,11 @@ def test_appstream_screenshot_points_at_current_release_tag() -> None:
     version = project_version()
 
     assert f"/v{version}/" in appstream_screenshot_url()
+
+
+def test_all_appstream_screenshots_point_at_current_release_tag() -> None:
+    version = project_version()
+
+    assert appstream_screenshot_urls()
+    for url in appstream_screenshot_urls():
+        assert f"/v{version}/" in url
