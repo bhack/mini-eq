@@ -96,7 +96,7 @@ jobs:
           ref: ${{ inputs.target }}
 
       - name: Download package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: mini-eq-dist
           path: dist
@@ -168,7 +168,7 @@ jobs:
 
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: mini-eq-dist
           path: dist
@@ -194,7 +194,7 @@ jobs:
 
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: mini-eq-dist
           path: dist
