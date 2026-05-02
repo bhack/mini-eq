@@ -78,7 +78,6 @@ mini_eq = [
     "style.css",
     "assets/icons/hicolor/scalable/apps/*.svg",
     "assets/icons/hicolor/symbolic/apps/*.svg",
-    "assets/source/*.png",
 ]
 
 [tool.pytest.ini_options]
