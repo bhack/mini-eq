@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-05-04
+
+- Improve adaptive layout spacing across compact, tall, and wide windows.
+- Remove unnecessary utility-pane scrolling at the minimum window height.
+- Lighten the utility pane presentation so tall windows keep focus on the controls.
+
 ## 0.3.0 - 2026-05-03
 
 - Add optional live LUFS loudness metering through libebur128 and the existing JACK monitor stream.

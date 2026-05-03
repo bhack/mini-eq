@@ -34,11 +34,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.0/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.1/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.0/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.1/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -46,6 +46,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.3.1" date="2026-05-04">
+      <description>
+        <ul>
+          <li>Improve adaptive layout spacing across compact, tall, and wide windows.</li>
+          <li>Avoid unnecessary utility pane scrolling at the minimum window height.</li>
+          <li>Lighten the utility pane presentation so tall windows keep focus on the controls.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-05-03">
       <description>
         <ul>

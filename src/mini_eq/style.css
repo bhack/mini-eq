@@ -120,8 +120,21 @@
     color: alpha(var(--window-fg-color), 0.86);
 }
 
+overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
+    background-color: transparent;
+}
+
+.mini-eq-dark overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
+    background-color: transparent;
+}
+
+.utility-pane-scroller,
+.utility-pane-scroller viewport {
+    background-color: transparent;
+}
+
 .utility-section {
-    padding: 9px 10px;
+    padding: 7px 10px;
     border-radius: 12px;
     border: 1px solid var(--mini-border-soft);
     background-color: var(--mini-utility-section-bg);
@@ -132,13 +145,13 @@
 }
 
 .utility-row {
-    padding: 6px 0;
+    padding: 4px 0;
     border-radius: 0;
     background-color: transparent;
 }
 
 .compare-row {
-    padding: 6px 0;
+    padding: 4px 0;
     border-radius: 0;
     background-color: transparent;
 }
@@ -173,7 +186,7 @@
 }
 
 .preset-state-chip {
-    padding: 4px 10px;
+    padding: 3px 10px;
     border-radius: 999px;
     font-size: 9pt;
     font-weight: 800;
@@ -195,7 +208,7 @@
 }
 
 .system-state-chip {
-    padding: 4px 10px;
+    padding: 3px 10px;
     border-radius: 999px;
     font-size: 9pt;
     font-weight: 800;
@@ -222,7 +235,7 @@
 }
 
 .headroom-panel {
-    padding: 6px 0;
+    padding: 4px 0;
     border-radius: 8px;
     background-color: transparent;
 }
@@ -240,7 +253,7 @@
 }
 
 .headroom-peak-chip {
-    padding: 4px 9px;
+    padding: 3px 9px;
     border-radius: 999px;
     font-size: 9.5pt;
     font-weight: 800;
@@ -277,13 +290,13 @@
 }
 
 .monitor-strip {
-    margin-top: 3px;
-    padding-top: 7px;
+    margin-top: 1px;
+    padding-top: 5px;
     border-top: 1px solid var(--mini-border-subtle);
 }
 
 .monitor-detail-row {
-    min-height: 28px;
+    min-height: 24px;
 }
 
 .monitor-settings-button {
@@ -299,60 +312,7 @@
 }
 
 .loudness-meter-area {
-    min-height: 16px;
-}
-
-.utility-pane-dense .utility-section {
-    padding: 6px 8px;
-}
-
-.utility-pane-dense .utility-row,
-.utility-pane-dense .compare-row {
-    padding: 6px 8px;
-}
-
-.utility-pane-dense .toolbar-button {
-    min-height: 32px;
-    padding-top: 2px;
-    padding-bottom: 2px;
-}
-
-.utility-pane-dense .preset-row {
-    margin-top: 0;
-}
-
-.utility-pane-dense .preset-state-chip,
-.utility-pane-dense .system-state-chip,
-.utility-pane-dense .compare-state-chip,
-.utility-pane-dense .headroom-peak-chip {
-    padding-top: 2px;
-    padding-bottom: 2px;
-}
-
-.utility-pane-dense .headroom-panel {
-    padding: 6px 8px;
-}
-
-.utility-pane-dense .headroom-state {
-    font-size: 12pt;
-}
-
-.utility-pane-dense .headroom-meter-area {
-    min-height: 10px;
-}
-
-.utility-pane-dense .monitor-strip {
-    margin-top: 1px;
-    padding-top: 5px;
-}
-
-.utility-pane-dense .monitor-detail-row {
-    min-height: 24px;
-}
-
-.utility-pane-dense .monitor-settings-button {
-    min-width: 32px;
-    min-height: 32px;
+    min-height: 14px;
 }
 
 .headroom-state.headroom-safe {

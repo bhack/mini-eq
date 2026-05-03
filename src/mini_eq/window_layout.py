@@ -34,7 +34,6 @@ from .window_utils import (
 )
 
 ADAPTIVE_NARROW_BREAKPOINT_SP = 1320
-RESPONSIVE_COMFORTABLE_HEIGHT = 720
 RESPONSIVE_ROOMY_HEIGHT = 960
 COMPACT_BREAKPOINT_SP = 1080
 DEFAULT_GRAPH_CONTENT_WIDTH = 900
@@ -184,6 +183,7 @@ class MiniEqWindowLayoutMixin:
         root.append(toolbar_stack)
 
         workspace = Adw.OverlaySplitView()
+        workspace.add_css_class("mini-eq-workspace")
         workspace.set_hexpand(True)
         workspace.set_vexpand(True)
         workspace.set_valign(Gtk.Align.FILL)
@@ -219,6 +219,7 @@ class MiniEqWindowLayoutMixin:
         right_column.add_css_class("utility-pane-shell")
 
         right_scroller = Gtk.ScrolledWindow()
+        right_scroller.add_css_class("utility-pane-scroller")
         right_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         right_scroller.set_propagate_natural_height(False)
         right_scroller.set_size_request(310, -1)
@@ -620,32 +621,27 @@ class MiniEqWindowLayoutMixin:
                 ROOMY_FADER_SCROLLER_MIN_HEIGHT,
                 layout_height,
             )
-            dense = layout_height < RESPONSIVE_COMFORTABLE_HEIGHT
-            right_column.set_spacing(8 if dense else 12)
-            right_column.set_margin_top(2 if dense else 4)
-            right_column.set_margin_bottom(0 if dense else 2)
-            preset_section.set_spacing(6 if dense else 8)
-            system_section.set_spacing(6 if dense else 8)
-            self.headroom_panel.set_spacing(4 if dense else 7)
-            self.headroom_meter_area.set_content_height(10 if dense else 14)
-            monitor_panel.set_spacing(2 if dense else 4)
-            if dense:
-                right_column.add_css_class("utility-pane-dense")
-            else:
-                right_column.remove_css_class("utility-pane-dense")
+            right_column.set_spacing(responsive_value(6, 12, layout_height))
+            right_column.set_margin_top(responsive_value(2, 4, layout_height))
+            right_column.set_margin_bottom(responsive_value(0, 2, layout_height))
+            preset_section.set_spacing(responsive_value(5, 8, layout_height))
+            system_section.set_spacing(responsive_value(5, 8, layout_height))
+            self.headroom_panel.set_spacing(responsive_value(3, 7, layout_height))
+            self.headroom_meter_area.set_content_height(responsive_value(9, 14, layout_height))
+            monitor_panel.set_spacing(responsive_value(1, 4, layout_height))
 
             if compact:
                 right_column.set_margin_start(18)
                 right_column.set_margin_end(12)
-                graph_shell.set_spacing(4 if not dense else 2)
+                graph_shell.set_spacing(responsive_value(2, 4, layout_height))
                 self.graph_area.set_content_height(graph_height)
                 self.analyzer_area.set_content_height(analyzer_height)
                 self.graph_response_area.set_content_height(graph_height)
                 fader_section.set_spacing(COMPACT_FADER_SECTION_SPACING)
                 fader_section.set_vexpand(False)
                 fader_section.set_valign(Gtk.Align.START)
-                fader_section.set_margin_top(6 if not dense else 4)
-                fader_section.set_margin_bottom(4 if not dense else 3)
+                fader_section.set_margin_top(responsive_value(4, 6, layout_height))
+                fader_section.set_margin_bottom(responsive_value(3, 4, layout_height))
                 self.fader_scroller.set_vexpand(False)
                 self.fader_scroller.set_valign(Gtk.Align.START)
                 self.fader_scroller.set_min_content_height(fader_scroller_height)
@@ -679,21 +675,23 @@ class MiniEqWindowLayoutMixin:
 
             right_column.set_margin_start(14)
             right_column.set_margin_end(10)
-            graph_shell.set_spacing(2 if dense else 6)
+            graph_shell.set_spacing(responsive_value(2, 6, layout_height))
             self.graph_area.set_content_height(graph_height)
             self.analyzer_area.set_content_height(analyzer_height)
             self.graph_response_area.set_content_height(graph_height)
-            fader_section.set_spacing(COMPACT_FADER_SECTION_SPACING if dense else DEFAULT_FADER_SECTION_SPACING)
+            fader_section.set_spacing(
+                responsive_value(COMPACT_FADER_SECTION_SPACING, DEFAULT_FADER_SECTION_SPACING, layout_height)
+            )
             fader_section.set_vexpand(False)
             fader_section.set_valign(Gtk.Align.START)
-            fader_section.set_margin_top(4 if dense else 8)
-            fader_section.set_margin_bottom(3 if dense else 6)
+            fader_section.set_margin_top(responsive_value(4, 8, layout_height))
+            fader_section.set_margin_bottom(responsive_value(3, 6, layout_height))
             self.fader_scroller.set_vexpand(False)
             self.fader_scroller.set_valign(Gtk.Align.START)
             self.fader_scroller.set_min_content_height(fader_scroller_height)
             self.fader_scroller.remove_css_class("fader-scroller-compact")
-            fader_grid.set_margin_top(2 if dense else 4)
-            fader_grid.set_margin_bottom(2 if dense else 4)
+            fader_grid.set_margin_top(responsive_value(2, 4, layout_height))
+            fader_grid.set_margin_bottom(responsive_value(2, 4, layout_height))
             band_editor.remove_css_class("band-editor-compact-active")
             band_editor.remove_css_class("band-editor-inline-compact")
             band_editor.set_child_spacing(8)
