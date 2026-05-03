@@ -122,6 +122,8 @@ class MiniEqWindow(
         self.analyzer_levels = [0.0] * ANALYZER_BIN_COUNT
         self.analyzer_db_floor = ANALYZER_DB_FLOOR
         self.analyzer_display_gain_db = ANALYZER_DISPLAY_GAIN_DEFAULT
+        self.analyzer_loudness_snapshot = None
+        self.analyzer_session_max_shortterm_lufs: float | None = None
         self.analyzer_last_redraw_time = 0.0
         self.control_analyzer_last_emit_time = 0.0
         self.curve_metadata_refresh_source_id = 0
@@ -161,6 +163,8 @@ class MiniEqWindow(
         self.analyzer_mode_combo.set_sensitive(False)
         self.analyzer_state_label = Gtk.Label(xalign=1.0)
         self.analyzer_summary_label = Gtk.Label(xalign=0.0)
+        self.analyzer_loudness_value_label = Gtk.Label(label="--", xalign=1.0)
+        self.analyzer_loudness_meter_area = Gtk.DrawingArea()
         self.analyzer_smoothing_label = Gtk.Label(xalign=1.0)
         self.analyzer_smoothing_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 15.0, 95.0, 1.0)
         self.analyzer_smoothing_scale.set_draw_value(False)
@@ -188,6 +192,7 @@ class MiniEqWindow(
 
         self.controller.set_status_callback(self.set_status)
         self.controller.set_analyzer_levels_callback(self.on_analyzer_levels)
+        self.controller.set_analyzer_loudness_callback(self.on_analyzer_loudness)
         self.install_css()
         self.sync_appearance_css_class()
         self.build_window_content(auto_route)
@@ -279,6 +284,7 @@ class MiniEqWindow(
         self.controller.set_status_callback(None)
         self.controller.set_outputs_changed_callback(None)
         self.controller.set_analyzer_levels_callback(None)
+        self.controller.set_analyzer_loudness_callback(None)
         self.stop_preset_monitoring()
         self.stop_analyzer_preview(stop_backend=False)
 

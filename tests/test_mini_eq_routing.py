@@ -178,6 +178,73 @@ def test_enabling_analyzer_while_engine_runs_opens_jack_before_restarting_engine
     ]
 
 
+def test_set_analyzer_loudness_callback_updates_existing_analyzer() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    callbacks: list[object] = []
+
+    class FakeAnalyzer:
+        def set_loudness_callback(self, callback) -> None:
+            callbacks.append(callback)
+
+    callback = object()
+    controller.output_analyzer = FakeAnalyzer()
+
+    routing.SystemWideEqController.set_analyzer_loudness_callback(controller, callback)
+
+    assert controller.analyzer_loudness_callback is callback
+    assert callbacks == [callback]
+
+
+def test_ensure_output_analyzer_passes_loudness_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.output_sink = "speakers"
+    controller.output_backend = FakeOutputBackend([make_node(1, "speakers")])
+    controller.analyzer_levels_callback = object()
+    controller.analyzer_loudness_callback = object()
+    controller.analyzer_response_speed = routing.ANALYZER_RESPONSE_DEFAULT
+    controller.output_analyzer = None
+    created: list[object] = []
+
+    class FakeAnalyzer:
+        def __init__(
+            self,
+            output_sink_name,
+            levels_callback,
+            status_callback,
+            output_sink_description=None,
+            loudness_callback=None,
+        ) -> None:
+            self.output_sink_name = output_sink_name
+            self.levels_callback = levels_callback
+            self.status_callback = status_callback
+            self.output_sink_description = output_sink_description
+            self.loudness_callback = loudness_callback
+            created.append(self)
+
+        def set_output_sink_name(self, sink_name, sink_description=None) -> None:
+            self.output_sink_name = sink_name
+            self.output_sink_description = sink_description
+
+        def set_levels_callback(self, callback) -> None:
+            self.levels_callback = callback
+
+        def set_loudness_callback(self, callback) -> None:
+            self.loudness_callback = callback
+
+        def set_response_speed(self, speed: float) -> None:
+            self.response_speed = speed
+
+    monkeypatch.setattr(routing, "OutputSpectrumAnalyzer", FakeAnalyzer)
+    controller.emit_status = lambda _message: None
+
+    analyzer_instance = routing.SystemWideEqController.ensure_output_analyzer(controller)
+
+    assert analyzer_instance is created[0]
+    assert analyzer_instance.output_sink_name == "speakers"
+    assert analyzer_instance.levels_callback is controller.analyzer_levels_callback
+    assert analyzer_instance.loudness_callback is controller.analyzer_loudness_callback
+
+
 def test_enabling_prepared_analyzer_does_not_restart_running_engine() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.running = True

@@ -34,11 +34,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.2.0/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.0/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.2.0/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.0/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -46,6 +46,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.3.0" date="2026-05-03">
+      <description>
+        <ul>
+          <li>Add live LUFS loudness metering in the monitor strip.</li>
+          <li>Use the existing audio monitor stream for listening-session loudness readings.</li>
+          <li>Bundle loudness metering support in Flatpak builds.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-05-02">
       <description>
         <ul>

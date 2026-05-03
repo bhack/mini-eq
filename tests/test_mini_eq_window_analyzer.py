@@ -137,6 +137,8 @@ class AnalyzerToggleWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
         self.updating_ui = False
         self.analyzer_enabled = True
         self.analyzer_levels = [0.8, 0.4]
+        self.analyzer_loudness_snapshot = analyzer.AnalyzerLoudnessSnapshot(-18.0, -17.0, -16.0)
+        self.analyzer_session_max_shortterm_lufs = -12.0
         self.analyzer_preview_source_id = 0
         self.analyzer_preview_uses_tick_callback = False
         self.controller = FakeAnalyzerController()
@@ -147,6 +149,65 @@ class AnalyzerToggleWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
 
     def sync_ui_from_state(self) -> None:
         self.sync_count += 1
+
+
+class FakeSummaryLabel:
+    def __init__(self) -> None:
+        self.text = ""
+        self.tooltip = ""
+
+    def set_text(self, text: str) -> None:
+        self.text = text
+
+    def set_tooltip_text(self, tooltip: str) -> None:
+        self.tooltip = tooltip
+
+
+class FakeTooltipWidget:
+    def __init__(self) -> None:
+        self.tooltip = ""
+
+    def set_tooltip_text(self, tooltip: str) -> None:
+        self.tooltip = tooltip
+
+
+class FakeMeterArea:
+    def __init__(self) -> None:
+        self.draw_count = 0
+        self.accessible_description = ""
+        self.tooltip = ""
+
+    def queue_draw(self) -> None:
+        self.draw_count += 1
+
+    def update_property(self, _properties: object, values: list[str]) -> None:
+        self.accessible_description = values[0]
+
+    def set_tooltip_text(self, tooltip: str) -> None:
+        self.tooltip = tooltip
+
+
+class AnalyzerSummaryWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
+    def __init__(self) -> None:
+        self.analyzer_summary_label = FakeSummaryLabel()
+        self.analyzer_loudness_value_label = FakeSummaryLabel()
+        self.analyzer_loudness_meter_area = FakeMeterArea()
+        self.monitor_panel = FakeTooltipWidget()
+        self.monitor_title_label = FakeTooltipWidget()
+        self.monitor_detail_row = FakeTooltipWidget()
+        self.monitor_tooltip_widgets = (
+            self.monitor_panel,
+            self.monitor_title_label,
+            self.monitor_detail_row,
+            self.analyzer_loudness_meter_area,
+            self.analyzer_loudness_value_label,
+        )
+        self.analyzer_enabled = True
+        self.analyzer_frozen = False
+        self.analyzer_smoothing = 0.4
+        self.analyzer_display_gain_db = 6.0
+        self.analyzer_loudness_snapshot = analyzer.AnalyzerLoudnessSnapshot(-18.25, -16.5, -14.0)
+        self.analyzer_session_max_shortterm_lufs = -11.75
 
 
 def test_analyzer_bars_follow_log_frequency_edges() -> None:
@@ -302,6 +363,101 @@ def test_analyzer_toggle_off_emits_zero_level_signal() -> None:
     assert window.controller.enabled_values == [False]
     assert window.analyzer_enabled is False
     assert window.analyzer_levels == [0.0, 0.0]
+    assert window.analyzer_loudness_snapshot is None
+    assert window.analyzer_session_max_shortterm_lufs is None
     assert window.application.analyzer_count == 1
     assert window.application.state_count == 1
     assert window.sync_count == 1
+
+
+def test_analyzer_summary_prefers_live_shortterm_loudness() -> None:
+    window = AnalyzerSummaryWindow()
+
+    window.update_analyzer_summary_label()
+
+    assert window.analyzer_summary_label.text == "On · -16.5 LUFS"
+    assert window.analyzer_summary_label.tooltip == "Current -16.5 LUFS · Peak -11.8 LUFS"
+    assert "momentary" not in window.analyzer_summary_label.tooltip
+    assert "integrated" not in window.analyzer_summary_label.tooltip
+    assert window.analyzer_loudness_value_label.text == "-16.5 LUFS"
+    assert window.analyzer_loudness_meter_area.draw_count == 1
+    assert window.analyzer_loudness_meter_area.accessible_description == "Current -16.5 LUFS · Peak -11.8 LUFS"
+    assert window.monitor_panel.tooltip == window.analyzer_summary_label.tooltip
+    assert window.monitor_title_label.tooltip == window.analyzer_summary_label.tooltip
+    assert window.monitor_detail_row.tooltip == window.analyzer_summary_label.tooltip
+    assert window.analyzer_loudness_meter_area.tooltip == window.analyzer_summary_label.tooltip
+    assert window.analyzer_loudness_value_label.tooltip == window.analyzer_summary_label.tooltip
+
+
+def test_format_lufs_handles_silence() -> None:
+    assert window_analyzer.format_lufs(float("-inf")) == "-inf LUFS"
+
+
+def test_analyzer_summary_clears_loudness_details_without_snapshot() -> None:
+    window = AnalyzerSummaryWindow()
+    window.analyzer_loudness_snapshot = None
+    window.analyzer_session_max_shortterm_lufs = None
+
+    window.update_analyzer_summary_label()
+
+    assert window.analyzer_summary_label.text == "On · +6 dB"
+    assert window.analyzer_summary_label.tooltip == "Monitor on"
+    assert window.analyzer_loudness_value_label.text == "--"
+    assert window.analyzer_loudness_meter_area.accessible_description == "Current -- · Peak --"
+
+
+def test_analyzer_summary_shows_off_in_main_loudness_value() -> None:
+    window = AnalyzerSummaryWindow()
+    window.analyzer_enabled = False
+
+    window.update_analyzer_summary_label()
+
+    assert window.analyzer_summary_label.text == "Off"
+    assert window.analyzer_summary_label.tooltip == "Monitor off"
+    assert window.analyzer_loudness_value_label.text == "Off"
+    assert window.analyzer_loudness_meter_area.accessible_description == "Monitor is off"
+
+
+def test_analyzer_summary_marks_frozen_loudness_in_tooltip() -> None:
+    window = AnalyzerSummaryWindow()
+    window.analyzer_frozen = True
+
+    window.update_analyzer_summary_label()
+
+    assert window.analyzer_summary_label.text == "Frozen · -16.5 LUFS"
+    assert window.analyzer_summary_label.tooltip == "Frozen · Current -16.5 LUFS · Peak -11.8 LUFS"
+
+
+def test_loudness_meter_norm_maps_lufs_to_meter_range() -> None:
+    assert window_analyzer.loudness_meter_norm(None) == pytest.approx(0.0)
+    assert window_analyzer.loudness_meter_norm(float("-inf")) == pytest.approx(0.0)
+    assert window_analyzer.loudness_meter_norm(-60.0) == pytest.approx(0.0)
+    assert window_analyzer.loudness_meter_norm(-30.0) == pytest.approx(0.5)
+    assert window_analyzer.loudness_meter_norm(0.0) == pytest.approx(1.0)
+    assert window_analyzer.loudness_meter_norm(3.0) == pytest.approx(1.0)
+
+
+def test_loudness_summary_falls_back_while_shortterm_is_not_ready() -> None:
+    snapshot = analyzer.AnalyzerLoudnessSnapshot(-21.0, float("-inf"), float("-inf"))
+
+    assert window_analyzer.loudness_current_lufs(snapshot) == pytest.approx(-21.0)
+    assert window_analyzer.loudness_summary_lufs(snapshot) == "-21.0 LUFS"
+
+
+def test_visible_loudness_falls_back_while_shortterm_is_not_ready() -> None:
+    window = AnalyzerSummaryWindow()
+    window.analyzer_loudness_snapshot = analyzer.AnalyzerLoudnessSnapshot(-21.0, float("-inf"), float("-inf"))
+    window.analyzer_session_max_shortterm_lufs = None
+
+    window.update_analyzer_summary_label()
+
+    assert window.analyzer_summary_label.text == "On · -21.0 LUFS"
+    assert window.analyzer_summary_label.tooltip == "Current -21.0 LUFS · Peak --"
+    assert window.analyzer_loudness_value_label.text == "-21.0 LUFS"
+    assert window.analyzer_loudness_meter_area.accessible_description == "Current -21.0 LUFS · Peak --"
+
+
+def test_loudness_session_max_ignores_silence() -> None:
+    assert window_analyzer.update_loudness_max(None, float("-inf")) is None
+    assert window_analyzer.update_loudness_max(-18.0, -20.0) == pytest.approx(-18.0)
+    assert window_analyzer.update_loudness_max(-18.0, -12.0) == pytest.approx(-12.0)

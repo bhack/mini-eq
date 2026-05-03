@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 - 2026-05-03
+
+- Add optional live LUFS loudness metering through libebur128 and the existing JACK monitor stream.
+- Bundle libebur128 in the local Flatpak manifest for the live loudness readout.
+
 ## 0.2.0 - 2026-05-02
 
 - Add per-output preset links so headphones, speakers, HDMI, and other outputs can automatically use different saved presets.

@@ -4,9 +4,11 @@ import math
 import os
 import sys
 import threading
+import time
 from array import array
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import lru_cache
 
 from .core import GRAPH_FREQ_MAX, GRAPH_FREQ_MIN, SAMPLE_RATE, clamp
@@ -66,7 +68,15 @@ ANALYZER_RESPONSE_MIN = 0.02
 ANALYZER_RESPONSE_MAX = 15.0
 ANALYZER_RESPONSE_DEFAULT = 2.0
 ANALYZER_POWER_FLOOR = 10.0 ** (ANALYZER_DB_FLOOR / 10.0)
+LOUDNESS_EMIT_INTERVAL_SECONDS = 0.25
 _numpy_module = None
+
+
+@dataclass(frozen=True)
+class AnalyzerLoudnessSnapshot:
+    momentary_lufs: float
+    shortterm_lufs: float
+    integrated_lufs: float
 
 
 def require_numpy():
@@ -205,6 +215,21 @@ def stereo_f32le_bytes_to_mono_samples(left_payload: bytes, right_payload: bytes
     samples = array("f")
     samples.frombytes(mono_values.tobytes())
     return samples
+
+
+def stereo_f32le_bytes_to_interleaved_float32(left_payload: bytes, right_payload: bytes) -> object:
+    usable_size = min(len(left_payload), len(right_payload))
+    usable_size -= usable_size % ANALYZER_SAMPLE_WIDTH_BYTES
+    if usable_size == 0:
+        return require_numpy().array([], dtype=require_numpy().float32)
+
+    np = require_numpy()
+    left_values = np.frombuffer(left_payload[:usable_size], dtype="<f4")
+    right_values = np.frombuffer(right_payload[:usable_size], dtype="<f4")
+    interleaved = np.empty(left_values.size * 2, dtype=np.float32)
+    interleaved[0::2] = left_values
+    interleaved[1::2] = right_values
+    return interleaved
 
 
 def samples_to_numpy_window(samples: array, fft_size: int):
@@ -449,10 +474,12 @@ class OutputSpectrumAnalyzer:
         levels_callback: Callable[[list[float]], None] | None,
         status_callback: Callable[[str], None],
         output_sink_description: str | None = None,
+        loudness_callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None = None,
     ) -> None:
         self.output_sink_name = output_sink_name
         self.output_sink_description = output_sink_description
         self.levels_callback = levels_callback
+        self.loudness_callback = loudness_callback
         self.status_callback = status_callback
         self.enabled = False
         self.client = None
@@ -468,6 +495,9 @@ class OutputSpectrumAnalyzer:
 
     def set_levels_callback(self, callback: Callable[[list[float]], None] | None) -> None:
         self.levels_callback = callback
+
+    def set_loudness_callback(self, callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None) -> None:
+        self.loudness_callback = callback
 
     def set_response_speed(self, speed: float) -> None:
         self.response_speed = clamp(float(speed), ANALYZER_RESPONSE_MIN, ANALYZER_RESPONSE_MAX)
@@ -538,6 +568,7 @@ class OutputSpectrumAnalyzer:
         self.reader_thread = None
         self.stop_event.set()
         self.audio_blocks.clear()
+        self.emit_loudness_snapshot(None)
 
         if client is not None and self.client_active and not close_client:
             self.deactivate_jack_client(client)
@@ -633,6 +664,48 @@ class OutputSpectrumAnalyzer:
         client.connect(jack_port_name(left_output_port), jack_port_name(self.left_input_port))
         client.connect(jack_port_name(right_output_port), jack_port_name(self.right_input_port))
 
+    def create_loudness_meter(self):
+        try:
+            from .ebur128 import EBUR128_MODE_I, EBUR128_MODE_S, Ebur128Meter
+
+            return Ebur128Meter(
+                sample_rate=int(round(self.sample_rate)),
+                channels=2,
+                mode=EBUR128_MODE_I | EBUR128_MODE_S,
+            )
+        except Exception as exc:
+            self.status_callback(f"Loudness Unavailable: {exc}")
+            return None
+
+    def emit_loudness_snapshot(self, snapshot: AnalyzerLoudnessSnapshot | None) -> None:
+        callback = self.loudness_callback
+        if callback is not None:
+            callback(snapshot)
+
+    def feed_loudness_meter(self, meter, left_payload: bytes, right_payload: bytes) -> bool:
+        interleaved = stereo_f32le_bytes_to_interleaved_float32(left_payload, right_payload)
+        if len(interleaved) == 0:
+            return False
+
+        meter.add_frames_float32(interleaved)
+        return True
+
+    def read_loudness_snapshot(self, meter) -> AnalyzerLoudnessSnapshot:
+        return AnalyzerLoudnessSnapshot(
+            momentary_lufs=meter.momentary_lufs(),
+            shortterm_lufs=meter.shortterm_lufs(),
+            integrated_lufs=meter.integrated_lufs(),
+        )
+
+    def close_loudness_meter(self, meter) -> None:
+        if meter is None:
+            return
+
+        try:
+            meter.close()
+        except Exception:
+            pass
+
     def process_jack_audio(self, _frames: int) -> None:
         if self.stop_event.is_set() or self.left_input_port is None or self.right_input_port is None:
             return
@@ -649,6 +722,9 @@ class OutputSpectrumAnalyzer:
         fft_samples = array("f")
         fft_size = analyzer_fft_size(self.sample_rate)
         smoothed_powers: tuple[float, ...] = ()
+        loudness_meter = None
+        loudness_stopped = False
+        last_loudness_emit_time = 0.0
 
         try:
             while not self.stop_event.is_set():
@@ -657,6 +733,31 @@ class OutputSpectrumAnalyzer:
                 except IndexError:
                     self.stop_event.wait(ANALYZER_QUEUE_WAIT_SECONDS)
                     continue
+
+                if self.loudness_callback is None:
+                    if loudness_meter is not None:
+                        self.close_loudness_meter(loudness_meter)
+                        loudness_meter = None
+                    loudness_stopped = False
+                elif loudness_meter is None and not loudness_stopped:
+                    loudness_meter = self.create_loudness_meter()
+                    if loudness_meter is None:
+                        self.emit_loudness_snapshot(None)
+                        loudness_stopped = True
+
+                if loudness_meter is not None:
+                    try:
+                        if self.feed_loudness_meter(loudness_meter, left_payload, right_payload):
+                            now = time.monotonic()
+                            if now - last_loudness_emit_time >= LOUDNESS_EMIT_INTERVAL_SECONDS:
+                                self.emit_loudness_snapshot(self.read_loudness_snapshot(loudness_meter))
+                                last_loudness_emit_time = now
+                    except Exception as exc:
+                        self.status_callback(f"Loudness stopped: {exc}")
+                        self.emit_loudness_snapshot(None)
+                        self.close_loudness_meter(loudness_meter)
+                        loudness_meter = None
+                        loudness_stopped = True
 
                 pending_samples.extend(stereo_f32le_bytes_to_mono_samples(left_payload, right_payload))
                 frame_count = analyzer_frame_count(self.sample_rate)
@@ -681,5 +782,6 @@ class OutputSpectrumAnalyzer:
                     if callback is not None and levels:
                         callback(levels)
         finally:
+            self.close_loudness_meter(loudness_meter)
             if self.reader_thread is threading.current_thread():
                 self.reader_thread = None

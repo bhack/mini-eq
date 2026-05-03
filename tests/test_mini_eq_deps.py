@@ -89,3 +89,16 @@ def test_gi_repository_attribute_reports_missing_attribute(monkeypatch) -> None:
 
     assert not check.ok
     assert check.detail == "GI namespace lacks Gtk.Button.set_can_shrink"
+
+
+def test_native_ebur128_check_is_optional_when_library_is_missing(monkeypatch) -> None:
+    ebur128 = import_mini_eq_module("ebur128")
+
+    monkeypatch.setattr(ebur128, "version", lambda: (_ for _ in ()).throw(RuntimeError("missing lib")))
+
+    check = deps.check_native_ebur128()
+
+    assert check.name == "libebur128 loudness meter"
+    assert check.required is False
+    assert check.status == "missing"
+    assert "missing lib" in check.detail
