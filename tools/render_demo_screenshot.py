@@ -10,7 +10,7 @@ from PIL import Image, ImageFilter
 
 gi.require_version("Adw", "1")
 
-from demo_runtime import DEMO_PRESET_NAME, DemoController, demo_analyzer_levels
+from demo_runtime import DEMO_PRESET_NAME, DemoController, demo_analyzer_levels, demo_analyzer_loudness
 from gi.repository import Adw, GLib
 
 from mini_eq import core
@@ -108,6 +108,8 @@ class DemoScreenshotApplication(Adw.Application):
         self.window.analyzer_enabled = True
         self.window.analyzer_display_gain_db = 24.0
         self.window.analyzer_levels = demo_analyzer_levels()
+        self.window.analyzer_loudness_snapshot = demo_analyzer_loudness()
+        self.window.analyzer_session_max_shortterm_lufs = -11.8
         self.window.sync_ui_from_state()
         self.window.refresh_preset_list()
         self.window.set_visible(True)
@@ -121,6 +123,9 @@ class DemoScreenshotApplication(Adw.Application):
 
         self.window.analyzer_enabled = True
         self.window.analyzer_levels = demo_analyzer_levels()
+        self.window.analyzer_loudness_snapshot = demo_analyzer_loudness()
+        self.window.analyzer_session_max_shortterm_lufs = -11.8
+        self.window.update_analyzer_summary_label()
         self.window.queue_analyzer_draw(force=True)
         GLib.timeout_add(120, self.on_capture_ready_timeout)
         return False

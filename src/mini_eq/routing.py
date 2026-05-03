@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from gi.repository import GLib
 
-from .analyzer import ANALYZER_RESPONSE_DEFAULT, OutputSpectrumAnalyzer
+from .analyzer import ANALYZER_RESPONSE_DEFAULT, AnalyzerLoudnessSnapshot, OutputSpectrumAnalyzer
 from .core import (
     EQ_FREQUENCY_MAX_HZ,
     EQ_FREQUENCY_MIN_HZ,
@@ -74,6 +74,7 @@ class SystemWideEqController:
         self.status_callback: Callable[[str], None] | None = None
         self.outputs_changed_callback: Callable[[], None] | None = None
         self.analyzer_levels_callback: Callable[[list[float]], None] | None = None
+        self.analyzer_loudness_callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None = None
         self.eq_enabled = True
         self.eq_mode = next(iter(EQ_MODES.values()))
         self.preamp_db = 0.0
@@ -109,6 +110,15 @@ class SystemWideEqController:
 
         if self.output_analyzer is not None:
             self.output_analyzer.set_levels_callback(callback)
+
+    def set_analyzer_loudness_callback(
+        self,
+        callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None,
+    ) -> None:
+        self.analyzer_loudness_callback = callback
+
+        if self.output_analyzer is not None:
+            self.output_analyzer.set_loudness_callback(callback)
 
     def list_sinks(self) -> list[WirePlumberNode]:
         return self.output_backend.list_audio_sinks()
@@ -155,10 +165,12 @@ class SystemWideEqController:
                 self.analyzer_levels_callback,
                 self.emit_status,
                 output_sink_description,
+                self.analyzer_loudness_callback,
             )
 
         self.output_analyzer.set_output_sink_name(self.output_sink, output_sink_description)
         self.output_analyzer.set_levels_callback(self.analyzer_levels_callback)
+        self.output_analyzer.set_loudness_callback(self.analyzer_loudness_callback)
         self.output_analyzer.set_response_speed(self.analyzer_response_speed)
         return self.output_analyzer
 
@@ -530,6 +542,7 @@ class SystemWideEqController:
         self.status_callback = None
         self.outputs_changed_callback = None
         self.analyzer_levels_callback = None
+        self.analyzer_loudness_callback = None
 
         try:
             try:

@@ -292,6 +292,16 @@
     border-radius: 8px;
 }
 
+.loudness-value-label {
+    min-width: 68px;
+    font-weight: 800;
+    color: var(--window-fg-color);
+}
+
+.loudness-meter-area {
+    min-height: 16px;
+}
+
 .utility-pane-dense .utility-section {
     padding: 6px 8px;
 }

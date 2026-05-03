@@ -73,6 +73,11 @@ release, then update the Flathub manifest to the new release archive.
    - `https://flathub.org/en/apps/io.github.bhack.mini-eq`
    - `https://flathub.org/en/apps/io.github.bhack.mini-eq/bannerpreview`
 
+For PR test builds, the GitHub Actions build can finish before Flathub finishes
+committing the generated test build. A temporary `pending / Committing build...`
+status is normal; wait until the PR context becomes `success / Build ready`
+before merging.
+
 GitHub draft releases expose assets under temporary `untagged-*` URLs. Publish
 the upstream GitHub release first, then use the stable asset URL:
 

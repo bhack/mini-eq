@@ -198,6 +198,16 @@ def test_stereo_f32le_bytes_to_mono_samples_downmixes_channels() -> None:
     assert list(decoded) == pytest.approx([0.5, 0.0, 0.0])
 
 
+def test_stereo_f32le_bytes_to_interleaved_float32_preserves_channels() -> None:
+    left = array("f", [1.0, 0.5, -0.25])
+    right = array("f", [0.0, -0.5, 0.25])
+
+    decoded = analyzer.stereo_f32le_bytes_to_interleaved_float32(left.tobytes(), right.tobytes())
+
+    assert decoded.dtype == analyzer.require_numpy().float32
+    assert decoded.tolist() == pytest.approx([1.0, 0.0, 0.5, -0.5, -0.25, 0.25])
+
+
 class FakeJackPort:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -432,3 +442,129 @@ def test_analyzer_registers_terminal_jack_input_ports(monkeypatch: pytest.Monkey
         (analyzer.JACK_LEFT_INPUT_PORT, True),
         (analyzer.JACK_RIGHT_INPUT_PORT, True),
     ]
+
+
+def test_analyzer_feeds_loudness_meter_with_interleaved_stereo() -> None:
+    left = array("f", [1.0, 0.5])
+    right = array("f", [0.25, -0.25])
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+
+    class FakeMeter:
+        def __init__(self) -> None:
+            self.audio = None
+
+        def add_frames_float32(self, audio) -> None:
+            self.audio = audio.copy()
+
+    meter = FakeMeter()
+
+    assert spectrum.feed_loudness_meter(meter, left.tobytes(), right.tobytes()) is True
+
+    assert meter.audio.tolist() == pytest.approx([1.0, 0.25, 0.5, -0.25])
+
+
+def test_analyzer_reads_loudness_snapshot_from_native_meter() -> None:
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+
+    class FakeMeter:
+        def momentary_lufs(self) -> float:
+            return -18.0
+
+        def shortterm_lufs(self) -> float:
+            return -16.5
+
+        def integrated_lufs(self) -> float:
+            return -15.0
+
+    snapshot = spectrum.read_loudness_snapshot(FakeMeter())
+
+    assert snapshot == analyzer.AnalyzerLoudnessSnapshot(-18.0, -16.5, -15.0)
+
+
+def test_analyzer_create_loudness_meter_reports_optional_runtime_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    ebur128 = import_mini_eq_module("ebur128")
+    messages: list[str] = []
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, messages.append)
+
+    def unavailable_meter(**_kwargs):
+        raise ebur128.Ebur128UnavailableError("missing lib")
+
+    monkeypatch.setattr(ebur128, "Ebur128Meter", unavailable_meter)
+
+    assert spectrum.create_loudness_meter() is None
+    assert messages == ["Loudness Unavailable: missing lib"]
+
+
+def test_analyzer_create_loudness_meter_uses_shortterm_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    ebur128 = import_mini_eq_module("ebur128")
+    kwargs_seen = None
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+
+    class FakeMeter:
+        def __init__(self, **kwargs) -> None:
+            nonlocal kwargs_seen
+            kwargs_seen = kwargs
+
+    monkeypatch.setattr(ebur128, "Ebur128Meter", FakeMeter)
+
+    assert isinstance(spectrum.create_loudness_meter(), FakeMeter)
+    assert kwargs_seen == {
+        "sample_rate": 48_000,
+        "channels": 2,
+        "mode": ebur128.EBUR128_MODE_I | ebur128.EBUR128_MODE_S,
+    }
+
+
+def test_analyzer_starts_loudness_meter_when_callback_is_added_late(monkeypatch: pytest.MonkeyPatch) -> None:
+    left = array("f", [0.2]).tobytes()
+    right = array("f", [0.1]).tobytes()
+    snapshots: list[analyzer.AnalyzerLoudnessSnapshot | None] = []
+    created_meters = []
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+    spectrum.stop_event.clear()
+    spectrum.audio_blocks.append((left, right))
+
+    class FakeMeter:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def add_frames_float32(self, _audio) -> None:
+            pass
+
+        def momentary_lufs(self) -> float:
+            return -20.0
+
+        def shortterm_lufs(self) -> float:
+            return -18.0
+
+        def integrated_lufs(self) -> float:
+            return -17.0
+
+        def close(self) -> None:
+            self.closed = True
+
+    def create_loudness_meter():
+        meter = FakeMeter()
+        created_meters.append(meter)
+        return meter
+
+    def levels_callback(_levels: list[float]) -> None:
+        if spectrum.loudness_callback is None:
+            spectrum.set_loudness_callback(snapshots.append)
+            spectrum.audio_blocks.append((left, right))
+        else:
+            spectrum.stop_event.set()
+
+    monkeypatch.setattr(spectrum, "create_loudness_meter", create_loudness_meter)
+    monkeypatch.setattr(analyzer, "analyzer_frame_count", lambda _sample_rate=analyzer.SAMPLE_RATE: 1)
+    monkeypatch.setattr(analyzer, "analyzer_fft_size", lambda _sample_rate=analyzer.SAMPLE_RATE: 2)
+    monkeypatch.setattr(analyzer, "samples_to_log_band_powers", lambda *_args, **_kwargs: (1.0,))
+    monkeypatch.setattr(analyzer, "power_values_to_db_values", lambda _powers: (-12.0,))
+    monkeypatch.setattr(analyzer, "spectrum_db_values_to_levels", lambda _db_values: [0.5])
+    spectrum.set_levels_callback(levels_callback)
+
+    spectrum.read_jack_levels()
+
+    assert snapshots == [analyzer.AnalyzerLoudnessSnapshot(-20.0, -18.0, -17.0)]
+    assert len(created_meters) == 1
+    assert created_meters[0].closed is True

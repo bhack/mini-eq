@@ -7,7 +7,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gtk, Pango
 
-from .window_utils import bind_label_to_control, set_accessible_label
+from .window_utils import bind_label_to_control, set_accessible_description, set_accessible_label
 
 
 class MiniEqWindowUtilityPaneMixin:
@@ -190,9 +190,12 @@ class MiniEqWindowUtilityPaneMixin:
         analyzer_settings_button.set_popover(analyzer_settings_popover)
 
         monitor_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.monitor_panel = monitor_panel
         monitor_panel.add_css_class("monitor-strip")
         monitor_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.monitor_header = monitor_header
         monitor_title = Gtk.Label(label="Monitor", xalign=0.0)
+        self.monitor_title_label = monitor_title
         monitor_title.add_css_class("metric-title")
         bind_label_to_control(monitor_title, self.analyzer_switch)
         monitor_header.append(monitor_title)
@@ -200,21 +203,47 @@ class MiniEqWindowUtilityPaneMixin:
         monitor_header_spacer.set_hexpand(True)
         monitor_header.append(monitor_header_spacer)
 
+        monitor_header.append(analyzer_settings_button)
         self.analyzer_switch.set_valign(Gtk.Align.CENTER)
         set_accessible_label(self.analyzer_switch, "Monitor")
         monitor_header.append(self.analyzer_switch)
         monitor_panel.append(monitor_header)
 
         monitor_detail_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.monitor_detail_row = monitor_detail_row
         monitor_detail_row.add_css_class("monitor-detail-row")
 
         self.analyzer_summary_label.add_css_class("dim-label")
         self.analyzer_summary_label.add_css_class("numeric")
         self.analyzer_summary_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.analyzer_summary_label.set_hexpand(True)
-        monitor_detail_row.append(self.analyzer_summary_label)
-        monitor_detail_row.append(analyzer_settings_button)
+        self.analyzer_loudness_meter_area.add_css_class("loudness-meter-area")
+        self.analyzer_loudness_meter_area.set_content_width(104)
+        self.analyzer_loudness_meter_area.set_content_height(16)
+        self.analyzer_loudness_meter_area.set_hexpand(True)
+        self.analyzer_loudness_meter_area.set_valign(Gtk.Align.CENTER)
+        self.analyzer_loudness_meter_area.set_accessible_role(Gtk.AccessibleRole.IMG)
+        set_accessible_label(self.analyzer_loudness_meter_area, "Loudness Meter")
+        set_accessible_description(
+            self.analyzer_loudness_meter_area,
+            "Current LUFS meter with peak marker",
+        )
+        self.analyzer_loudness_meter_area.set_draw_func(self.on_loudness_meter_draw)
+        monitor_detail_row.append(self.analyzer_loudness_meter_area)
+
+        self.analyzer_loudness_value_label.add_css_class("numeric")
+        self.analyzer_loudness_value_label.add_css_class("loudness-value-label")
+        self.analyzer_loudness_value_label.set_width_chars(8)
+        set_accessible_label(self.analyzer_loudness_value_label, "Loudness Value")
+        monitor_detail_row.append(self.analyzer_loudness_value_label)
         monitor_panel.append(monitor_detail_row)
+        self.monitor_tooltip_widgets = (
+            monitor_panel,
+            monitor_header,
+            monitor_title,
+            monitor_detail_row,
+            self.analyzer_loudness_meter_area,
+            self.analyzer_loudness_value_label,
+        )
 
         system_section.append(monitor_panel)
 

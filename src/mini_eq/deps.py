@@ -33,6 +33,10 @@ JACK_HINT = (
 NUMPY_HINT = (
     "Install the package with Python dependencies: python -m pip install mini-eq, or python -m pip install numpy."
 )
+LIBEBUR128_HINT = (
+    "Ubuntu/Debian: libebur128-1; Fedora: libebur128; Arch: libebur128. "
+    "Flatpak builds should bundle libebur128 when live LUFS is enabled."
+)
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,23 @@ def check_python_import(module_name: str, label: str, required: bool, hint: str)
     module_file = getattr(module, "__file__", None)
     detail = f"imported from {module_file}" if module_file else "imported"
     return DependencyCheck(label, "ok", required, detail, hint)
+
+
+def check_native_ebur128() -> DependencyCheck:
+    try:
+        from . import ebur128
+
+        detected_version = ebur128.version()
+    except Exception as exc:
+        return DependencyCheck("libebur128 loudness meter", "missing", False, str(exc), LIBEBUR128_HINT)
+
+    return DependencyCheck(
+        "libebur128 loudness meter",
+        "ok",
+        False,
+        f"libebur128 {detected_version}",
+        LIBEBUR128_HINT,
+    )
 
 
 def check_gi_repository(namespace: str, version: str, label: str, required: bool, hint: str) -> DependencyCheck:
@@ -288,6 +309,7 @@ def collect_dependency_checks() -> list[DependencyCheck]:
         ),
         check_python_import("numpy", "NumPy FFT analyzer", False, NUMPY_HINT),
         check_python_import("jack", "Python JACK analyzer client", False, JACK_HINT),
+        check_native_ebur128(),
     ]
 
     if platform.system() != "Linux":

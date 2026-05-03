@@ -19,8 +19,11 @@ const INTERFACE_NAME = 'io.github.bhack.MiniEq.Control';
 const APP_DESKTOP_ID = 'io.github.bhack.mini-eq.desktop';
 const PANEL_ANALYZER_BARS = 10;
 const PANEL_ANALYZER_WIDTH = 2;
-const PANEL_ANALYZER_HEIGHT = 12;
+const PANEL_ANALYZER_HEIGHT = 14;
 const PANEL_ANALYZER_GAP = 1;
+const PANEL_ANALYZER_VISUAL_GAIN = 1.15;
+const PANEL_ANALYZER_ACTIVE_THRESHOLD = 0.02;
+const PANEL_ANALYZER_MIN_ACTIVE_HEIGHT = 3;
 const PANEL_ANALYZER_ACTIVE_COLOR = 'rgba(127, 213, 232, 0.96)';
 const PANEL_ANALYZER_DIM_COLOR = 'rgba(255, 255, 255, 0.24)';
 const PANEL_ANALYZER_STANDBY_COLOR = 'rgba(255, 255, 255, 0.16)';
@@ -38,6 +41,13 @@ function getEventTime(event) {
     return global.get_current_time();
 }
 
+function panelAnalyzerDisplayLevel(level) {
+    const normalized = Math.max(0.0, Math.min(1.0, Number(level) || 0.0));
+    if (normalized <= PANEL_ANALYZER_ACTIVE_THRESHOLD)
+        return 0.0;
+    return Math.min(1.0, normalized * PANEL_ANALYZER_VISUAL_GAIN);
+}
+
 const MiniEqIndicator = GObject.registerClass(
 class MiniEqIndicator extends PanelMenu.Button {
     constructor(extensionPath) {
@@ -50,6 +60,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._signalId = 0;
         this._analyzerSignalId = 0;
         this._presetsSignalId = 0;
+        this.connect('destroy', () => this._beginDispose());
         this._presetItems = [];
         this._analyzerBars = [];
         this._analyzerBarHeights = [];
@@ -78,7 +89,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._statusItem.setSensitive(false);
         this.menu.addMenuItem(this._statusItem);
 
-        this._outputPresetItem = new PopupMenu.PopupMenuItem(_('No output preset'));
+        this._outputPresetItem = new PopupMenu.PopupMenuItem(_('Output preset: None'));
         this._outputPresetItem.setSensitive(false);
         this.menu.addMenuItem(this._outputPresetItem);
 
@@ -116,6 +127,8 @@ class MiniEqIndicator extends PanelMenu.Button {
             null,
             Gio.DBusSignalFlags.NONE,
             (_connection, _sender, _objectPath, _interfaceName, _signalName, parameters) => {
+                if (this._disposed)
+                    return;
                 const [state] = parameters.deepUnpack();
                 this._applyState(state);
             });
@@ -128,6 +141,8 @@ class MiniEqIndicator extends PanelMenu.Button {
             null,
             Gio.DBusSignalFlags.NONE,
             (_connection, _sender, _objectPath, _interfaceName, _signalName, parameters) => {
+                if (this._disposed)
+                    return;
                 const [levels] = parameters.deepUnpack();
                 this._applyAnalyzerLevels(levels);
             });
@@ -139,7 +154,10 @@ class MiniEqIndicator extends PanelMenu.Button {
             OBJECT_PATH,
             null,
             Gio.DBusSignalFlags.NONE,
-            () => this._refreshPresets());
+            () => {
+                if (!this._disposed)
+                    this._refreshPresets();
+            });
 
         this._setDisconnectedState();
         this._watchId = Gio.bus_watch_name(
@@ -153,7 +171,10 @@ class MiniEqIndicator extends PanelMenu.Button {
             () => this._setDisconnectedState());
     }
 
-    destroy() {
+    _beginDispose() {
+        if (this._disposed)
+            return;
+
         this._disposed = true;
 
         if (this._refreshSourceId) {
@@ -181,6 +202,13 @@ class MiniEqIndicator extends PanelMenu.Button {
             this._watchId = 0;
         }
 
+        this._analyzerBars = [];
+        this._analyzerBarHeights = [];
+        this._analyzerBarStyles = [];
+    }
+
+    destroy() {
+        this._beginDispose();
         super.destroy();
     }
 
@@ -294,7 +322,6 @@ class MiniEqIndicator extends PanelMenu.Button {
         const routed = Boolean(unpackValue(state.routed));
         const presetName = unpackValue(state.preset_name) || _('Current State');
         const outputPresetName = unpackValue(state.output_preset_name) || '';
-        const outputPresetAutoApplied = Boolean(unpackValue(state.output_preset_auto_applied));
 
         this._running = running;
         this._routed = routed;
@@ -317,7 +344,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsItem.setSensitive(running);
         this._presetsItem.label.text = running ? _('Preset: %s').format(presetName) : _('Presets');
         this._statusItem.label.text = this._statusText(running, routed, eqEnabled);
-        this._outputPresetItem.label.text = this._outputPresetText(running, outputPresetName, outputPresetAutoApplied);
+        this._outputPresetItem.label.text = this._outputPresetText(running, outputPresetName);
     }
 
     _setDisconnectedState() {
@@ -339,7 +366,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsItem.setSensitive(false);
         this._presetsItem.label.text = _('Presets');
         this._statusItem.label.text = _('Mini EQ is not running');
-        this._outputPresetItem.label.text = _('No output preset');
+        this._outputPresetItem.label.text = _('Output preset: None');
         this._setAnalyzerLevels([]);
         this._setPresets([]);
     }
@@ -348,21 +375,22 @@ class MiniEqIndicator extends PanelMenu.Button {
         if (!running)
             return _('Mini EQ is not running');
         if (routed && eqEnabled)
-            return _('System-wide EQ is on');
+            return _('System-wide EQ on');
         if (routed)
             return _('Original audio selected');
-        return _('System-wide EQ is off');
+        return _('System-wide EQ off');
     }
 
-    _outputPresetText(running, presetName, autoApplied) {
+    _outputPresetText(running, presetName) {
         if (!running || !presetName)
-            return _('No output preset');
-        if (autoApplied)
-            return _('Output preset: %s').format(presetName);
-        return _('Preset for output: %s').format(presetName);
+            return _('Output preset: None');
+        return _('Output preset: %s').format(presetName);
     }
 
     _applyAnalyzerLevels(levels) {
+        if (this._disposed)
+            return;
+
         this._setAnalyzerLevels(this._running && this._routed && this._eqEnabled ? levels : []);
     }
 
@@ -406,11 +434,15 @@ class MiniEqIndicator extends PanelMenu.Button {
     }
 
     _setAnalyzerLevels(levels) {
+        if (this._disposed)
+            return;
+
         for (let index = 0; index < this._analyzerBars.length; index++) {
-            const level = Number(levels[index] ?? 0.0);
-            const normalized = Math.max(0.0, Math.min(1.0, level));
-            const active = normalized > 0.02;
-            const height = Math.max(2, Math.round(PANEL_ANALYZER_HEIGHT * normalized));
+            const normalized = panelAnalyzerDisplayLevel(levels[index] ?? 0.0);
+            const active = normalized > 0.0;
+            const height = active
+                ? Math.max(PANEL_ANALYZER_MIN_ACTIVE_HEIGHT, Math.round(PANEL_ANALYZER_HEIGHT * normalized))
+                : 2;
             const style = this._barStyle(active);
 
             if (this._analyzerBarHeights[index] !== height) {

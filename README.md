@@ -1,7 +1,7 @@
 # Mini EQ
 
 [![CI](https://github.com/bhack/mini-eq/actions/workflows/ci.yml/badge.svg)](https://github.com/bhack/mini-eq/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/mini-eq.svg)](https://pypi.org/project/mini-eq/)
+[![PyPI](https://img.shields.io/pypi/v/mini-eq.svg?cacheSeconds=3600)](https://pypi.org/project/mini-eq/)
 [![GitHub release](https://img.shields.io/github/v/release/bhack/mini-eq?sort=semver)](https://github.com/bhack/mini-eq/releases)
 [![License](https://img.shields.io/github/license/bhack/mini-eq.svg)](https://github.com/bhack/mini-eq/blob/main/LICENSE)
 
@@ -10,7 +10,8 @@
 Mini EQ is a small system-wide parametric equalizer for PipeWire desktops.
 It uses GTK/Libadwaita for the UI, WirePlumber for routing/default-output
 control, PipeWire filter-chain with builtin biquad filters for the equalizer,
-and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer.
+and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer. When
+libebur128 is available, the monitor can also show live LUFS loudness.
 
 ![Mini EQ screenshot](https://raw.githubusercontent.com/bhack/mini-eq/main/docs/screenshots/mini-eq.png)
 
@@ -20,9 +21,12 @@ and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer.
 - GTK/Libadwaita interface with a compact 10-band fader workflow.
 - WirePlumber routing and default-output tracking.
 - PipeWire filter-chain DSP using builtin biquad filters.
-- Optional spectrum analyzer through the PipeWire JACK compatibility layer.
+- Optional spectrum analyzer and LUFS loudness readout through the PipeWire JACK
+  compatibility layer.
 - Per-output preset links for automatically using different saved presets with
   headphones, speakers, HDMI, and other outputs.
+- Optional GNOME Shell extension for quick panel access to routing, EQ,
+  analyzer status, presets, and output preset links.
 - Equalizer APO preset import from the UI or `--import-apo`, including
   compatible presets exported by [AutoEq](https://autoeq.app/).
 
@@ -73,7 +77,8 @@ sudo apt install \
   pipewire-jack \
   python3-cairo \
   python3-gi \
-  wireplumber
+  wireplumber \
+  libebur128-1
 
 # Fedora
 sudo dnf install \
@@ -84,7 +89,8 @@ sudo dnf install \
   python3-cairo \
   python3-gobject \
   wireplumber \
-  wireplumber-libs
+  wireplumber-libs \
+  libebur128
 
 # Arch Linux
 sudo pacman -S \
@@ -95,7 +101,8 @@ sudo pacman -S \
   pipewire-jack \
   python-cairo \
   python-gobject \
-  wireplumber
+  wireplumber \
+  libebur128
 ```
 
 Use `gir1.2-wp-0.5` instead of `gir1.2-wp-0.4` on distro releases that package
@@ -130,6 +137,14 @@ Install the desktop launcher and icon for the current user:
 mini-eq --install-desktop
 ```
 
+## GNOME Shell Extension
+
+Mini EQ also has an optional GNOME Shell extension for quick panel access to
+routing, EQ, analyzer status, presets, and output preset links.
+
+Install it from GNOME Shell Extensions:
+https://extensions.gnome.org/extension/9803/mini-eq-controls/
+
 ## Test
 
 ```bash
@@ -155,7 +170,8 @@ The Flatpak manifest uses the GNOME runtime. It does not ship a full PipeWire
 daemon or session manager; it builds only the local PipeWire filter-chain module
 and SPA builtin filter-graph support that Mini EQ loads inside the app process.
 The analyzer uses the runtime JACK compatibility library with bundled Python
-JACK and NumPy dependencies.
+JACK and NumPy dependencies. The Flatpak build also bundles libebur128 for the
+live LUFS readout.
 
 Install the local build tools:
 

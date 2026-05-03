@@ -4,7 +4,7 @@ import json
 import math
 
 from mini_eq import core
-from mini_eq.analyzer import ANALYZER_BIN_COUNT
+from mini_eq.analyzer import ANALYZER_BIN_COUNT, AnalyzerLoudnessSnapshot
 from mini_eq.core import EQ_MODES, FILTER_TYPES, PRESET_VERSION, EqBand, eq_band_to_dict
 from mini_eq.wireplumber_backend import WirePlumberNode
 
@@ -24,6 +24,14 @@ def demo_analyzer_levels(count: int = ANALYZER_BIN_COUNT) -> list[float]:
     return levels
 
 
+def demo_analyzer_loudness() -> AnalyzerLoudnessSnapshot:
+    return AnalyzerLoudnessSnapshot(
+        momentary_lufs=-18.2,
+        shortterm_lufs=-16.5,
+        integrated_lufs=-14.0,
+    )
+
+
 class DemoController:
     def __init__(self) -> None:
         self.output_sink = DEMO_OUTPUT_NAME
@@ -37,6 +45,7 @@ class DemoController:
         self.status_callback = None
         self.outputs_changed_callback = None
         self.analyzer_levels_callback = None
+        self.analyzer_loudness_callback = None
         self.analyzer_enabled = False
         self.route_enabled = False
         self.demo_sink = WirePlumberNode(
@@ -132,8 +141,13 @@ class DemoController:
     def set_analyzer_levels_callback(self, callback) -> None:
         self.analyzer_levels_callback = callback
 
+    def set_analyzer_loudness_callback(self, callback) -> None:
+        self.analyzer_loudness_callback = callback
+
     def set_analyzer_enabled(self, enabled: bool) -> bool:
         self.analyzer_enabled = enabled
+        if enabled and self.analyzer_loudness_callback is not None:
+            self.analyzer_loudness_callback(demo_analyzer_loudness())
         return True
 
     def route_system_audio(self, enabled: bool) -> None:
