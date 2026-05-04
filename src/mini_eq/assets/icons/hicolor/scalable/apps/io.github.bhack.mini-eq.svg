@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Mini EQ">
-  <g transform="translate(512 522) scale(1.11) translate(-512 -512)">
+  <g transform="translate(512 514) scale(1.08) translate(-512 -512)">
     <rect x="162" y="146" width="700" height="732" rx="118" fill="#38545f" stroke="#8bd2dc" stroke-width="24"/>
     <path d="M280 178h464c64 0 86 22 86 86v86c-76-48-180-72-318-72s-242 24-318 72v-86c0-64 22-86 86-86Z" fill="#5f7c86" opacity="0.24"/>
     <rect x="194" y="180" width="636" height="664" rx="92" fill="none" stroke="#18303a" stroke-width="8" opacity="0.60"/>
