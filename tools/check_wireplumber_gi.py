@@ -11,6 +11,7 @@ REQUIRED_WP_SYMBOLS = (
     "Core.new",
     "ObjectManager.new",
     "ObjectInterest.new_type",
+    "Properties.new_empty",
     "Node",
     "Metadata",
     "ProxyFeatures.PIPEWIRE_OBJECT_FEATURE_INFO",

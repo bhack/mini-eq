@@ -36,6 +36,7 @@ class FakeWirePlumberBackend:
         self.closed = False
         self.disconnected_handlers: list[int] = []
         self.missing_stream_ids: set[int] = set()
+        self.move_failures: dict[int, Exception] = {}
 
     def connect(self) -> None:
         self.connected = True
@@ -49,6 +50,8 @@ class FakeWirePlumberBackend:
     def move_stream_to_target(self, stream_bound_id: int, target_node_name: str) -> None:
         if stream_bound_id in self.missing_stream_ids:
             raise wp_backend.WirePlumberError(f"output stream not found: {stream_bound_id}")
+        if stream_bound_id in self.move_failures:
+            raise self.move_failures[stream_bound_id]
 
         self.moves.append((stream_bound_id, target_node_name))
         self.target_nodes[stream_bound_id] = target_node_name
@@ -149,6 +152,49 @@ def test_wireplumber_router_drops_stream_that_disappears_during_route() -> None:
     assert routed_now == 0
     assert backend.moves == []
     assert router.routed_stream_ids == set()
+
+
+def test_wireplumber_router_enable_raises_and_stops_monitoring_on_initial_route_error() -> None:
+    backend = FakeWirePlumberBackend(
+        [make_node(1, wp_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
+    )
+    statuses: list[str] = []
+    router = wp_router.WirePlumberStreamRouter("mini_eq_sink", "mini_eq_sink_output", statuses.append, backend)
+
+    def fail_move(_stream_bound_id: int, _target_node_name: str) -> None:
+        raise RuntimeError("metadata permission denied")
+
+    backend.move_stream_to_target = fail_move
+
+    with pytest.raises(RuntimeError, match="metadata permission denied"):
+        router.enable()
+
+    assert router.enabled is False
+    assert router.accept_stream_events is False
+    assert backend.disconnected_handlers == [42]
+    assert statuses == ["routing warning: metadata permission denied"]
+
+
+def test_wireplumber_router_enable_restores_partial_initial_route_failure() -> None:
+    backend = FakeWirePlumberBackend(
+        [
+            make_node(1, wp_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify"),
+            make_node(2, wp_backend.STREAM_OUTPUT_AUDIO, "browser", "Browser"),
+        ]
+    )
+    backend.move_failures = {2: RuntimeError("metadata permission denied")}
+    statuses: list[str] = []
+    router = wp_router.WirePlumberStreamRouter("mini_eq_sink", "mini_eq_sink_output", statuses.append, backend)
+    router.set_output_sink_name("speakers")
+
+    with pytest.raises(RuntimeError, match="metadata permission denied"):
+        router.enable()
+
+    assert router.enabled is False
+    assert router.routed_stream_ids == set()
+    assert backend.moves == [(1, "mini_eq_sink"), (1, "speakers")]
+    assert backend.target_nodes[1] == "speakers"
+    assert statuses == ["routing warning: metadata permission denied"]
 
 
 def test_wireplumber_router_always_writes_restore_move_for_tracked_streams() -> None:

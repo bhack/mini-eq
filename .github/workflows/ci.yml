@@ -6,6 +6,11 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      flatpak_runtime_smoke:
+        description: Run the experimental Flatpak PipeWire/WirePlumber routing smoke test
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -358,3 +363,123 @@ jobs:
           if missing:
               raise SystemExit(f"missing Python analyzer module(s): {', '.join(missing)}")
           PY
+
+  flatpak-runtime-smoke:
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.flatpak_runtime_smoke }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    continue-on-error: true
+
+    steps:
+      - name: Require change detection
+        if: ${{ needs.changes.result != 'success' }}
+        run: exit 1
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Flatpak and PipeWire test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            dbus-user-session \
+            flatpak \
+            flatpak-builder \
+            jq \
+            pipewire \
+            pipewire-bin \
+            wireplumber
+
+      - name: Configure Flathub remote
+        run: flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build and install local Flatpak
+        run: |
+          flatpak-builder \
+            --user \
+            --install \
+            --force-clean \
+            --install-deps-from=flathub \
+            flatpak-build io.github.bhack.mini-eq.yaml
+
+      - name: Run experimental Flatpak runtime smoke
+        run: |
+          set -euo pipefail
+
+          runtime_dir="/run/user/$(id -u)"
+          config_home="$(mktemp -d)"
+
+          sudo mkdir -p "$runtime_dir"
+          sudo chown "$(id -u):$(id -g)" "$runtime_dir"
+          chmod 700 "$runtime_dir"
+          mkdir -p "$config_home/pipewire/pipewire.conf.d"
+
+          cat > "$config_home/pipewire/pipewire.conf.d/10-mini-eq-ci-null-sink.conf" <<'EOF'
+          context.objects = [
+              { factory = adapter
+                  args = {
+                      factory.name     = support.null-audio-sink
+                      node.name        = "ci_null_sink"
+                      node.description = "CI Null Sink"
+                      media.class      = "Audio/Sink"
+                      audio.position   = "FL,FR"
+                      adapter.auto-port-config = {
+                          mode     = dsp
+                          monitor  = true
+                          position = preserve
+                      }
+                  }
+              }
+          ]
+          EOF
+
+          export XDG_RUNTIME_DIR="$runtime_dir"
+          export XDG_CONFIG_HOME="$config_home"
+
+          dbus-run-session -- bash <<'SH'
+          set -euo pipefail
+
+          pipewire >"$XDG_RUNTIME_DIR/pipewire.log" 2>&1 &
+          pipewire_pid=$!
+          wireplumber >"$XDG_RUNTIME_DIR/wireplumber.log" 2>&1 &
+          wireplumber_pid=$!
+
+          cleanup() {
+            kill "$wireplumber_pid" "$pipewire_pid" 2>/dev/null || true
+            wait "$wireplumber_pid" 2>/dev/null || true
+            wait "$pipewire_pid" 2>/dev/null || true
+          }
+
+          dump_logs() {
+            echo "## pipewire.log"
+            sed -n '1,240p' "$XDG_RUNTIME_DIR/pipewire.log" 2>/dev/null || true
+            echo "## wireplumber.log"
+            sed -n '1,240p' "$XDG_RUNTIME_DIR/wireplumber.log" 2>/dev/null || true
+          }
+
+          trap cleanup EXIT
+          trap dump_logs ERR
+
+          for _ in $(seq 1 200); do
+            if pw-dump >/dev/null 2>&1 \
+              && pw-dump | jq -e '.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink")' >/dev/null
+            then
+              break
+            fi
+            sleep 0.1
+          done
+
+          ci_sink_id="$(
+            pw-dump \
+              | jq -r '.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink") | .id' \
+              | head -n 1
+          )"
+          test -n "$ci_sink_id"
+          wpctl set-default "$ci_sink_id"
+
+          python3 tools/check_flatpak_runtime.py \
+            --app-ref io.github.bhack.mini-eq//master \
+            --duration 8 \
+            --timeout 20
+          SH

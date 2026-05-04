@@ -53,6 +53,32 @@ class FakeWp:
     ImplModule = FakeImplModule
 
 
+class FakeProperties:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    @classmethod
+    def new_empty(cls) -> FakeProperties:
+        return cls()
+
+    def set(self, key: str, value: str) -> None:
+        self.values[key] = value
+
+
+class FakeCore:
+    calls: list[tuple[object | None, object | None, FakeProperties | None]] = []
+
+    @classmethod
+    def new(cls, context, conf, properties=None):
+        cls.calls.append((context, conf, properties))
+        return object()
+
+
+class FakeCoreWp:
+    Core = FakeCore
+    Properties = FakeProperties
+
+
 class FakeNodeProxy:
     def __init__(self, bound_id: int, set_result: bool = True) -> None:
         self.bound_id = bound_id
@@ -214,6 +240,20 @@ def test_node_classification_and_display_name() -> None:
     assert stream.display_name == "spotify"
 
 
+def test_new_core_requests_pipewire_manager_access() -> None:
+    FakeCore.calls = []
+
+    wp_backend.WirePlumberBackend._new_core(FakeCoreWp)
+
+    assert len(FakeCore.calls) == 1
+    _context, _conf, properties = FakeCore.calls[0]
+    assert properties is not None
+    assert properties.values == {
+        "application.name": wp_backend.PIPEWIRE_CLIENT_NAME,
+        "media.category": wp_backend.PIPEWIRE_MEDIA_CATEGORY,
+    }
+
+
 def test_sync_core_removes_timeout_source_after_success() -> None:
     core = FakeSyncCore()
     glib = FakeSyncGLib(core)
@@ -261,6 +301,96 @@ def test_stream_targets_node_rejects_different_target_object_metadata() -> None:
     backend.stream_target_object = lambda _bound_id: ("68", wp_backend.SPA_ID_TYPE)
 
     assert backend.stream_targets_node(126, "alsa_output.test") is False
+
+
+def test_move_stream_to_target_raises_when_metadata_change_is_not_acknowledged() -> None:
+    backend = wp_backend.WirePlumberBackend()
+    stream = wp_backend.WirePlumberNode(
+        bound_id=126,
+        object_serial="300",
+        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        node_name="spotify",
+        node_description=None,
+        application_name="spotify",
+        node_dont_move=False,
+    )
+    sink = wp_backend.WirePlumberNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=wp_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+    )
+
+    backend.output_stream_by_bound_id = lambda _bound_id: stream
+    backend.audio_sink_by_name = lambda _name: sink
+    backend.set_metadata_and_wait = lambda *_args: False
+    backend.stream_target_object = lambda _bound_id: ("64", wp_backend.SPA_ID_TYPE)
+
+    with pytest.raises(wp_backend.WirePlumberError, match="did not acknowledge"):
+        backend.move_stream_to_target(126, "alsa_output.test")
+
+
+def test_move_stream_to_target_skips_metadata_read_after_acknowledged_change() -> None:
+    backend = wp_backend.WirePlumberBackend()
+    stream = wp_backend.WirePlumberNode(
+        bound_id=126,
+        object_serial="300",
+        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        node_name="spotify",
+        node_description=None,
+        application_name="spotify",
+        node_dont_move=False,
+    )
+    sink = wp_backend.WirePlumberNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=wp_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+    )
+
+    backend.output_stream_by_bound_id = lambda _bound_id: stream
+    backend.audio_sink_by_name = lambda _name: sink
+    backend.set_metadata_and_wait = lambda *_args: True
+    backend.stream_target_object = lambda _bound_id: (_ for _ in ()).throw(
+        AssertionError("acknowledged moves should not need metadata readback")
+    )
+
+    backend.move_stream_to_target(126, "alsa_output.test")
+
+
+def test_move_stream_to_target_accepts_already_updated_metadata() -> None:
+    backend = wp_backend.WirePlumberBackend()
+    stream = wp_backend.WirePlumberNode(
+        bound_id=126,
+        object_serial="300",
+        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        node_name="spotify",
+        node_description=None,
+        application_name="spotify",
+        node_dont_move=False,
+    )
+    sink = wp_backend.WirePlumberNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=wp_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+    )
+
+    backend.output_stream_by_bound_id = lambda _bound_id: stream
+    backend.audio_sink_by_name = lambda _name: sink
+    backend.set_metadata_and_wait = lambda *_args: False
+    backend.stream_target_object = lambda _bound_id: ("67", wp_backend.SPA_ID_TYPE)
+
+    backend.move_stream_to_target(126, "alsa_output.test")
 
 
 def test_defaults_returns_cached_value_without_metadata_read(monkeypatch) -> None:

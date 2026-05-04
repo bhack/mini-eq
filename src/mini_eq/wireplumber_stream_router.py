@@ -104,7 +104,7 @@ class WirePlumberStreamRouter:
         self.routed_stream_ids.clear()
         return restored
 
-    def refresh(self) -> bool:
+    def refresh(self, *, raise_errors: bool = False) -> bool:
         if not self.enabled:
             return False
 
@@ -114,6 +114,8 @@ class WirePlumberStreamRouter:
                 self.emit_status(f"routed {routed_now} stream(s) to {self.virtual_sink_name}")
         except Exception as exc:
             self.emit_status(f"routing warning: {exc}")
+            if raise_errors:
+                raise
 
         return False
 
@@ -140,14 +142,14 @@ class WirePlumberStreamRouter:
         if self.event_source_id == 0:
             self.event_source_id = GLib.idle_add(self.on_stream_event_idle)
 
-    def start_monitoring(self) -> None:
+    def start_monitoring(self, *, require_initial_route: bool = False) -> None:
         self.backend.connect()
         self.accept_stream_events = True
 
         if self.object_added_handler_id == 0:
             self.object_added_handler_id = self.backend.connect_object_added(self.handle_object_added)
 
-        self.refresh()
+        self.refresh(raise_errors=require_initial_route)
 
     def stop_monitoring(self) -> None:
         self.accept_stream_events = False
@@ -162,7 +164,13 @@ class WirePlumberStreamRouter:
 
     def enable(self) -> None:
         self.enabled = True
-        self.start_monitoring()
+        try:
+            self.start_monitoring(require_initial_route=True)
+        except Exception:
+            self.enabled = False
+            self.stop_monitoring()
+            self.restore_output_streams()
+            raise
 
     def disable(self, announce: bool = True) -> None:
         if not self.enabled and not self.routed_stream_ids:

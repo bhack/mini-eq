@@ -126,6 +126,14 @@ flatpak run --command=flathub-build org.flatpak.Builder --install io.github.bhac
 flatpak run io.github.bhack.mini-eq --check-deps
 ```
 
+When routing, WirePlumber access, Flatpak permissions, runtime dependencies, or
+shutdown behavior changed, also run the upstream runtime smoke test against the
+installed local build before opening or merging the Flathub PR:
+
+```bash
+python3 tools/check_flatpak_runtime.py --app-ref io.github.bhack.mini-eq//master
+```
+
 For a local source and full build check without installing the app:
 
 ```bash

@@ -352,7 +352,7 @@ class MiniEqWindow(
                 self.updating_ui = False
 
             try:
-                self.controller.route_system_audio(False, announce=False)
+                self.controller.route_system_audio(False, announce=False, refresh_output=False)
             except Exception:
                 pass
             finally:
@@ -780,6 +780,11 @@ class MiniEqWindow(
             self.controller.route_system_audio(enabled)
             route_changed = True
         except Exception as exc:
+            self.updating_ui = True
+            try:
+                switch.set_active(self.controller.routed)
+            finally:
+                self.updating_ui = False
             self.set_status(str(exc))
         finally:
             self.update_eq_power_indicator()

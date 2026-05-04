@@ -94,6 +94,34 @@ If extensions.gnome.org asks for an extension screenshot, capture it from the
 nested fake-control Shell documented in `extensions/gnome-shell/README.md` so no
 real desktop, device, account, or path details are exposed.
 
+## Flatpak Runtime Smoke
+
+Run this after installing the local Flatpak build, and before release
+publication or Flathub handoff, whenever PipeWire routing, WirePlumber access,
+Flatpak permissions, runtime dependencies, or shutdown behavior changed. This
+check temporarily routes a silent host PipeWire stream through Mini EQ and then
+verifies that the stream is restored when the app exits, so keep it separate
+from the generic preflight.
+
+```bash
+flatpak run --command=flatpak-builder org.flatpak.Builder \
+  --user --install --force-clean --install-deps-from=flathub \
+  flatpak-build io.github.bhack.mini-eq.yaml
+python3 tools/check_flatpak_runtime.py --app-ref io.github.bhack.mini-eq//master
+```
+
+For shutdown changes, also run the installed Flatpak interactively, enable
+system-wide EQ, close the GTK window, and confirm that the app exits without a
+crash and streams are restored:
+
+```bash
+flatpak run io.github.bhack.mini-eq//master --auto-route
+```
+
+There is also an experimental non-blocking GitHub Actions path for this check:
+manually dispatch the `CI` workflow with `flatpak_runtime_smoke=true`. Treat it
+as extra signal only until it has proven stable in the hosted runner.
+
 ## Build
 
 ```bash

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 - 2026-05-04
+
+- Fix Flatpak system-wide routing by requesting PipeWire manager access from the WirePlumber client.
+- Restore partially routed streams when initial routing fails and reset the routing switch after failures.
+- Avoid restarting output routing during GTK close shutdown.
+- Add a local Flatpak runtime smoke test and an experimental manual CI job for routing checks.
+
 ## 0.3.1 - 2026-05-04
 
 - Improve adaptive layout spacing across compact, tall, and wide windows.

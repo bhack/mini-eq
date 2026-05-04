@@ -12,6 +12,8 @@ SPA_ID_TYPE = "Spa:Id"
 STREAM_OUTPUT_AUDIO = "Stream/Output/Audio"
 AUDIO_SINK = "Audio/Sink"
 FILTER_CHAIN_MODULE_NAME = "libpipewire-module-filter-chain"
+PIPEWIRE_CLIENT_NAME = "Mini EQ"
+PIPEWIRE_MEDIA_CATEGORY = "Manager"
 
 
 @dataclass(frozen=True)
@@ -367,7 +369,15 @@ class WirePlumberBackend:
         if not target.object_serial:
             raise WirePlumberError(f"audio sink has no object.serial: {target_node_name}")
 
-        self.set_metadata_and_wait(stream.bound_id, TARGET_OBJECT_KEY, SPA_ID_TYPE, target.object_serial)
+        moved = self.set_metadata_and_wait(stream.bound_id, TARGET_OBJECT_KEY, SPA_ID_TYPE, target.object_serial)
+        if moved:
+            return
+
+        target_object, target_type = self.stream_target_object(stream.bound_id)
+        if target_object != target.object_serial or target_type not in {None, SPA_ID_TYPE}:
+            raise WirePlumberError(
+                f"WirePlumber did not acknowledge moving {stream.display_name} to {target_node_name}"
+            )
 
     def stream_targets_node(self, stream_bound_id: int, target_node_name: str) -> bool:
         target = self.audio_sink_by_name(target_node_name)
@@ -468,8 +478,12 @@ class WirePlumberBackend:
 
     @staticmethod
     def _new_core(Wp):
+        properties = Wp.Properties.new_empty()
+        properties.set("application.name", PIPEWIRE_CLIENT_NAME)
+        properties.set("media.category", PIPEWIRE_MEDIA_CATEGORY)
+
         try:
-            return Wp.Core.new(None, None, None)
+            return Wp.Core.new(None, None, properties)
         except TypeError:
             return Wp.Core.new(None, None)
 
