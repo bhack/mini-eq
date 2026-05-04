@@ -119,8 +119,17 @@ flatpak run io.github.bhack.mini-eq//master --auto-route
 ```
 
 There is also an experimental non-blocking GitHub Actions path for this check:
-manually dispatch the `CI` workflow with `flatpak_runtime_smoke=true`. Treat it
-as extra signal only until it has proven stable in the hosted runner.
+manually dispatch the `CI` workflow with `flatpak_runtime_smoke=true` and, when
+iterating only on the smoke harness, `smoke_only=true`. For quick harness
+iterations against the published Flathub app, use `flatpak_runtime_build=false`,
+`flatpak_runtime_install_remote=true`, and the default blank
+`flatpak_runtime_app_ref` so the harness runs the installed Flathub ref. Set
+`flatpak_runtime_expected_version` when using the published app, because Flathub
+metadata can lag after an update. Leave `flatpak_runtime_build=true` for any
+release check that must test current source or the local manifest. Use hosted
+smoke as the validation for harness-only CI changes and as extra release signal;
+keep the local runtime smoke as the release check when app/runtime routing
+behavior changed.
 
 ## Build
 

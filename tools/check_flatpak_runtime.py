@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import shutil
 import subprocess
 import sys
 import time
+import wave
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from typing import Any
 APP_ID = "io.github.bhack.mini-eq"
 DEFAULT_APP_REF = f"{APP_ID}//master"
 SMOKE_APPLICATION_NAME = "mini-eq-flatpak-smoke"
+SMOKE_NODE_NAME = "mini-eq-flatpak-smoke"
 VIRTUAL_SINK_NAME = "mini_eq_sink"
 PIPEWIRE_MANAGER_ACCESS = "flatpak-manager"
 TARGET_OBJECT_RE = re.compile(
@@ -45,7 +48,7 @@ def require_tools(*tools: str) -> None:
 
 def read_pw_dump() -> list[dict[str, Any]]:
     result = subprocess.run(["pw-dump"], check=True, text=True, stdout=subprocess.PIPE)
-    payload = json.loads(result.stdout)
+    payload, _end = json.JSONDecoder().raw_decode(result.stdout.lstrip())
     if not isinstance(payload, list):
         raise RuntimeError("pw-dump returned an unexpected JSON shape")
     return payload
@@ -74,9 +77,8 @@ def node_by_name(node_name: str) -> dict[str, Any] | None:
 def smoke_stream_node() -> dict[str, Any] | None:
     for node in node_items():
         props = item_props(node)
-        if (
-            props.get("media.class") == "Stream/Output/Audio"
-            and props.get("application.name") == SMOKE_APPLICATION_NAME
+        if props.get("media.class") == "Stream/Output/Audio" and (
+            props.get("application.name") == SMOKE_APPLICATION_NAME or props.get("node.name") == SMOKE_NODE_NAME
         ):
             return node
     return None
@@ -139,30 +141,43 @@ def mini_eq_has_manager_access() -> bool:
     return False
 
 
-def start_smoke_stream() -> subprocess.Popen[str]:
+def create_silent_wav(duration_seconds: float) -> Path:
+    path = Path("/tmp/mini-eq-flatpak-smoke.wav")
+    frame_count = max(1, math.ceil(duration_seconds * 48_000))
+    silence = b"\0" * 2 * 2 * 48_000
+
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(48_000)
+        for _ in range(math.ceil(frame_count / 48_000)):
+            wav.writeframes(silence)
+
+    return path
+
+
+def start_smoke_stream(target: str | None, audio_file: Path) -> subprocess.Popen[str]:
     command = [
         "pw-cat",
         "--playback",
-        "--raw",
-        "--rate",
-        "48000",
-        "--channels",
-        "2",
-        "--format",
-        "s16",
         "--volume",
         "0",
         "--properties",
         f"application.name={SMOKE_APPLICATION_NAME}",
-        "/dev/zero",
     ]
+    if target is not None:
+        command.extend(["--target", target])
+    command.append(audio_file)
     print(f"$ {format_command(command)}", flush=True)
     return subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 
 def stop_process(process: subprocess.Popen[str], label: str, timeout_seconds: float = 5.0) -> str:
     if process.poll() is not None:
-        return process.stdout.read() if process.stdout is not None else ""
+        output = process.stdout.read() if process.stdout is not None and not process.stdout.closed else ""
+        if output:
+            print(f"{label} output:\n{output.rstrip()}", flush=True)
+        return output
 
     process.terminate()
     try:
@@ -183,17 +198,33 @@ def assert_no_existing_virtual_sink() -> None:
         )
 
 
-def run_runtime_smoke(app_ref: str, duration_seconds: float, timeout_seconds: float) -> None:
+def run_runtime_smoke(
+    app_ref: str,
+    duration_seconds: float,
+    timeout_seconds: float,
+    smoke_target: str | None,
+) -> None:
     assert_no_existing_virtual_sink()
 
     deps = run(["flatpak", "run", app_ref, "--check-deps"])
     print(deps.stdout.rstrip(), flush=True)
 
-    smoke = start_smoke_stream()
+    # Keep pw-cat alive across stream discovery, app startup, routing, app runtime, and restore waits.
+    smoke_audio_duration = max(duration_seconds + timeout_seconds * 4.0 + 15.0, 60.0)
+    smoke_audio = create_silent_wav(smoke_audio_duration)
+    smoke = start_smoke_stream(smoke_target, smoke_audio)
     app: subprocess.Popen[str] | None = None
 
     try:
-        smoke_node = wait_for("silent PipeWire smoke stream", smoke_stream_node, timeout_seconds)
+
+        def live_smoke_stream_node() -> dict[str, Any] | None:
+            if smoke.poll() is not None:
+                output = stop_process(smoke, "pw-cat smoke stream")
+                detail = f": {output.strip()}" if output.strip() else ""
+                raise RuntimeError(f"pw-cat exited before its PipeWire stream appeared{detail}")
+            return smoke_stream_node()
+
+        smoke_node = wait_for("silent PipeWire smoke stream", live_smoke_stream_node, timeout_seconds)
         smoke_id = bound_id(smoke_node)
         original_target = metadata_targets().get(smoke_id)
 
@@ -208,14 +239,33 @@ def run_runtime_smoke(app_ref: str, duration_seconds: float, timeout_seconds: fl
         ]
         print(f"$ {format_command(command)}", flush=True)
         app = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        manager_access_seen = False
 
-        wait_for("Mini EQ PipeWire manager access", mini_eq_has_manager_access, timeout_seconds)
+        def note_manager_access() -> None:
+            nonlocal manager_access_seen
+            manager_access_seen = manager_access_seen or mini_eq_has_manager_access()
+
+        def require_mini_eq_running(label: str) -> None:
+            if app is not None and app.poll() is not None:
+                output = stop_process(app, "Mini EQ Flatpak")
+                detail = f": {output.strip()}" if output.strip() else f" with status {app.returncode}"
+                raise RuntimeError(f"Mini EQ Flatpak exited before {label}{detail}")
+
+        def live_virtual_sink() -> dict[str, Any] | None:
+            note_manager_access()
+            require_mini_eq_running(f"{VIRTUAL_SINK_NAME} appeared")
+            return node_by_name(VIRTUAL_SINK_NAME)
+
         virtual_sink = wait_for(
-            f"{VIRTUAL_SINK_NAME} PipeWire node", lambda: node_by_name(VIRTUAL_SINK_NAME), timeout_seconds
+            f"{VIRTUAL_SINK_NAME} PipeWire node",
+            live_virtual_sink,
+            timeout_seconds,
         )
         virtual_serial = object_serial(virtual_sink)
 
         def smoke_stream_targets_virtual_sink() -> bool:
+            note_manager_access()
+            require_mini_eq_running("the smoke stream was routed")
             target = metadata_targets().get(smoke_id)
             return target == (virtual_serial, "Spa:Id")
 
@@ -238,11 +288,17 @@ def run_runtime_smoke(app_ref: str, duration_seconds: float, timeout_seconds: fl
             restored_target = metadata_targets().get(smoke_id)
             print(f"Smoke stream restored to {restored_target}.", flush=True)
 
-        print("Flatpak runtime smoke passed: manager access, stream routing, and restore behavior verified.")
+        if manager_access_seen:
+            print("Mini EQ PipeWire manager access client observed.", flush=True)
+        else:
+            print("Mini EQ PipeWire manager access client was not observed; routing behavior was verified.", flush=True)
+
+        print("Flatpak runtime smoke passed: stream routing and restore behavior verified.")
     finally:
-        if app is not None and app.poll() is None:
+        if app is not None:
             stop_process(app, "Mini EQ Flatpak")
         stop_process(smoke, "pw-cat smoke stream")
+        smoke_audio.unlink(missing_ok=True)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -266,6 +322,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=8.0,
         help="Timeout in seconds for each PipeWire state transition.",
     )
+    parser.add_argument(
+        "--smoke-target",
+        default=None,
+        help="Optional PipeWire node target for the silent smoke stream.",
+    )
     return parser.parse_args(argv)
 
 
@@ -274,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         require_tools("flatpak", "pw-cat", "pw-dump", "pw-metadata")
-        run_runtime_smoke(args.app_ref, args.duration, args.timeout)
+        run_runtime_smoke(args.app_ref, args.duration, args.timeout, args.smoke_target)
     except subprocess.CalledProcessError as exc:
         if exc.stdout:
             sys.stderr.write(exc.stdout)

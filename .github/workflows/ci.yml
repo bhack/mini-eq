@@ -11,6 +11,30 @@ on:
         description: Run the experimental Flatpak PipeWire/WirePlumber routing smoke test
         type: boolean
         default: false
+      smoke_only:
+        description: Skip ordinary CI work and run only the requested experimental smoke job
+        type: boolean
+        default: false
+      flatpak_runtime_build:
+        description: Build and reinstall the local Flatpak before the runtime smoke test
+        type: boolean
+        default: true
+      flatpak_runtime_install_remote:
+        description: Install the smoke target from Flathub instead of using a local build
+        type: boolean
+        default: false
+      flatpak_runtime_app_ref:
+        description: Optional Flatpak app ref to run; blank infers the build or install ref
+        type: string
+        default: ""
+      flatpak_runtime_install_ref:
+        description: Flathub ref to install when flatpak_runtime_install_remote is enabled
+        type: string
+        default: io.github.bhack.mini-eq
+      flatpak_runtime_expected_version:
+        description: Optional installed Flatpak version expected by the runtime smoke test
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -37,6 +61,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          SMOKE_ONLY: ${{ inputs.smoke_only }}
         run: |
           set -euo pipefail
 
@@ -53,6 +78,15 @@ jobs:
 
           case "$GITHUB_EVENT_NAME" in
             workflow_dispatch)
+              if [[ "${SMOKE_ONLY:-false}" == "true" ]]; then
+                {
+                  echo "test=false"
+                  echo "tooling=false"
+                  echo "wp04=false"
+                  echo "flatpak=false"
+                } >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
               set_all
               exit 0
               ;;
@@ -130,7 +164,7 @@ jobs:
 
   tooling:
     needs: changes
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -163,7 +197,7 @@ jobs:
 
   test:
     needs: changes
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -243,7 +277,7 @@ jobs:
 
   wireplumber-0-4-compat:
     needs: changes
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -269,7 +303,7 @@ jobs:
 
   flatpak:
     needs: changes
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container:
@@ -390,98 +424,11 @@ jobs:
             pipewire-bin \
             wireplumber
 
-      - name: Configure Flathub remote
-        run: |
-          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user -y flathub org.flatpak.Builder//stable
-
-      - name: Build and install local Flatpak
-        run: |
-          flatpak run --command=flathub-build org.flatpak.Builder \
-            --install io.github.bhack.mini-eq.yaml
-
-      - name: Run experimental Flatpak runtime smoke
-        run: |
-          set -euo pipefail
-
-          runtime_dir="/run/user/$(id -u)"
-          config_home="$(mktemp -d)"
-
-          sudo mkdir -p "$runtime_dir"
-          sudo chown "$(id -u):$(id -g)" "$runtime_dir"
-          chmod 700 "$runtime_dir"
-          mkdir -p "$config_home/pipewire/pipewire.conf.d"
-
-          cat > "$config_home/pipewire/pipewire.conf.d/10-mini-eq-ci-null-sink.conf" <<'EOF'
-          context.objects = [
-              { factory = adapter
-                  args = {
-                      factory.name     = support.null-audio-sink
-                      node.name        = "ci_null_sink"
-                      node.description = "CI Null Sink"
-                      media.class      = "Audio/Sink"
-                      audio.position   = "FL,FR"
-                      adapter.auto-port-config = {
-                          mode     = dsp
-                          monitor  = true
-                          position = preserve
-                      }
-                  }
-              }
-          ]
-          EOF
-
-          export XDG_RUNTIME_DIR="$runtime_dir"
-          export XDG_CONFIG_HOME="$config_home"
-
-          dbus-run-session -- bash <<'SH'
-          set -euo pipefail
-
-          pipewire >"$XDG_RUNTIME_DIR/pipewire.log" 2>&1 &
-          pipewire_pid=$!
-          wireplumber >"$XDG_RUNTIME_DIR/wireplumber.log" 2>&1 &
-          wireplumber_pid=$!
-
-          cleanup() {
-            kill "$wireplumber_pid" "$pipewire_pid" 2>/dev/null || true
-            wait "$wireplumber_pid" 2>/dev/null || true
-            wait "$pipewire_pid" 2>/dev/null || true
-          }
-
-          dump_logs() {
-            echo "## wpctl status"
-            wpctl status 2>/dev/null || true
-            echo "## pipewire.log"
-            sed -n '1,240p' "$XDG_RUNTIME_DIR/pipewire.log" 2>/dev/null || true
-            echo "## wireplumber.log"
-            sed -n '1,240p' "$XDG_RUNTIME_DIR/wireplumber.log" 2>/dev/null || true
-          }
-
-          trap cleanup EXIT
-          trap dump_logs ERR
-
-          ci_sink_id=""
-          default_set=false
-          for _ in $(seq 1 200); do
-            ci_sink_id="$(
-              pw-dump 2>/dev/null \
-                | jq -r '.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink") | .id' \
-                | head -n 1
-            )"
-            if [[ -n "$ci_sink_id" ]] && wpctl set-default "$ci_sink_id" >/dev/null 2>&1; then
-              default_set=true
-              break
-            fi
-            sleep 0.1
-          done
-
-          if [[ "$default_set" != true ]]; then
-            echo "failed to set ci_null_sink as the default PipeWire sink"
-            exit 1
-          fi
-
-          python3 tools/check_flatpak_runtime.py \
-            --app-ref io.github.bhack.mini-eq//master \
-            --duration 8 \
-            --timeout 20
-          SH
+      - name: Build and run experimental Flatpak runtime smoke
+        env:
+          MINI_EQ_FLATPAK_BUILD: ${{ inputs.flatpak_runtime_build && '1' || '0' }}
+          MINI_EQ_FLATPAK_INSTALL_REMOTE: ${{ inputs.flatpak_runtime_install_remote && '1' || '0' }}
+          MINI_EQ_FLATPAK_APP_REF: ${{ inputs.flatpak_runtime_app_ref }}
+          MINI_EQ_FLATPAK_INSTALL_REF: ${{ inputs.flatpak_runtime_install_ref }}
+          MINI_EQ_FLATPAK_EXPECT_VERSION: ${{ inputs.flatpak_runtime_expected_version }}
+        run: tools/run_flatpak_runtime_smoke_ci.sh
