@@ -385,23 +385,20 @@ jobs:
           sudo apt-get install -y \
             dbus-user-session \
             flatpak \
-            flatpak-builder \
             jq \
             pipewire \
             pipewire-bin \
             wireplumber
 
       - name: Configure Flathub remote
-        run: flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+        run: |
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.flatpak.Builder//stable
 
       - name: Build and install local Flatpak
         run: |
-          flatpak-builder \
-            --user \
-            --install \
-            --force-clean \
-            --install-deps-from=flathub \
-            flatpak-build io.github.bhack.mini-eq.yaml
+          flatpak run --command=flathub-build org.flatpak.Builder \
+            --install io.github.bhack.mini-eq.yaml
 
       - name: Run experimental Flatpak runtime smoke
         run: |

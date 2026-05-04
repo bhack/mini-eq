@@ -104,9 +104,9 @@ verifies that the stream is restored when the app exits, so keep it separate
 from the generic preflight.
 
 ```bash
-flatpak run --command=flatpak-builder org.flatpak.Builder \
-  --user --install --force-clean --install-deps-from=flathub \
-  flatpak-build io.github.bhack.mini-eq.yaml
+flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user -y flathub org.flatpak.Builder//stable
+flatpak run --command=flathub-build org.flatpak.Builder --install io.github.bhack.mini-eq.yaml
 python3 tools/check_flatpak_runtime.py --app-ref io.github.bhack.mini-eq//master
 ```
 
