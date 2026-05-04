@@ -79,12 +79,24 @@ def test_ci_scope_treats_release_workflow_and_release_gate_tools_as_tested_chang
     ci_yml = workflow_text("ci.yml")
 
     assert ".github/workflows/*.yml)" in ci_yml
+    assert "tools/check_autoeq_live.py" in ci_yml
     assert "tools/release_gates.py" in ci_yml
     assert "tools/release_runtime_gate.py" in ci_yml
     assert "tools/check_headless_pipewire_runtime.py" in ci_yml
     assert "tools/run_headless_pipewire_runtime_smoke_ci.sh" in ci_yml
     assert "live_ui_runtime_smoke" in ci_yml
     assert "tools/run_live_ui_runtime_smoke_ci.sh" in ci_yml
+
+
+def test_autoeq_live_workflow_is_scheduled_and_manual_only() -> None:
+    workflow = workflow_text("autoeq-live.yml")
+
+    assert "workflow_dispatch:" in workflow
+    assert "schedule:" in workflow
+    assert "cron:" in workflow
+    assert "pull_request:" not in workflow
+    assert "push:" not in workflow
+    assert "tools/check_autoeq_live.py" in workflow
 
 
 def test_headless_pipewire_runtime_smoke_is_optional_ci_gate_without_nested_gnome() -> None:

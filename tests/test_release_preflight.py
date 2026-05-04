@@ -23,6 +23,9 @@ def test_leak_pattern_matches_common_credential_prefixes() -> None:
             "value=" + "AK" + "IA" + ("A" * 16),
             "value=" + "AS" + "IA" + ("A" * 16),
             "api" + "_key=value",
+            "to" + "ken=" + ("A" * 40),
+            "sec" + "ret=" + ("A" * 40),
+            "sec" + "ret_key=" + ("A" * 40),
             "/" + "home/user/project",
         ]
     )
@@ -48,6 +51,12 @@ def test_allowed_matches_still_cover_public_release_references() -> None:
 
     for line in lines:
         assert release_preflight.allowed_leak_match(line)
+
+
+def test_leak_pattern_ignores_regular_token_identifiers() -> None:
+    assert not leak_match("tokens = normalize_search_query(query)")
+    assert not leak_match("first_token = tokens[0]")
+    assert not leak_match("def score(tokens: list[str]) -> int:")
 
 
 def test_pipewire_gobject_build_environment_error_lists_missing_tools(monkeypatch) -> None:
@@ -95,6 +104,26 @@ def test_release_preflight_runs_headless_pipewire_runtime_smoke(monkeypatch) -> 
             "34",
         ]
     ]
+
+
+def test_release_preflight_autoeq_live_notice_tracks_autoeq_paths(monkeypatch, capsys) -> None:
+    observed_paths: list[Path] = []
+
+    monkeypatch.setattr(release_preflight, "extension_comparison_base_tag", lambda: "v0.7.4")
+
+    def changed_paths(_base_tag: str, paths: tuple[Path, ...]) -> list[str]:
+        observed_paths.extend(paths)
+        return ["src/mini_eq/autoeq.py"]
+
+    monkeypatch.setattr(release_preflight, "changed_paths_for_review", changed_paths)
+
+    release_preflight.run_autoeq_live_check_notice()
+
+    output = capsys.readouterr().out
+    assert Path("src/mini_eq/autoeq.py") in observed_paths
+    assert Path("tools/check_autoeq_live.py") in observed_paths
+    assert "AutoEQ.app live compatibility check may be needed" in output
+    assert "python3 tools/check_autoeq_live.py" in output
 
 
 def test_release_preflight_uses_hosted_headless_pipewire_defaults(monkeypatch) -> None:

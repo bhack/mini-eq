@@ -1,0 +1,32 @@
+name: AutoEQ Live
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  autoeq-live:
+    name: AutoEQ.app compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install check dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install numpy
+
+      - name: Run AutoEQ live compatibility check
+        run: PYTHONPATH=src .venv/bin/python tools/check_autoeq_live.py

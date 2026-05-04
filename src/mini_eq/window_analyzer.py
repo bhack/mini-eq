@@ -30,6 +30,10 @@ LOUDNESS_METER_MIN_LUFS = -60.0
 LOUDNESS_METER_MAX_LUFS = 0.0
 
 
+def loudness_value_is_displayable(value: float) -> bool:
+    return math.isfinite(value) and value >= LOUDNESS_METER_MIN_LUFS
+
+
 def format_lufs(value: float) -> str:
     if not math.isfinite(value):
         return "-inf LUFS"
@@ -40,16 +44,18 @@ def loudness_current_lufs(snapshot: AnalyzerLoudnessSnapshot | None) -> float | 
     if snapshot is None:
         return None
 
-    for value in (snapshot.shortterm_lufs, snapshot.momentary_lufs, snapshot.integrated_lufs):
-        if math.isfinite(value):
+    for value in (snapshot.shortterm_lufs, snapshot.momentary_lufs):
+        if loudness_value_is_displayable(value):
             return value
 
     return None
 
 
 def loudness_summary_lufs(snapshot: AnalyzerLoudnessSnapshot | None) -> str | None:
+    if snapshot is None:
+        return None
     value = loudness_current_lufs(snapshot)
-    return format_lufs(value) if value is not None else None
+    return format_lufs(value) if value is not None else "--"
 
 
 def optional_lufs(value: float | None) -> str:
@@ -88,7 +94,7 @@ def loudness_tooltip_text(
 
 
 def update_loudness_max(current_max: float | None, value: float) -> float | None:
-    if not math.isfinite(value):
+    if not loudness_value_is_displayable(value):
         return current_max
     if current_max is None or value > current_max:
         return value

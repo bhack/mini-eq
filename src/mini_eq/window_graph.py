@@ -12,6 +12,7 @@ from gi.repository import GLib, Gtk
 from .analyzer import analyzer_db_to_display_norm
 from .appearance import style_manager_is_dark
 from .core import (
+    DEFAULT_BAND_Q,
     FILTER_TYPE_INDEX_BY_VALUE,
     FILTER_TYPE_ORDER,
     FILTER_TYPES,
@@ -39,6 +40,7 @@ GRAPH_PLOT_LEFT = 58.0
 GRAPH_PLOT_RIGHT = 62.0
 GRAPH_PLOT_TOP = 26.0
 GRAPH_PLOT_BOTTOM = 34.0
+SELECTED_BAND_PLACEHOLDER_FREQUENCY_HZ = 1000.0
 
 
 def rounded_rectangle_path(cr, x: float, y: float, width: float, height: float, radius: float) -> None:
@@ -246,12 +248,18 @@ class MiniEqWindowGraphMixin:
         if selected_entry is None:
             self.selected_band_label.set_text("No Band")
             self.selected_band_label.set_tooltip_text("No band selected")
+            self.selected_band_type_combo.set_selected(FILTER_TYPE_INDEX_BY_VALUE.get(FILTER_TYPES["Off"], 0))
+            self.selected_band_frequency_spin.set_value(SELECTED_BAND_PLACEHOLDER_FREQUENCY_HZ)
+            self.selected_band_q_spin.set_value(DEFAULT_BAND_Q)
+            self.selected_band_gain_spin.set_value(0.0)
+            self.selected_band_mute_button.set_active(False)
+            self.selected_band_solo_button.set_active(False)
             for control in editor_controls:
                 control.set_sensitive(False)
             for group_name in editor_groups:
                 group = getattr(self, group_name, None)
                 if group is not None:
-                    group.set_visible(False)
+                    group.set_visible(True)
             return
 
         selected_index, selected = selected_entry

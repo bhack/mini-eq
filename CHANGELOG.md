@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add direct AutoEq search, curve preview, and on-demand preset import from the app.
+- Show current AppStream release notes in the About dialog.
+- Request Flatpak network access so AutoEq.app profile search and preset generation work in sandboxed builds.
+- Keep the Flatpak display permission Wayland-only, avoiding the X11 screen-contents access grant.
+
 ## 0.7.4 - 2026-05-11
 
 - Run filter-chain readiness callbacks from the GLib main context when PipeWire

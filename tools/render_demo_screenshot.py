@@ -114,7 +114,7 @@ class DemoScreenshotApplication(Adw.Application):
         self.window.refresh_preset_list()
         self.window.set_visible(True)
         self.window.present()
-        self.window.schedule_post_present_setup()
+        self.window.schedule_startup_ready()
         GLib.timeout_add(self.delay_ms, self.on_capture_timeout)
 
     def on_capture_timeout(self) -> bool:

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="io.github.bhack.mini-eq" path="/io/github/bhack/mini-eq/">
+    <key name="window-width" type="i">
+      <range min="980" max="4096"/>
+      <default>1360</default>
+      <summary>Window width</summary>
+      <description>The width of the main Mini EQ window.</description>
+    </key>
+    <key name="window-height" type="i">
+      <range min="600" max="2160"/>
+      <default>720</default>
+      <summary>Window height</summary>
+      <description>The height of the main Mini EQ window.</description>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window maximized state</summary>
+      <description>Whether the main Mini EQ window was maximized.</description>
+    </key>
+  </schema>
+</schemalist>

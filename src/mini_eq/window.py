@@ -40,11 +40,13 @@ from .pipewire_backend import PipeWireNode, node_sample_rate, parse_positive_int
 from .routing import SystemWideEqController
 from .settings import load_monitor_enabled
 from .window_analyzer import MiniEqWindowAnalyzerMixin
+from .window_autoeq import MiniEqWindowAutoEqMixin, initialize_autoeq_window_state
 from .window_graph import MiniEqWindowGraphMixin
 from .window_headroom import MiniEqWindowHeadroomMixin, format_headroom_peak_db
 from .window_layout import MiniEqWindowLayoutMixin
 from .window_preferences import MiniEqWindowPreferencesMixin
-from .window_presets import MiniEqWindowPresetMixin, imported_apo_curve_label
+from .window_presets import MiniEqWindowPresetMixin, imported_apo_curve_label, imported_apo_curve_label_for_name
+from .window_state import bind_window_state
 from .window_utility import MiniEqWindowUtilityPaneMixin
 from .window_utils import requested_switch_state, set_switch_confirmed_state
 
@@ -125,6 +127,7 @@ def output_preset_target_identity(owner: object, fallback: str | None) -> str | 
 class MiniEqWindow(
     MiniEqWindowPresetMixin,
     MiniEqWindowAnalyzerMixin,
+    MiniEqWindowAutoEqMixin,
     MiniEqWindowGraphMixin,
     MiniEqWindowHeadroomMixin,
     MiniEqWindowUtilityPaneMixin,
@@ -154,6 +157,9 @@ class MiniEqWindow(
         self.compact_min_window_height = MIN_WINDOW_HEIGHT
         self.default_min_window_height = MIN_WINDOW_HEIGHT
         self.set_default_size(1360, DEFAULT_WINDOW_HEIGHT)
+        self.window_state_settings = bind_window_state(self)
+        _default_width, default_height = self.get_default_size()
+        self.initial_layout_height = default_height if default_height > 0 else DEFAULT_WINDOW_HEIGHT
         self.set_size_request(self.min_window_width, self.compact_min_window_height)
         self.updating_ui = False
         self.selected_band_index: int | None = 0
@@ -207,6 +213,7 @@ class MiniEqWindow(
         self.analyzer_last_frame_time = time.monotonic()
         self.utility_pane_button: Gtk.ToggleButton | None = None
         self.utility_pane_binding: GObject.Binding | None = None
+        initialize_autoeq_window_state(self)
         self.fallback_preset_row_visible = False
         self.default_preset_row: Gtk.Box | None = None
         self.preset_default_heading: Gtk.Label | None = None
@@ -893,20 +900,31 @@ class MiniEqWindow(
             return
 
         try:
-            imported_count = self.controller.import_apo_preset(path)
-            curve_label = imported_apo_curve_label(path)
-            self.selected_band_index = None
-            self.set_visible_band_count(imported_count)
-            self.current_preset_name = None
-            self.saved_preset_signature = self.controller.state_signature()
-            self.set_curve_revert_baseline(curve_label)
-            self.output_preset_curve_auto_loaded = False
-            self.refresh_preset_list()
-            self.sync_ui_from_state()
+            self.import_apo_preset_path(path)
             self.set_status("Imported APO curve")
-            self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
+
+    def import_apo_preset_path(self, path: str, *, imported_name: str | None = None) -> int:
+        imported_count = self.controller.import_apo_preset(path)
+        if imported_name is not None:
+            curve_label = imported_apo_curve_label_for_name(imported_name)
+        else:
+            curve_label = imported_apo_curve_label(path)
+        self.selected_band_index = None
+        self.set_visible_band_count(imported_count)
+        self.current_preset_name = None
+        self.saved_preset_signature = self.controller.state_signature()
+        self.set_curve_revert_baseline(curve_label)
+        self.output_preset_auto_applied = False
+        self.output_preset_curve_auto_loaded = False
+        self.refresh_preset_list()
+        utility_pane_button = getattr(self, "utility_pane_button", None)
+        if utility_pane_button is not None and utility_pane_button.get_visible():
+            utility_pane_button.set_active(True)
+        self.sync_ui_from_state()
+        self.notify_control_state_changed()
+        return imported_count
 
     def on_output_changed(self, combo: Gtk.DropDown, _param: object) -> None:
         if self.updating_output_combo:

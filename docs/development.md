@@ -97,7 +97,7 @@ python3 -m venv --system-site-packages ~/.local/share/mini-eq/venv
 ~/.local/share/mini-eq/venv/bin/mini-eq
 ```
 
-Install the desktop launcher and icon for the current user:
+Install the desktop launcher, icon, and GSettings schema for the current user:
 
 ```bash
 mini-eq --install-desktop

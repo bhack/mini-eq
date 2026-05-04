@@ -25,6 +25,7 @@ from .core import (
     clamp,
 )
 from .desktop_integration import APP_ICON_NAME
+from .release_notes import about_release_notes
 from .window_graph import GRAPH_PLOT_BOTTOM, GRAPH_PLOT_LEFT, GRAPH_PLOT_RIGHT, GRAPH_PLOT_TOP
 from .window_utils import (
     bind_label_to_control,
@@ -57,8 +58,39 @@ ROOMY_FADER_WIDGET_HEIGHT = 300
 DEFAULT_FADER_SCROLLER_MIN_HEIGHT = 200
 COMPACT_FADER_SCROLLER_MIN_HEIGHT = 150
 ROOMY_FADER_SCROLLER_MIN_HEIGHT = 290
-UTILITY_DENSE_HEIGHT = 660
-UTILITY_TIGHT_HEIGHT = 620
+COMPACT_UTILITY_PANE_SPACING = 6
+ROOMY_UTILITY_PANE_SPACING = 12
+COMPACT_UTILITY_PANE_MARGIN_TOP = 2
+ROOMY_UTILITY_PANE_MARGIN_TOP = 4
+COMPACT_UTILITY_PANE_MARGIN_BOTTOM = 0
+ROOMY_UTILITY_PANE_MARGIN_BOTTOM = 2
+COMPACT_UTILITY_SECTION_SPACING = 5
+ROOMY_UTILITY_SECTION_SPACING = 8
+COMPACT_HEADROOM_PANEL_SPACING = 3
+ROOMY_HEADROOM_PANEL_SPACING = 7
+COMPACT_HEADROOM_METER_CONTENT_HEIGHT = 9
+ROOMY_HEADROOM_METER_CONTENT_HEIGHT = 14
+COMPACT_MONITOR_PANEL_SPACING = 1
+ROOMY_MONITOR_PANEL_SPACING = 4
+
+
+def visual_layout_height(owner: object, height: int | None) -> int:
+    if height is not None and height > 0:
+        return height
+
+    allocated_height = 0
+    get_allocated_height = getattr(owner, "get_allocated_height", None)
+    if callable(get_allocated_height):
+        allocated_height = int(get_allocated_height())
+    if allocated_height > 0:
+        return allocated_height
+
+    return max(
+        int(getattr(owner, "initial_layout_height", 0) or 0),
+        int(getattr(owner, "default_min_window_height", 0) or 0),
+        int(getattr(owner, "compact_min_window_height", 0) or 0),
+        1,
+    )
 
 
 class MiniEqWindowLayoutMixin:
@@ -129,6 +161,7 @@ class MiniEqWindowLayoutMixin:
             action.connect("activate", lambda _action, _parameter: callback())
             self.add_action(action)
 
+        add_window_action("import-autoeq", lambda: self.on_import_autoeq_clicked(tools_button))
         add_window_action("import-apo", lambda: self.on_import_apo_clicked(tools_button))
         add_window_action("preferences", self.show_preferences_dialog)
         add_window_action("about", self.show_about_dialog)
@@ -141,6 +174,7 @@ class MiniEqWindowLayoutMixin:
         self.add_action(self.appearance_action)
 
         tools_menu = Gio.Menu()
+        tools_menu.append("Import from AutoEq…", "win.import-autoeq")
         tools_menu.append("Import Equalizer APO…", "win.import-apo")
 
         appearance_menu = Gio.Menu()
@@ -213,12 +247,12 @@ class MiniEqWindowLayoutMixin:
         left_scroller.set_vexpand(True)
         left_scroller.set_child(left_column)
 
-        right_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        right_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=COMPACT_UTILITY_PANE_SPACING)
         right_column.set_size_request(292, -1)
         right_column.set_vexpand(False)
         right_column.set_valign(Gtk.Align.START)
-        right_column.set_margin_top(4)
-        right_column.set_margin_bottom(2)
+        right_column.set_margin_top(COMPACT_UTILITY_PANE_MARGIN_TOP)
+        right_column.set_margin_bottom(COMPACT_UTILITY_PANE_MARGIN_BOTTOM)
         right_column.set_margin_start(14)
         right_column.set_margin_end(10)
         right_column.add_css_class("utility-pane-shell")
@@ -295,9 +329,14 @@ class MiniEqWindowLayoutMixin:
         sync_compact_toolbar()
 
         preset_section = self.make_preset_section()
+        preset_section.set_spacing(COMPACT_UTILITY_SECTION_SPACING)
         right_column.append(preset_section)
 
         system_section, monitor_panel = self.make_system_section()
+        system_section.set_spacing(COMPACT_UTILITY_SECTION_SPACING)
+        self.headroom_panel.set_spacing(COMPACT_HEADROOM_PANEL_SPACING)
+        self.headroom_meter_area.set_content_height(COMPACT_HEADROOM_METER_CONTENT_HEIGHT)
+        monitor_panel.set_spacing(COMPACT_MONITOR_PANEL_SPACING)
         right_column.append(system_section)
 
         graph_shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -608,7 +647,7 @@ class MiniEqWindowLayoutMixin:
 
         def sync_visual_layout(height: int | None = None) -> None:
             compact = workspace.get_collapsed()
-            layout_height = height if height is not None and height > 0 else self.get_allocated_height()
+            layout_height = visual_layout_height(self, height)
 
             graph_height = responsive_value(
                 COMPACT_GRAPH_CONTENT_HEIGHT,
@@ -626,29 +665,42 @@ class MiniEqWindowLayoutMixin:
                 ROOMY_FADER_SCROLLER_MIN_HEIGHT,
                 layout_height,
             )
-            dense_utility = layout_height <= UTILITY_DENSE_HEIGHT
-            tight_utility = layout_height <= UTILITY_TIGHT_HEIGHT
-            if dense_utility:
-                right_column.add_css_class("utility-pane-dense")
-            else:
-                right_column.remove_css_class("utility-pane-dense")
-            if tight_utility:
-                right_column.add_css_class("utility-pane-tight")
-            else:
-                right_column.remove_css_class("utility-pane-tight")
-
             fallback_row = getattr(self, "default_preset_row", None)
             if fallback_row is not None:
                 fallback_row.set_visible(getattr(self, "fallback_preset_row_visible", False))
 
-            right_column.set_spacing(responsive_value(6, 12, layout_height))
-            right_column.set_margin_top(responsive_value(2, 4, layout_height))
-            right_column.set_margin_bottom(responsive_value(0, 2, layout_height))
-            preset_section.set_spacing(responsive_value(5, 8, layout_height))
-            system_section.set_spacing(responsive_value(5, 8, layout_height))
-            self.headroom_panel.set_spacing(responsive_value(3, 7, layout_height))
-            self.headroom_meter_area.set_content_height(responsive_value(9, 14, layout_height))
-            monitor_panel.set_spacing(responsive_value(1, 4, layout_height))
+            right_column.set_spacing(
+                responsive_value(COMPACT_UTILITY_PANE_SPACING, ROOMY_UTILITY_PANE_SPACING, layout_height)
+            )
+            right_column.set_margin_top(
+                responsive_value(COMPACT_UTILITY_PANE_MARGIN_TOP, ROOMY_UTILITY_PANE_MARGIN_TOP, layout_height)
+            )
+            right_column.set_margin_bottom(
+                responsive_value(
+                    COMPACT_UTILITY_PANE_MARGIN_BOTTOM,
+                    ROOMY_UTILITY_PANE_MARGIN_BOTTOM,
+                    layout_height,
+                )
+            )
+            preset_section.set_spacing(
+                responsive_value(COMPACT_UTILITY_SECTION_SPACING, ROOMY_UTILITY_SECTION_SPACING, layout_height)
+            )
+            system_section.set_spacing(
+                responsive_value(COMPACT_UTILITY_SECTION_SPACING, ROOMY_UTILITY_SECTION_SPACING, layout_height)
+            )
+            self.headroom_panel.set_spacing(
+                responsive_value(COMPACT_HEADROOM_PANEL_SPACING, ROOMY_HEADROOM_PANEL_SPACING, layout_height)
+            )
+            self.headroom_meter_area.set_content_height(
+                responsive_value(
+                    COMPACT_HEADROOM_METER_CONTENT_HEIGHT,
+                    ROOMY_HEADROOM_METER_CONTENT_HEIGHT,
+                    layout_height,
+                )
+            )
+            monitor_panel.set_spacing(
+                responsive_value(COMPACT_MONITOR_PANEL_SPACING, ROOMY_MONITOR_PANEL_SPACING, layout_height)
+            )
 
             if compact:
                 right_column.set_margin_start(18)
@@ -789,14 +841,20 @@ class MiniEqWindowLayoutMixin:
             )
 
     def show_about_dialog(self) -> None:
-        dialog = Adw.AboutDialog(
-            application_icon=APP_ICON_NAME,
-            application_name=APP_NAME,
-            developer_name="bhack",
-            developers=["bhack"],
-            issue_url="https://github.com/bhack/mini-eq/issues",
-            license_type=Gtk.License.GPL_3_0,
-            version=__version__,
-            website="https://github.com/bhack/mini-eq",
-        )
+        dialog_properties = {
+            "application_icon": APP_ICON_NAME,
+            "application_name": APP_NAME,
+            "developer_name": "bhack",
+            "developers": ["bhack"],
+            "issue_url": "https://github.com/bhack/mini-eq/issues",
+            "license_type": Gtk.License.GPL_3_0,
+            "version": __version__,
+            "website": "https://github.com/bhack/mini-eq",
+        }
+        release_notes = about_release_notes(__version__)
+        if release_notes is not None:
+            dialog_properties["release_notes"] = release_notes.markup
+            dialog_properties["release_notes_version"] = release_notes.version
+
+        dialog = Adw.AboutDialog(**dialog_properties)
         dialog.present(self)

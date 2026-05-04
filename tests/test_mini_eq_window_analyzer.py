@@ -577,6 +577,13 @@ def test_loudness_summary_falls_back_while_shortterm_is_not_ready() -> None:
     assert window_analyzer.loudness_summary_lufs(snapshot) == "-21.0 LUFS"
 
 
+def test_loudness_summary_treats_sub_floor_current_values_as_silence() -> None:
+    snapshot = analyzer.AnalyzerLoudnessSnapshot(-200.0, -190.0, -19.3)
+
+    assert window_analyzer.loudness_current_lufs(snapshot) is None
+    assert window_analyzer.loudness_summary_lufs(snapshot) == "--"
+
+
 def test_visible_loudness_falls_back_while_shortterm_is_not_ready() -> None:
     window = AnalyzerSummaryWindow()
     window.analyzer_loudness_snapshot = analyzer.AnalyzerLoudnessSnapshot(-21.0, float("-inf"), float("-inf"))
@@ -590,7 +597,21 @@ def test_visible_loudness_falls_back_while_shortterm_is_not_ready() -> None:
     assert window.analyzer_loudness_meter_area.accessible_description == "Current -21.0 LUFS · Peak --"
 
 
+def test_visible_loudness_does_not_fall_back_to_integrated_after_silence() -> None:
+    window = AnalyzerSummaryWindow()
+    window.analyzer_loudness_snapshot = analyzer.AnalyzerLoudnessSnapshot(-200.0, -190.0, -19.3)
+    window.analyzer_session_max_shortterm_lufs = -19.3
+
+    window.update_analyzer_summary_label()
+
+    assert window.analyzer_summary_label.text == "On · --"
+    assert window.analyzer_summary_label.tooltip == "Current -- · Peak -19.3 LUFS"
+    assert window.analyzer_loudness_value_label.text == "--"
+    assert window.analyzer_loudness_meter_area.accessible_description == "Current -- · Peak -19.3 LUFS"
+
+
 def test_loudness_session_max_ignores_silence() -> None:
     assert window_analyzer.update_loudness_max(None, float("-inf")) is None
+    assert window_analyzer.update_loudness_max(None, -200.0) is None
     assert window_analyzer.update_loudness_max(-18.0, -20.0) == pytest.approx(-18.0)
     assert window_analyzer.update_loudness_max(-18.0, -12.0) == pytest.approx(-12.0)

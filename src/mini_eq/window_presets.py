@@ -37,11 +37,15 @@ APO_IMPORT_LABEL_PREFIX = "Imported APO: "
 DELETED_PRESET_LABEL_PREFIX = "Unsaved copy: "
 
 
-def imported_apo_curve_label(path: str) -> str:
-    preset_name = sanitize_preset_name(Path(path).stem)
+def imported_apo_curve_label_for_name(name: str) -> str:
+    preset_name = sanitize_preset_name(name)
     if preset_name:
         return f"{APO_IMPORT_LABEL_PREFIX}{preset_name}"
     return "Imported APO"
+
+
+def imported_apo_curve_label(path: str) -> str:
+    return imported_apo_curve_label_for_name(Path(path).stem)
 
 
 @dataclass(frozen=True)

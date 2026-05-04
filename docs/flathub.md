@@ -148,6 +148,9 @@ status as the authoritative screenshot-mirroring check.
 
 - Mini EQ is an upstream-maintained GTK/Libadwaita graphical application.
 - The app ID `io.github.bhack.mini-eq` matches the GitHub repository ownership.
+- The Flatpak is Wayland-only. Do not add X11 fallback permissions unless the
+  release intentionally trades the extra screen-contents access warning for X11
+  session support.
 - The app requires `xdg-run/pipewire-0` to create and use PipeWire audio nodes.
 - PyGObject comes from `org.gnome.Platform`; bundling it from PyPI would risk
   mismatches with the runtime GLib, GTK, and GObject-Introspection stack.

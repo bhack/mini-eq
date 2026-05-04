@@ -19,7 +19,8 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 ROOT = Path(__file__).resolve().parents[1]
 LEAK_PATTERN = (
-    r"(/home/|/Users/|secret|token|api[_-]?key|github_pat|"
+    r"(/home/|/Users/|(^|[^A-Za-z0-9_])secret[ \t]*[:=]|(^|[^A-Za-z0-9_])secret[_-]?key|"
+    r"(^|[^A-Za-z0-9_])token[ \t]*=|(^|[^A-Za-z0-9_])token[_-]?value[ \t]*=|api[_-]?key|github_pat|"
     r"gh[pousr]_[A-Za-z0-9_]{20,}|pypi-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|"
     r"AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|BEGIN [A-Z0-9 ]*PRIVATE KEY)"
 )
@@ -50,6 +51,13 @@ BACKGROUND_PORTAL_REVIEW_PATHS = (
     Path("src/mini_eq/window.py"),
     Path("src/mini_eq/window_preferences.py"),
     Path("extensions/gnome-shell/mini-eq@bhack.github.io/extension.js"),
+)
+AUTOEQ_LIVE_REVIEW_PATHS = (
+    Path(".github/workflows/autoeq-live.yml"),
+    Path("src/mini_eq/autoeq.py"),
+    Path("src/mini_eq/window_autoeq.py"),
+    Path("tests/test_mini_eq_autoeq.py"),
+    Path("tools/check_autoeq_live.py"),
 )
 PIPEWIRE_GOBJECT_BUILD_TOOLS = ("g-ir-compiler", "g-ir-scanner", "pkg-config")
 PIPEWIRE_GOBJECT_PKG_CONFIG_MODULES = ("glib-2.0", "gio-2.0", "gobject-2.0", "libpipewire-0.3")
@@ -246,6 +254,26 @@ def run_background_portal_smoke_notice() -> None:
     for path in changes:
         print(f"  {path}")
     print("Run one clean-permission Flatpak portal smoke in a real GNOME session before releasing this change.")
+
+
+def run_autoeq_live_check_notice() -> None:
+    base_tag = extension_comparison_base_tag()
+    if base_tag is None:
+        print("\nAutoEQ.app live compatibility notice skipped; no release tag found.")
+        return
+
+    changes = changed_paths_for_review(base_tag, AUTOEQ_LIVE_REVIEW_PATHS)
+    if not changes:
+        print(f"\nAutoEQ.app live compatibility check not indicated; AutoEQ integration unchanged since {base_tag}.")
+        return
+
+    print(f"\nAutoEQ.app live compatibility check may be needed; AutoEQ integration changed since {base_tag}:")
+    for path in changes:
+        print(f"  {path}")
+    print(
+        "Run python3 tools/check_autoeq_live.py before release. A failure is a live-service or format-drift "
+        "signal to investigate, not an automatic blocker for unrelated fixes."
+    )
 
 
 def run_flatpak_runtime_smoke_notice() -> None:
@@ -483,6 +511,7 @@ def main() -> int:
     run_flatpak_runtime_smoke_notice()
     run_live_ui_runtime_smoke_notice()
     run_background_portal_smoke_notice()
+    run_autoeq_live_check_notice()
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])
     run([python, "-m", "pytest", "-q"])
