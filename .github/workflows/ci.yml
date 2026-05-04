@@ -452,6 +452,8 @@ jobs:
           }
 
           dump_logs() {
+            echo "## wpctl status"
+            wpctl status 2>/dev/null || true
             echo "## pipewire.log"
             sed -n '1,240p' "$XDG_RUNTIME_DIR/pipewire.log" 2>/dev/null || true
             echo "## wireplumber.log"
@@ -461,22 +463,25 @@ jobs:
           trap cleanup EXIT
           trap dump_logs ERR
 
+          ci_sink_id=""
+          default_set=false
           for _ in $(seq 1 200); do
-            if pw-dump >/dev/null 2>&1 \
-              && pw-dump | jq -e '.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink")' >/dev/null
-            then
+            ci_sink_id="$(
+              pw-dump 2>/dev/null \
+                | jq -r '.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink") | .id' \
+                | head -n 1
+            )"
+            if [[ -n "$ci_sink_id" ]] && wpctl set-default "$ci_sink_id" >/dev/null 2>&1; then
+              default_set=true
               break
             fi
             sleep 0.1
           done
 
-          ci_sink_id="$(
-            pw-dump \
-              | jq -r '.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink") | .id' \
-              | head -n 1
-          )"
-          test -n "$ci_sink_id"
-          wpctl set-default "$ci_sink_id"
+          if [[ "$default_set" != true ]]; then
+            echo "failed to set ci_null_sink as the default PipeWire sink"
+            exit 1
+          fi
 
           python3 tools/check_flatpak_runtime.py \
             --app-ref io.github.bhack.mini-eq//master \
