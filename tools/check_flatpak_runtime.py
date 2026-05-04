@@ -16,6 +16,16 @@ from typing import Any
 
 APP_ID = "io.github.bhack.mini-eq"
 DEFAULT_APP_REF = f"{APP_ID}//master"
+FLATPAK_APP_REFS = tuple(
+    sorted(
+        {
+            APP_ID,
+            f"{APP_ID}//master",
+            f"{APP_ID}//stable",
+            *(f"app/{APP_ID}/{arch}/{branch}" for arch in ("aarch64", "x86_64") for branch in ("master", "stable")),
+        }
+    )
+)
 SMOKE_APPLICATION_NAME = "mini-eq-flatpak-smoke"
 SMOKE_NODE_NAME = "mini-eq-flatpak-smoke"
 VIRTUAL_SINK_NAME = "mini_eq_sink"
@@ -23,6 +33,7 @@ PIPEWIRE_MANAGER_ACCESS = "flatpak-manager"
 TARGET_OBJECT_RE = re.compile(
     r"update: id:(?P<id>\d+) key:'target\.object' value:'(?P<value>[^']*)' type:'(?P<type>[^']*)'"
 )
+PIPEWIRE_TARGET_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]*\Z")
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -44,6 +55,19 @@ def require_tools(*tools: str) -> None:
     missing = [tool for tool in tools if shutil.which(tool) is None]
     if missing:
         raise RuntimeError(f"Missing required tool(s): {', '.join(missing)}")
+
+
+def flatpak_app_ref(value: str) -> str:
+    for supported_ref in FLATPAK_APP_REFS:
+        if value == supported_ref:
+            return supported_ref
+    raise argparse.ArgumentTypeError(f"unsupported Flatpak app ref: {value}")
+
+
+def pipewire_node_target(value: str) -> str:
+    if PIPEWIRE_TARGET_RE.fullmatch(value):
+        return value
+    raise argparse.ArgumentTypeError(f"invalid PipeWire node target: {value}")
 
 
 def read_pw_dump() -> list[dict[str, Any]]:
@@ -307,6 +331,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--app-ref",
+        type=flatpak_app_ref,
         default=DEFAULT_APP_REF,
         help=f"Flatpak app ref to test (default: {DEFAULT_APP_REF})",
     )
@@ -324,6 +349,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--smoke-target",
+        type=pipewire_node_target,
         default=None,
         help="Optional PipeWire node target for the silent smoke stream.",
     )
