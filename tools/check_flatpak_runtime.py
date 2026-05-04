@@ -16,15 +16,19 @@ from typing import Any
 
 APP_ID = "io.github.bhack.mini-eq"
 DEFAULT_APP_REF = f"{APP_ID}//master"
-FLATPAK_APP_REFS = tuple(
-    sorted(
-        {
-            APP_ID,
-            f"{APP_ID}//master",
-            f"{APP_ID}//stable",
-            *(f"app/{APP_ID}/{arch}/{branch}" for arch in ("aarch64", "x86_64") for branch in ("master", "stable")),
-        }
-    )
+STABLE_APP_REF = f"{APP_ID}//stable"
+FULL_AARCH64_MASTER_REF = f"app/{APP_ID}/aarch64/master"
+FULL_AARCH64_STABLE_REF = f"app/{APP_ID}/aarch64/stable"
+FULL_X86_64_MASTER_REF = f"app/{APP_ID}/x86_64/master"
+FULL_X86_64_STABLE_REF = f"app/{APP_ID}/x86_64/stable"
+FLATPAK_APP_REFS = (
+    APP_ID,
+    DEFAULT_APP_REF,
+    STABLE_APP_REF,
+    FULL_AARCH64_MASTER_REF,
+    FULL_AARCH64_STABLE_REF,
+    FULL_X86_64_MASTER_REF,
+    FULL_X86_64_STABLE_REF,
 )
 SMOKE_APPLICATION_NAME = "mini-eq-flatpak-smoke"
 SMOKE_NODE_NAME = "mini-eq-flatpak-smoke"
@@ -68,6 +72,24 @@ def pipewire_node_target(value: str) -> str:
     if PIPEWIRE_TARGET_RE.fullmatch(value):
         return value
     raise argparse.ArgumentTypeError(f"invalid PipeWire node target: {value}")
+
+
+def flatpak_run_command(app_ref: str, *app_args: str) -> list[str]:
+    if app_ref == APP_ID:
+        return ["flatpak", "run", APP_ID, *app_args]
+    if app_ref == DEFAULT_APP_REF:
+        return ["flatpak", "run", DEFAULT_APP_REF, *app_args]
+    if app_ref == STABLE_APP_REF:
+        return ["flatpak", "run", STABLE_APP_REF, *app_args]
+    if app_ref == FULL_AARCH64_MASTER_REF:
+        return ["flatpak", "run", FULL_AARCH64_MASTER_REF, *app_args]
+    if app_ref == FULL_AARCH64_STABLE_REF:
+        return ["flatpak", "run", FULL_AARCH64_STABLE_REF, *app_args]
+    if app_ref == FULL_X86_64_MASTER_REF:
+        return ["flatpak", "run", FULL_X86_64_MASTER_REF, *app_args]
+    if app_ref == FULL_X86_64_STABLE_REF:
+        return ["flatpak", "run", FULL_X86_64_STABLE_REF, *app_args]
+    raise RuntimeError(f"unsupported Flatpak app ref: {app_ref}")
 
 
 def read_pw_dump() -> list[dict[str, Any]]:
@@ -230,7 +252,7 @@ def run_runtime_smoke(
 ) -> None:
     assert_no_existing_virtual_sink()
 
-    deps = run(["flatpak", "run", app_ref, "--check-deps"])
+    deps = run(flatpak_run_command(app_ref, "--check-deps"))
     print(deps.stdout.rstrip(), flush=True)
 
     # Keep pw-cat alive across stream discovery, app startup, routing, app runtime, and restore waits.
@@ -252,15 +274,13 @@ def run_runtime_smoke(
         smoke_id = bound_id(smoke_node)
         original_target = metadata_targets().get(smoke_id)
 
-        command = [
-            "flatpak",
-            "run",
+        command = flatpak_run_command(
             app_ref,
             "--headless",
             "--auto-route",
             "--duration",
             str(duration_seconds),
-        ]
+        )
         print(f"$ {format_command(command)}", flush=True)
         app = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         manager_access_seen = False
