@@ -139,7 +139,7 @@ jobs:
               README.md|pyproject.toml|MANIFEST.in|src/*|tests/*|data/*|extensions/*)
                 test=true
                 ;;
-              tools/check_gnome_shell_extension.py|tools/check_headless_pipewire_runtime.py|tools/pack_gnome_shell_extension.sh|tools/prepare_release.py|tools/release_gates.py|tools/release_preflight.py|tools/release_runtime_gate.py|tools/release_status.py|tools/run_headless_pipewire_runtime_smoke_ci.sh|tools/run_live_ui_runtime_smoke_ci.sh)
+              tools/check_autoeq_live.py|tools/check_gnome_shell_extension.py|tools/check_headless_pipewire_runtime.py|tools/pack_gnome_shell_extension.sh|tools/prepare_release.py|tools/release_gates.py|tools/release_preflight.py|tools/release_runtime_gate.py|tools/release_status.py|tools/run_headless_pipewire_runtime_smoke_ci.sh|tools/run_live_ui_runtime_smoke_ci.sh)
                 test=true
                 ;;
             esac

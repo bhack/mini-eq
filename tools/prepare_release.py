@@ -154,7 +154,10 @@ def main() -> int:
     for edit in changed:
         edit.path.write_text(edit.after, encoding="utf-8")
         print(f"updated {edit.path}")
-    print("Run tests/test_version_metadata.py and review the generated release notes before committing.")
+    print(
+        "Run tests/test_version_metadata.py and review the generated release notes before committing. "
+        "They are shown in AppStream and the About dialog."
+    )
     return 0
 
 

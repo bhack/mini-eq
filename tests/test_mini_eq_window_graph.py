@@ -47,6 +47,45 @@ class FakeSwitch:
         self.tooltip = text
 
 
+class FakeControl:
+    def __init__(self) -> None:
+        self.sensitive = True
+        self.visible = True
+
+    def set_sensitive(self, sensitive: bool) -> None:
+        self.sensitive = sensitive
+
+    def set_visible(self, visible: bool) -> None:
+        self.visible = visible
+
+
+class FakeSpin(FakeControl):
+    def __init__(self) -> None:
+        super().__init__()
+        self.value = 0.0
+
+    def set_value(self, value: float) -> None:
+        self.value = value
+
+
+class FakeDropDown(FakeControl):
+    def __init__(self) -> None:
+        super().__init__()
+        self.selected = 0
+
+    def set_selected(self, selected: int) -> None:
+        self.selected = selected
+
+
+class FakeToggle(FakeControl):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active = False
+
+    def set_active(self, active: bool) -> None:
+        self.active = active
+
+
 class FakeScale:
     def __init__(self, value: float) -> None:
         self.value = value
@@ -77,6 +116,47 @@ class FocusSummaryWindow(window_graph.MiniEqWindowGraphMixin):
         self.focus_label = FakeLabel()
         self.band_count_label = FakeLabel()
         self.inspector_summary_label = FakeLabel()
+
+
+class SelectedBandEditorWindow(window_graph.MiniEqWindowGraphMixin):
+    def __init__(self, selected_band_index: int | None) -> None:
+        self.selected_band_index = selected_band_index
+        self.controller = SimpleNamespace(
+            bands=[
+                core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=2.5),
+            ]
+        )
+        self.selected_band_label = FakeLabel()
+        self.selected_band_state_box = FakeControl()
+        self.selected_band_type_box = FakeControl()
+        self.selected_band_frequency_box = FakeControl()
+        self.selected_band_q_box = FakeControl()
+        self.selected_band_gain_box = FakeControl()
+        self.selected_band_type_combo = FakeDropDown()
+        self.selected_band_frequency_spin = FakeSpin()
+        self.selected_band_q_spin = FakeSpin()
+        self.selected_band_gain_spin = FakeSpin()
+        self.selected_band_mute_button = FakeToggle()
+        self.selected_band_solo_button = FakeToggle()
+
+    def editor_groups(self) -> list[FakeControl]:
+        return [
+            self.selected_band_state_box,
+            self.selected_band_type_box,
+            self.selected_band_frequency_box,
+            self.selected_band_q_box,
+            self.selected_band_gain_box,
+        ]
+
+    def editor_controls(self) -> list[FakeControl]:
+        return [
+            self.selected_band_type_combo,
+            self.selected_band_frequency_spin,
+            self.selected_band_q_spin,
+            self.selected_band_gain_spin,
+            self.selected_band_mute_button,
+            self.selected_band_solo_button,
+        ]
 
 
 def test_filter_type_label_handles_non_contiguous_filter_values() -> None:
@@ -120,6 +200,41 @@ def test_focus_summary_handles_no_selected_band() -> None:
     assert window.focus_label.text == "No band selected"
     assert window.band_count_label.visible is False
     assert window.inspector_summary_label.text == "No Band"
+
+
+def test_selected_band_editor_keeps_parameter_space_visible_without_selection() -> None:
+    window = SelectedBandEditorWindow(selected_band_index=None)
+    window.selected_band_type_combo.selected = 1
+    window.selected_band_frequency_spin.value = 640.0
+    window.selected_band_q_spin.value = 1.4
+    window.selected_band_gain_spin.value = -3.0
+    window.selected_band_mute_button.active = True
+    window.selected_band_solo_button.active = True
+
+    window.update_selected_band_editor()
+
+    assert window.selected_band_label.text == "No Band"
+    assert window.selected_band_label.tooltip == "No band selected"
+    assert all(group.visible for group in window.editor_groups())
+    assert all(not control.sensitive for control in window.editor_controls())
+    assert window.selected_band_type_combo.selected == core.FILTER_TYPE_INDEX_BY_VALUE[core.FILTER_TYPES["Off"]]
+    assert window.selected_band_frequency_spin.value == window_graph.SELECTED_BAND_PLACEHOLDER_FREQUENCY_HZ
+    assert window.selected_band_q_spin.value == core.DEFAULT_BAND_Q
+    assert window.selected_band_gain_spin.value == 0.0
+    assert window.selected_band_mute_button.active is False
+    assert window.selected_band_solo_button.active is False
+
+
+def test_selected_band_editor_enables_parameter_controls_after_selection() -> None:
+    window = SelectedBandEditorWindow(selected_band_index=0)
+
+    window.update_selected_band_editor()
+
+    assert window.selected_band_label.text == "Band 1"
+    assert all(group.visible for group in window.editor_groups())
+    assert all(control.sensitive for control in window.editor_controls())
+    assert window.selected_band_frequency_spin.value == 1000.0
+    assert window.selected_band_gain_spin.value == 2.5
 
 
 def test_preamp_change_refreshes_preset_metadata() -> None:

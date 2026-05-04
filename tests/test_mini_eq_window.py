@@ -4,7 +4,9 @@ from types import MethodType, SimpleNamespace
 
 from tests._mini_eq_imports import import_mini_eq_module
 
+release_notes = import_mini_eq_module("release_notes")
 window = import_mini_eq_module("window")
+window_layout = import_mini_eq_module("window_layout")
 
 
 class FakeSwitch:
@@ -60,6 +62,30 @@ class FakeOpenDialog:
         return FakeFile(self.path)
 
 
+class FakeUtilityPaneButton:
+    def __init__(self, *, visible: bool) -> None:
+        self.visible = visible
+        self.active = False
+
+    def get_visible(self) -> bool:
+        return self.visible
+
+    def set_active(self, active: bool) -> None:
+        self.active = active
+
+
+class FakeAboutDialog:
+    instances: list[FakeAboutDialog] = []
+
+    def __init__(self, **properties: object) -> None:
+        self.properties = properties
+        self.presented_to = None
+        self.instances.append(self)
+
+    def present(self, parent: object) -> None:
+        self.presented_to = parent
+
+
 def bind_control_refresh_methods(fake_window: SimpleNamespace) -> None:
     fake_window.sync_control_switches_from_controller = MethodType(
         window.MiniEqWindow.sync_control_switches_from_controller,
@@ -77,6 +103,45 @@ def bind_control_refresh_methods(fake_window: SimpleNamespace) -> None:
         window.MiniEqWindow.apply_startup_auto_route,
         fake_window,
     )
+
+
+def test_about_dialog_includes_current_release_notes(monkeypatch) -> None:
+    FakeAboutDialog.instances = []
+    fake_window = SimpleNamespace()
+    notes = release_notes.AboutReleaseNotes("1.2.3", "<p>Changed.</p>")
+    monkeypatch.setattr(window_layout.Adw, "AboutDialog", FakeAboutDialog)
+    monkeypatch.setattr(window_layout, "about_release_notes", lambda version: notes)
+
+    window_layout.MiniEqWindowLayoutMixin.show_about_dialog(fake_window)
+
+    dialog = FakeAboutDialog.instances[0]
+    assert dialog.properties["release_notes"] == "<p>Changed.</p>"
+    assert dialog.properties["release_notes_version"] == "1.2.3"
+    assert dialog.properties["version"] == window_layout.__version__
+    assert dialog.presented_to is fake_window
+
+
+def test_visual_layout_height_uses_startup_height_before_first_allocation() -> None:
+    fake_window = SimpleNamespace(
+        initial_layout_height=720,
+        default_min_window_height=600,
+        compact_min_window_height=600,
+        get_allocated_height=lambda: 0,
+    )
+
+    assert window_layout.visual_layout_height(fake_window, None) == 720
+
+
+def test_visual_layout_height_prefers_real_allocation() -> None:
+    fake_window = SimpleNamespace(
+        initial_layout_height=720,
+        default_min_window_height=600,
+        compact_min_window_height=600,
+        get_allocated_height=lambda: 840,
+    )
+
+    assert window_layout.visual_layout_height(fake_window, None) == 840
+    assert window_layout.visual_layout_height(fake_window, 960) == 960
 
 
 def test_on_close_request_starts_custom_shutdown_sequence() -> None:
@@ -519,18 +584,65 @@ def test_import_apo_updates_provisional_curve_status_and_control_state(tmp_path)
         set_status=lambda message: statuses.append(message),
         notify_control_state_changed=lambda: calls.append("notify"),
     )
+    fake_window.import_apo_preset_path = MethodType(window.MiniEqWindow.import_apo_preset_path, fake_window)
 
     window.MiniEqWindow.on_import_apo_done(fake_window, FakeOpenDialog(str(apo_path)), None)
 
     assert fake_window.selected_band_index is None
     assert fake_window.current_preset_name is None
     assert fake_window.saved_preset_signature == "imported-signature"
+    assert fake_window.output_preset_auto_applied is False
     assert fake_window.output_preset_curve_auto_loaded is False
     assert statuses == ["Imported APO curve"]
     assert calls == [
         ("import", str(apo_path)),
         ("visible-bands", 7),
         ("baseline", "Imported APO: HD 650"),
+        "presets",
+        "sync",
+        "notify",
+    ]
+
+
+def test_import_apo_preset_path_uses_autoeq_name_and_reveals_utility_pane() -> None:
+    calls: list[object] = []
+    utility_button = FakeUtilityPaneButton(visible=True)
+    fake_window = SimpleNamespace(
+        controller=SimpleNamespace(
+            import_apo_preset=lambda path: calls.append(("import", path)) or 10,
+            state_signature=lambda: "imported-signature",
+            build_preset_payload=lambda label: {"name": label},
+        ),
+        selected_band_index=3,
+        current_preset_name="Studio Reference",
+        saved_preset_signature="old-signature",
+        output_preset_auto_applied=True,
+        output_preset_curve_auto_loaded=True,
+        utility_pane_button=utility_button,
+        set_visible_band_count=lambda count: calls.append(("visible-bands", count)),
+        set_curve_revert_baseline=lambda label: calls.append(("baseline", label)),
+        refresh_preset_list=lambda: calls.append("presets"),
+        sync_ui_from_state=lambda: calls.append("sync"),
+        notify_control_state_changed=lambda: calls.append("notify"),
+    )
+
+    count = window.MiniEqWindow.import_apo_preset_path(
+        fake_window,
+        "/tmp/Example Reference Headphone ParametricEQ.txt",
+        imported_name="Example Reference Headphone",
+    )
+
+    assert count == 10
+    assert fake_window.selected_band_index is None
+    assert fake_window.current_preset_name is None
+    assert fake_window.saved_preset_signature == "imported-signature"
+    assert fake_window.output_preset_auto_applied is False
+    assert fake_window.output_preset_curve_auto_loaded is False
+    assert utility_button.active is True
+    assert calls == [
+        ("import", "/tmp/Example Reference Headphone ParametricEQ.txt"),
+        ("visible-bands", 10),
+        ("baseline", "Imported APO: Example Reference Headphone"),
         "presets",
         "sync",
         "notify",

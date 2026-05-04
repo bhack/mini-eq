@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from importlib.resources import files
 from pathlib import Path
 
 import gi
@@ -15,6 +16,8 @@ from gi.repository import Gdk, GLib, Gtk
 APP_ID = "io.github.bhack.mini-eq"
 APP_ICON_NAME = APP_ID
 APP_ICON_SEARCH_PATH = Path(__file__).resolve().parent / "assets" / "icons"
+APP_SCHEMA_NAME = f"{APP_ID}.gschema.xml"
+APP_SCHEMA_SOURCE = files("mini_eq").joinpath("assets", "schemas", APP_SCHEMA_NAME)
 APP_DISPLAY_NAME = "Mini EQ"
 
 
@@ -34,6 +37,7 @@ def install_desktop_integration() -> None:
     applications_dir = data_home / "applications"
     hicolor_source_dir = APP_ICON_SEARCH_PATH / "hicolor"
     hicolor_target_dir = data_home / "icons" / "hicolor"
+    schemas_dir = data_home / "glib-2.0" / "schemas"
 
     applications_dir.mkdir(parents=True, exist_ok=True)
 
@@ -50,9 +54,11 @@ def install_desktop_integration() -> None:
 
     refresh_desktop_database(applications_dir)
     refresh_icon_cache(hicolor_target_dir)
+    install_gsettings_schema(schemas_dir)
 
     print(f"desktop entry installed: {desktop_file}")
     print(f"icons installed under: {hicolor_target_dir}")
+    print(f"GSettings schema installed under: {schemas_dir}")
 
 
 def build_desktop_file() -> str:
@@ -94,6 +100,33 @@ def remove_legacy_raster_app_icons(hicolor_dir: Path) -> None:
             target_icon.unlink()
         except FileNotFoundError:
             pass
+
+
+def install_gsettings_schema(schemas_dir: Path) -> Path:
+    schemas_dir.mkdir(parents=True, exist_ok=True)
+    target = schemas_dir / APP_SCHEMA_NAME
+    target.write_bytes(APP_SCHEMA_SOURCE.read_bytes())
+    compile_gsettings_schemas(schemas_dir)
+    return target
+
+
+def compile_gsettings_schemas(schemas_dir: Path) -> None:
+    glib_compile_schemas = shutil.which("glib-compile-schemas")
+    if glib_compile_schemas is None:
+        return
+
+    result = subprocess.run(
+        [glib_compile_schemas, "--strict", str(schemas_dir)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout).strip()
+        message = f"could not compile GSettings schemas in {schemas_dir}"
+        if details:
+            message = f"{message}: {details}"
+        raise RuntimeError(message)
 
 
 def refresh_desktop_database(applications_dir: Path) -> None:

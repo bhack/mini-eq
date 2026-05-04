@@ -29,18 +29,21 @@ also show live LUFS loudness.
   separate Start at Login preference and optional active-at-login routing.
 - Optional GNOME Shell extension for quick panel access to routing, EQ,
   analyzer status, presets, and auto preset links.
-- Equalizer APO preset import from the UI or `--import-apo`, including
-  compatible presets exported by [AutoEq](https://autoeq.app/).
+- Search and import headphone correction presets from
+  [AutoEq](https://autoeq.app/) directly in the app, or import Equalizer
+  APO-style text presets from a local file or `--import-apo`.
 
 ## AutoEq And APO Presets
 
-Mini EQ can import Equalizer APO-style parametric EQ text presets. This makes it
-usable with headphone correction presets exported by
-[AutoEq](https://autoeq.app/): export an Equalizer APO/parametric EQ preset from
-AutoEq, then use **Import Equalizer APO...** in Mini EQ or start the app with
-`mini-eq --import-apo path/to/ParametricEQ.txt`. The
-[AutoEq project](https://github.com/jaakkopasanen/AutoEq) provides the source,
-headphone measurement data, targets, and optimizer behind the web app.
+Mini EQ can search [AutoEq.app](https://autoeq.app/) headphone profiles,
+preview the correction curve for a selected profile, and import a generated
+Equalizer APO-style parametric EQ preset. Use **Import from AutoEq...** from the
+main menu, search by headphone model, select a profile, then import it. Profile
+data and generated presets come from AutoEq.app on demand and are cached
+locally.
+
+Local APO text presets are still supported: use **Import Equalizer APO...** in
+Mini EQ or start the app with `mini-eq --import-apo path/to/ParametricEQ.txt`.
 
 ## Install
 
@@ -75,7 +78,9 @@ https://extensions.gnome.org/extension/9803/mini-eq-controls/
 
 ## Notes
 
-Runtime data is stored under `~/.config/mini-eq`.
+User presets and output preset links are stored under `~/.config/mini-eq`.
+AutoEq profile data and downloaded presets are cached under
+`~/.cache/mini-eq/autoeq`.
 
 `pip install mini-eq` installs only the Python package. The recent desktop and
 audio system packages listed in

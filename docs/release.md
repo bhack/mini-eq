@@ -120,6 +120,8 @@ python3 tools/prepare_release.py "$version" \
 The helper only updates public version metadata: `pyproject.toml`,
 `CHANGELOG.md`, the top AppStream release entry, and AppStream screenshot tag
 URLs. It does not commit, tag, publish, or touch maintainer-local release state.
+The AppStream release entry is also shown in the app's About dialog, so keep
+these notes concise and user-facing.
 
 Mini EQ is pre-`1.0.0`. Use patch releases for fixes and listing/package polish,
 and minor releases for user-facing features or workflow changes. Do not claim
@@ -228,6 +230,23 @@ For PipeWire routing, analyzer capture, or filter-chain runtime changes, also
 run the app interactively with real music before release. Exercise
 enable/disable, output switching, preset changes, analyzer display, shutdown,
 and stream restoration against the actual desktop audio graph.
+
+Run the AutoEQ.app live compatibility check whenever AutoEQ import behavior,
+AutoEQ request formatting, or AutoEQ parser assumptions changed:
+
+```bash
+PYTHONPATH=src python3 tools/check_autoeq_live.py
+```
+
+This check reaches the live AutoEQ.app service, validates the current
+`/entries`, `/targets`, and `/equalize` shapes, and imports the generated APO
+text with Mini EQ's parser. By default it probes the first parsed AutoEQ
+profile, with CLI overrides available for debugging a specific profile. Treat
+a failure as a live-service availability or format-drift signal to investigate.
+Do not treat temporary AutoEQ.app downtime as an automatic blocker for unrelated
+fixes, but decide explicitly whether the release can ship with a known
+external-service issue. The `AutoEQ Live` GitHub Actions workflow runs the same
+check weekly and can be dispatched manually.
 
 Run the deterministic performance check when a release touches UI
 responsiveness, graph drawing, filter parameter updates, analyzer work, routing

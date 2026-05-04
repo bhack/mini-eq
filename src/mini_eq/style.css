@@ -55,11 +55,6 @@
 }
 
 .toolbar-button {
-    padding: 3px 9px;
-    min-height: 32px;
-}
-
-.utility-pane-dense .toolbar-button {
     padding: 2px 8px;
     min-height: 30px;
 }
@@ -73,10 +68,6 @@
 
 .toolbar-select {
     min-height: 32px;
-}
-
-.utility-pane-dense .toolbar-select {
-    min-height: 30px;
 }
 
 .toolbar-compact-actions {
@@ -137,8 +128,8 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
 }
 
 .utility-section {
-    padding: 7px 10px;
-    border-radius: 12px;
+    padding: 4px 8px;
+    border-radius: 10px;
     border: 1px solid var(--mini-border-soft);
     background-color: var(--mini-utility-section-bg);
 }
@@ -147,29 +138,10 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     background-color: var(--mini-utility-section-bg);
 }
 
-.utility-pane-dense .utility-section {
-    padding: 5px 8px;
-    border-radius: 10px;
-}
-
-.utility-pane-tight .utility-section {
-    padding: 4px 8px;
-}
-
 .utility-row {
-    padding: 4px 0;
+    padding: 1px 0;
     border-radius: 0;
     background-color: transparent;
-}
-
-.utility-pane-dense .utility-row,
-.utility-pane-dense .compare-row {
-    padding: 2px 0;
-}
-
-.utility-pane-tight .utility-row,
-.utility-pane-tight .compare-row {
-    padding: 1px 0;
 }
 
 .output-scope-state-label {
@@ -182,13 +154,13 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
 }
 
 .compare-row {
-    padding: 4px 0;
+    padding: 1px 0;
     border-radius: 0;
     background-color: transparent;
 }
 
 .preset-row {
-    margin-top: 2px;
+    margin-top: 0;
 }
 
 .preset-more-menu {
@@ -250,21 +222,11 @@ button.popover-action.destructive-action:not(:disabled) {
     color: var(--mini-danger-color);
 }
 
-.utility-pane-dense .preset-row {
-    margin-top: 0;
-}
-
 .preset-state-chip {
-    padding: 3px 10px;
+    padding: 2px 8px;
     border-radius: 999px;
     font-size: 9pt;
     font-weight: 800;
-}
-
-.utility-pane-dense .preset-state-chip,
-.utility-pane-dense .system-state-chip,
-.utility-pane-dense .headroom-peak-chip {
-    padding: 2px 8px;
 }
 
 .preset-state-saved {
@@ -288,7 +250,7 @@ button.popover-action.destructive-action:not(:disabled) {
 }
 
 .system-state-chip {
-    padding: 3px 10px;
+    padding: 2px 8px;
     border-radius: 999px;
     font-size: 9pt;
     font-weight: 800;
@@ -315,13 +277,9 @@ button.popover-action.destructive-action:not(:disabled) {
 }
 
 .headroom-panel {
-    padding: 4px 8px;
+    padding: 2px 6px;
     border-radius: 8px;
     background-color: transparent;
-}
-
-.utility-pane-dense .headroom-panel {
-    padding: 2px 6px;
 }
 
 .headroom-panel-risk {
@@ -329,21 +287,13 @@ button.popover-action.destructive-action:not(:disabled) {
 }
 
 .headroom-state {
-    font-size: 13pt;
+    font-size: 12pt;
     font-weight: 800;
     color: var(--window-fg-color);
 }
 
-.utility-pane-dense .headroom-state {
-    font-size: 12pt;
-}
-
-.utility-pane-tight .headroom-state {
-    font-size: 11pt;
-}
-
 .headroom-peak-chip {
-    padding: 3px 9px;
+    padding: 2px 8px;
     border-radius: 999px;
     font-size: 9.5pt;
     font-weight: 800;
@@ -372,10 +322,6 @@ button.popover-action.destructive-action:not(:disabled) {
 }
 
 .headroom-preamp-row {
-    margin-top: 1px;
-}
-
-.utility-pane-dense .headroom-preamp-row {
     margin-top: 0;
 }
 
@@ -384,37 +330,19 @@ button.popover-action.destructive-action:not(:disabled) {
 }
 
 .monitor-strip {
-    margin-top: 1px;
-    padding-top: 5px;
+    margin-top: 0;
+    padding-top: 2px;
     border-top: 1px solid var(--mini-border-subtle);
 }
 
-.utility-pane-dense .monitor-strip {
-    margin-top: 0;
-    padding-top: 3px;
-}
-
-.utility-pane-tight .monitor-strip {
-    padding-top: 2px;
-}
-
 .monitor-detail-row {
-    min-height: 24px;
-}
-
-.utility-pane-dense .monitor-detail-row {
     min-height: 20px;
 }
 
 .monitor-settings-button {
-    min-width: 32px;
-    min-height: 32px;
-    border-radius: 8px;
-}
-
-.utility-pane-dense .monitor-settings-button {
     min-width: 30px;
     min-height: 30px;
+    border-radius: 8px;
 }
 
 .loudness-value-label {
@@ -424,10 +352,6 @@ button.popover-action.destructive-action:not(:disabled) {
 }
 
 .loudness-meter-area {
-    min-height: 14px;
-}
-
-.utility-pane-dense .loudness-meter-area {
     min-height: 12px;
 }
 

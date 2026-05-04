@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
+
+import pytest
+
 from tests._mini_eq_imports import import_mini_eq_module
 
 desktop_integration = import_mini_eq_module("desktop_integration")
@@ -35,3 +40,47 @@ def test_remove_legacy_raster_app_icons_only_removes_mini_eq_pngs(tmp_path) -> N
     assert not mini_eq_png.exists()
     assert other_png.exists()
     assert mini_eq_svg.exists()
+
+
+def test_gsettings_schema_compiles(tmp_path) -> None:
+    glib_compile_schemas = shutil.which("glib-compile-schemas")
+    if glib_compile_schemas is None:
+        pytest.skip("glib-compile-schemas is not installed")
+
+    schema_path = tmp_path / desktop_integration.APP_SCHEMA_NAME
+    schema_path.write_bytes(desktop_integration.APP_SCHEMA_SOURCE.read_bytes())
+
+    subprocess.run([glib_compile_schemas, "--strict", "--dry-run", str(tmp_path)], check=True)
+
+
+def test_install_gsettings_schema_copies_package_schema(monkeypatch, tmp_path) -> None:
+    compiled_dirs = []
+    monkeypatch.setattr(desktop_integration, "compile_gsettings_schemas", lambda path: compiled_dirs.append(path))
+
+    target = desktop_integration.install_gsettings_schema(tmp_path)
+
+    assert target == tmp_path / desktop_integration.APP_SCHEMA_NAME
+    assert target.read_bytes() == desktop_integration.APP_SCHEMA_SOURCE.read_bytes()
+    assert compiled_dirs == [tmp_path]
+
+
+def test_compile_gsettings_schemas_raises_when_compiler_fails(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(desktop_integration.shutil, "which", lambda _name: "/usr/bin/glib-compile-schemas")
+
+    def run(_command, *, check, capture_output, text):
+        assert check is False
+        assert capture_output is True
+        assert text is True
+        return subprocess.CompletedProcess(_command, 1, stdout="", stderr="schema failed")
+
+    monkeypatch.setattr(desktop_integration.subprocess, "run", run)
+
+    with pytest.raises(RuntimeError, match=f"could not compile GSettings schemas in {tmp_path}: schema failed"):
+        desktop_integration.compile_gsettings_schemas(tmp_path)
+
+
+def test_compile_gsettings_schemas_noops_without_compiler(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(desktop_integration.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(desktop_integration.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("compiler used"))
+
+    desktop_integration.compile_gsettings_schemas(tmp_path)
