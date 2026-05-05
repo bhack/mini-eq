@@ -1,6 +1,7 @@
 name: Bug report
 description: Report a crash, broken behavior, routing issue, analyzer issue, or extension issue.
 title: "[Bug]: "
+labels: ["bug"]
 body:
   - type: markdown
     attributes:

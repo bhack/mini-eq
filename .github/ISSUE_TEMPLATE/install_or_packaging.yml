@@ -1,6 +1,7 @@
 name: Install or packaging issue
 description: Report install, launch, dependency, Flatpak, AUR, pipx, or source packaging problems.
 title: "[Packaging]: "
+labels: ["bug", "area: packaging"]
 body:
   - type: markdown
     attributes:
