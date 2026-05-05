@@ -347,62 +347,6 @@ def test_move_stream_to_target_sets_stream_target_without_metadata_readback() ->
     assert calls == [(126, 39, "67")]
 
 
-def test_move_stream_to_target_skips_metadata_read_after_acknowledged_change() -> None:
-    backend = wp_backend.WirePlumberBackend()
-    stream = wp_backend.WirePlumberNode(
-        bound_id=126,
-        object_serial="300",
-        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
-        node_name="spotify",
-        node_description=None,
-        application_name="spotify",
-        node_dont_move=False,
-    )
-    sink = wp_backend.WirePlumberNode(
-        bound_id=39,
-        object_serial="67",
-        media_class=wp_backend.AUDIO_SINK,
-        node_name="alsa_output.test",
-        node_description="Test Sink",
-        application_name=None,
-        node_dont_move=False,
-    )
-
-    backend.output_stream_by_bound_id = lambda _bound_id: stream
-    backend.audio_sink_by_name = lambda _name: sink
-    backend.set_stream_target = lambda *_args: None
-
-    backend.move_stream_to_target(126, "alsa_output.test")
-
-
-def test_move_stream_to_target_accepts_already_updated_metadata() -> None:
-    backend = wp_backend.WirePlumberBackend()
-    stream = wp_backend.WirePlumberNode(
-        bound_id=126,
-        object_serial="300",
-        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
-        node_name="spotify",
-        node_description=None,
-        application_name="spotify",
-        node_dont_move=False,
-    )
-    sink = wp_backend.WirePlumberNode(
-        bound_id=39,
-        object_serial="67",
-        media_class=wp_backend.AUDIO_SINK,
-        node_name="alsa_output.test",
-        node_description="Test Sink",
-        application_name=None,
-        node_dont_move=False,
-    )
-
-    backend.output_stream_by_bound_id = lambda _bound_id: stream
-    backend.audio_sink_by_name = lambda _name: sink
-    backend.set_stream_target = lambda *_args: None
-
-    backend.move_stream_to_target(126, "alsa_output.test")
-
-
 def test_set_stream_target_writes_node_and_object_metadata() -> None:
     backend = wp_backend.WirePlumberBackend()
 

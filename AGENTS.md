@@ -50,12 +50,15 @@ For periodic cleanup and legacy-code checks, use:
 ```bash
 .venv/bin/python -m vulture src tests tools --min-confidence 80
 .venv/bin/python -m pytest --dead-fixtures -q
+.venv/bin/python tools/check_test_hygiene.py
 .venv/bin/python -m pytest --cov=mini_eq --cov-report=term-missing:skip-covered -q
 ```
 
 Treat Vulture reports below 80% confidence as review prompts, not automatic
-deletions. GTK virtual methods, signal callbacks, property bindings, and other
-framework entry points often look unused to static analysis.
+deletions. Treat test hygiene reports the same way: exact duplicate test bodies
+and no-assert tests are candidates for human review, not automatic removals.
+GTK virtual methods, signal callbacks, property bindings, and other framework
+entry points often look unused to static analysis.
 
 For release/package checks:
 
@@ -175,7 +178,7 @@ only committed history:
 git rev-list --count HEAD
 git ls-remote --heads origin
 git ls-remote --tags origin
-leak_pattern='(/home/|/Users/|secret|token|api[_-]?key|github_pat|BEGIN (RSA|OPENSSH|PRIVATE) KEY)'
+leak_pattern='(/home/|/Users/|secret|token|api[_-]?key|github_pat|gh[pousr]_[A-Za-z0-9_]{20,}|pypi-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|BEGIN [A-Z0-9 ]*PRIVATE KEY)'
 git grep -n -I -E "$leak_pattern" HEAD -- . \
   ':(exclude)*.png' \
   ':(exclude)AGENTS.md' \
@@ -189,6 +192,15 @@ git grep -n -I -E "$leak_pattern" -- . \
 git ls-files --others --exclude-standard -z -- . \
   | grep -z -v -E '(^|/)(AGENTS\.md|docs/release\.md|tools/release_preflight\.py)$|\.png$' \
   | xargs -0 -r grep -n -I -E "$leak_pattern" --
+```
+
+This grep is a focused privacy and credential smoke check, not a full secret
+scanner. Keep GitHub secret scanning and push protection enabled; use an
+external scanner such as Gitleaks for deeper local investigation when release
+history or generated artifacts look suspicious:
+
+```bash
+gitleaks git --no-banner --redact .
 ```
 
 Do not push local scratch branches or local safety tags.

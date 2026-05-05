@@ -13,7 +13,11 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LEAK_PATTERN = r"(/home/|/Users/|secret|token|api[_-]?key|github_pat|BEGIN (RSA|OPENSSH|PRIVATE) KEY)"
+LEAK_PATTERN = (
+    r"(/home/|/Users/|secret|token|api[_-]?key|github_pat|"
+    r"gh[pousr]_[A-Za-z0-9_]{20,}|pypi-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|"
+    r"AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|BEGIN [A-Z0-9 ]*PRIVATE KEY)"
+)
 ALLOWED_LEAK_MATCHES = (
     "${{ github.token }}",
     "handle_token",  # XDG desktop portal public request identifier.

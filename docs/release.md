@@ -214,7 +214,7 @@ committing release files:
 git rev-list --count HEAD
 git ls-remote --heads origin
 git ls-remote --tags origin
-leak_pattern='(/home/|/Users/|secret|token|api[_-]?key|github_pat|BEGIN (RSA|OPENSSH|PRIVATE) KEY)'
+leak_pattern='(/home/|/Users/|secret|token|api[_-]?key|github_pat|gh[pousr]_[A-Za-z0-9_]{20,}|pypi-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|BEGIN [A-Z0-9 ]*PRIVATE KEY)'
 git grep -n -I -E "$leak_pattern" HEAD -- . \
   ':(exclude)*.png' \
   ':(exclude)AGENTS.md' \
@@ -228,6 +228,13 @@ git grep -n -I -E "$leak_pattern" -- . \
 git ls-files --others --exclude-standard -z -- . \
   | grep -z -v -E '(^|/)(AGENTS\.md|docs/release\.md|tools/release_preflight\.py)$|\.png$' \
   | xargs -0 -r grep -n -I -E "$leak_pattern" --
+```
+
+This focused grep does not replace GitHub secret scanning, push protection, or
+a dedicated scanner such as Gitleaks when deeper local investigation is needed:
+
+```bash
+gitleaks git --no-banner --redact .
 ```
 
 Keep these GitHub security features enabled in Settings > Advanced Security:
