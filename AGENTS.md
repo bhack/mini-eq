@@ -79,6 +79,13 @@ are unavailable.
   only when the user asked for that refactor or the change needs it.
 - Keep WirePlumber 0.4 and 0.5 compatibility in mind. Do not use a newer GI API
   without checking the compatibility layer and tests.
+- Treat the Mini EQ D-Bus control interface as a project-internal app/Shell
+  extension contract with version-skew tolerance. Keep `api_version = 1`
+  additive only: add state fields, methods, and capabilities when needed, but do
+  not remove or rename existing v1 members. Gate optional Shell extension
+  behavior on `capabilities`. Bump the API version only for semantic breaks, and
+  support the old version for a short, documented release window before removing
+  it.
 - Keep the `mini-eq` CLI user-oriented. Maintainer automation belongs in
   `tools/`, `docs/`, or this file.
 - Keep the GNOME Shell extension source in `extensions/gnome-shell/`; do not
@@ -159,7 +166,10 @@ During release preparation, verify that version-bearing files agree:
 URL. The package `__version__` is derived from release metadata and should not
 be hardcoded separately.
 
-Before publishing artifacts, run a focused leak scan:
+Before publishing artifacts, run `tools/release_preflight.py`; its focused leak
+scan covers `HEAD`, tracked worktree changes, and untracked non-ignored text
+files. If reproducing the scan manually, check all three surfaces instead of
+only committed history:
 
 ```bash
 git rev-list --count HEAD
@@ -171,6 +181,14 @@ git grep -n -I -E "$leak_pattern" HEAD -- . \
   ':(exclude)AGENTS.md' \
   ':(exclude)docs/release.md' \
   ':(exclude)tools/release_preflight.py'
+git grep -n -I -E "$leak_pattern" -- . \
+  ':(exclude)*.png' \
+  ':(exclude)AGENTS.md' \
+  ':(exclude)docs/release.md' \
+  ':(exclude)tools/release_preflight.py'
+git ls-files --others --exclude-standard -z -- . \
+  | grep -z -v -E '(^|/)(AGENTS\.md|docs/release\.md|tools/release_preflight\.py)$|\.png$' \
+  | xargs -0 -r grep -n -I -E "$leak_pattern" --
 ```
 
 Do not push local scratch branches or local safety tags.

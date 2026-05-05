@@ -37,10 +37,12 @@ from .core import (
 from .glib_utils import destroy_glib_source
 from .gtk_utils import create_dropdown_from_strings
 from .routing import SystemWideEqController
+from .settings import load_monitor_enabled
 from .window_analyzer import MiniEqWindowAnalyzerMixin
 from .window_graph import MiniEqWindowGraphMixin
 from .window_headroom import MiniEqWindowHeadroomMixin
 from .window_layout import MiniEqWindowLayoutMixin
+from .window_preferences import MiniEqWindowPreferencesMixin
 from .window_presets import MiniEqWindowPresetMixin
 from .window_utility import MiniEqWindowUtilityPaneMixin
 from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positive_int
@@ -74,6 +76,7 @@ class MiniEqWindow(
     MiniEqWindowGraphMixin,
     MiniEqWindowHeadroomMixin,
     MiniEqWindowUtilityPaneMixin,
+    MiniEqWindowPreferencesMixin,
     MiniEqWindowLayoutMixin,
     Adw.ApplicationWindow,
 ):
@@ -84,6 +87,7 @@ class MiniEqWindow(
         self.auto_route_on_startup = auto_route
         self.post_present_source_id = 0
         self.post_present_ready = False
+        self.present_after_setup = True
         self.responsive_layout_source_id = 0
         self.responsive_layout_size = (0, 0)
         self.toast_overlay: Adw.ToastOverlay | None = None
@@ -113,7 +117,7 @@ class MiniEqWindow(
         self.last_output_preset_sink_name: str | None = None
         self.preset_monitor: Gio.FileMonitor | None = None
         self.preset_refresh_source_id = 0
-        self.analyzer_enabled = False
+        self.analyzer_enabled = load_monitor_enabled()
         self.analyzer_frozen = False
         self.analyzer_smoothing = 0.40
         self.analyzer_preview_source_id = 0
@@ -232,7 +236,6 @@ class MiniEqWindow(
 
         self.post_present_ready = True
         self.start_preset_monitoring()
-        self.start_analyzer_preview()
         self.apply_output_preset_for_current_output()
 
         if self.ui_shutting_down:
@@ -255,7 +258,10 @@ class MiniEqWindow(
                 self.update_status_summary()
                 self.update_focus_summary()
 
-        if not self.ui_shutting_down:
+        self.start_analyzer_preview()
+        self.notify_control_state_changed()
+
+        if not self.ui_shutting_down and self.present_after_setup:
             self.present()
         return False
 
@@ -339,8 +345,18 @@ class MiniEqWindow(
         action.set_state(GLib.Variant.new_string(self.appearance_preference))
         self.queue_theme_sensitive_redraw()
 
-    def begin_close_request_shutdown(self) -> None:
+    def begin_close_request_shutdown(self, *, force_quit: bool = False) -> None:
         if self.ui_shutting_down or self.close_finish_source_id > 0:
+            return
+
+        application = self.get_application()
+        background_mode = bool(getattr(application, "background_mode", False))
+        if background_mode and not force_quit:
+            self.set_visible(False)
+            self.notify_control_state_changed()
+            update_background_status = getattr(application, "update_background_status", None)
+            if update_background_status is not None:
+                update_background_status()
             return
 
         routed = self.route_switch.get_active()
@@ -366,7 +382,6 @@ class MiniEqWindow(
             self.close_finish_source_id = GLib.timeout_add(ROUTING_CLOSE_SETTLE_MS, self.finish_close_request)
             return
 
-        application = self.get_application()
         if application is not None:
             GLib.idle_add(application.quit)
 

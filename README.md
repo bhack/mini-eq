@@ -25,6 +25,8 @@ libebur128 is available, the monitor can also show live LUFS loudness.
   compatibility layer.
 - Per-output preset links for automatically using different saved presets with
   headphones, speakers, HDMI, and other outputs.
+- Optional background mode keeps the EQ active after closing the window, with a
+  separate Start at Login preference.
 - Optional GNOME Shell extension for quick panel access to routing, EQ,
   analyzer status, presets, and output preset links.
 - Equalizer APO preset import from the UI or `--import-apo`, including

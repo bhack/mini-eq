@@ -17,6 +17,7 @@ from .analyzer import (
 from .appearance import style_manager_is_dark
 from .core import clamp
 from .glib_utils import destroy_glib_source
+from .settings import save_monitor_enabled
 
 ANALYZER_REDRAW_INTERVAL_S = 1.0 / 30.0
 ANALYZER_PREVIEW_INTERVAL_S = 1.0 / 30.0
@@ -414,6 +415,7 @@ class MiniEqWindowAnalyzerMixin:
             self.analyzer_session_max_shortterm_lufs = None
             self.queue_analyzer_draw(force=True)
             self.emit_control_analyzer_levels_changed()
+        save_monitor_enabled(self.analyzer_enabled)
         self.sync_ui_from_state()
         self.emit_control_state_changed()
 

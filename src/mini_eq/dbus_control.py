@@ -4,6 +4,7 @@ from typing import Protocol
 
 from gi.repository import Gio, GLib
 
+from . import __version__
 from .analyzer import analyzer_level_to_display_norm
 from .core import list_preset_names, sanitize_preset_name
 
@@ -11,6 +12,17 @@ BUS_NAME = "io.github.bhack.mini-eq"
 OBJECT_PATH = "/io/github/bhack/mini_eq/Control"
 INTERFACE_NAME = "io.github.bhack.MiniEq.Control"
 PANEL_ANALYZER_BINS = 10
+API_VERSION = 1
+CAPABILITIES = (
+    "present-window",
+    "quit",
+    "background-mode",
+    "start-at-login",
+    "set-routing",
+    "set-preset",
+    "output-presets",
+    "analyzer-levels",
+)
 
 INTROSPECTION_XML = f"""
 <node>
@@ -31,6 +43,7 @@ INTROSPECTION_XML = f"""
       <arg name="name" type="s" direction="in"/>
     </method>
     <method name="PresentWindow"/>
+    <method name="Quit"/>
     <signal name="StateChanged">
       <arg name="state" type="a{{sv}}"/>
     </signal>
@@ -72,6 +85,8 @@ class WindowProtocol(Protocol):
 
     def present(self) -> None: ...
 
+    def get_visible(self) -> bool: ...
+
     def sync_ui_from_state(self) -> None: ...
 
     def update_eq_power_indicator(self) -> None: ...
@@ -94,8 +109,14 @@ class WindowProtocol(Protocol):
 class ApplicationProtocol(Protocol):
     controller: ControllerProtocol | None
     window: WindowProtocol | None
+    background_mode: bool
+    start_at_login: bool
 
     def activate(self) -> None: ...
+
+    def present_main_window(self) -> None: ...
+
+    def quit_fully(self) -> None: ...
 
     def get_dbus_connection(self) -> Gio.DBusConnection | None: ...
 
@@ -138,6 +159,9 @@ class MiniEqDbusControl:
                 output_preset_name = output_preset_link_name() or ""
 
         return {
+            "api_version": GLib.Variant("u", API_VERSION),
+            "app_version": GLib.Variant("s", __version__),
+            "capabilities": GLib.Variant("as", CAPABILITIES),
             "running": GLib.Variant("b", controller is not None),
             "eq_enabled": GLib.Variant("b", bool(controller and controller.eq_enabled)),
             "routed": GLib.Variant("b", bool(controller and controller.routed)),
@@ -149,6 +173,16 @@ class MiniEqDbusControl:
             "output_preset_auto_applied": GLib.Variant(
                 "b",
                 bool(window and getattr(window, "output_preset_auto_applied", False)),
+            ),
+            "background_mode": GLib.Variant("b", bool(getattr(self.app, "background_mode", False))),
+            "start_at_login": GLib.Variant("b", bool(getattr(self.app, "start_at_login", False))),
+            "window_visible": GLib.Variant(
+                "b",
+                bool(
+                    window
+                    and not getattr(window, "ui_shutting_down", False)
+                    and getattr(window, "get_visible", lambda: False)()
+                ),
             ),
         }
 
@@ -280,10 +314,28 @@ class MiniEqDbusControl:
         self.emit_state_changed()
 
     def present_window(self) -> None:
+        present_main_window = getattr(self.app, "present_main_window", None)
+        if present_main_window is not None:
+            present_main_window()
+            return
+
         self.app.activate()
         window = self.app.window
         if window is not None and not window.ui_shutting_down:
             window.present()
+
+    def quit(self) -> None:
+        quit_fully = getattr(self.app, "quit_fully", None)
+        if quit_fully is not None:
+            quit_fully()
+            return
+
+        window = self.app.window
+        if window is not None and not window.ui_shutting_down:
+            window.close()
+            return
+
+        self.app.quit()
 
     def on_method_call(
         self,
@@ -315,10 +367,28 @@ class MiniEqDbusControl:
             elif method_name == "PresentWindow":
                 self.present_window()
                 invocation.return_value(None)
+            elif method_name == "Quit":
+                invocation.return_value(None)
+                self.quit()
             else:
                 invocation.return_dbus_error(f"{INTERFACE_NAME}.UnknownMethod", f"Unknown method: {method_name}")
         except Exception as exc:
             invocation.return_dbus_error(f"{INTERFACE_NAME}.Error", str(exc))
+
+
+def call_present_window(timeout_ms: int = 3000) -> None:
+    connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    connection.call_sync(
+        BUS_NAME,
+        OBJECT_PATH,
+        INTERFACE_NAME,
+        "PresentWindow",
+        None,
+        None,
+        Gio.DBusCallFlags.NONE,
+        timeout_ms,
+        None,
+    )
 
 
 def panel_analyzer_levels(window: WindowProtocol | None, target_count: int = PANEL_ANALYZER_BINS) -> list[float]:

@@ -12,4 +12,5 @@ dist/
 .flatpak-builder/
 flatpak-build/
 flatpak-repo/
+repo/
 *.flatpak

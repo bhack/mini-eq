@@ -8,6 +8,7 @@ DEFAULT_METADATA_NAME = "default"
 DEFAULT_AUDIO_SINK_KEY = "default.audio.sink"
 DEFAULT_CONFIGURED_AUDIO_SINK_KEY = "default.configured.audio.sink"
 TARGET_OBJECT_KEY = "target.object"
+TARGET_NODE_KEY = "target.node"
 SPA_ID_TYPE = "Spa:Id"
 STREAM_OUTPUT_AUDIO = "Stream/Output/Audio"
 AUDIO_SINK = "Audio/Sink"
@@ -256,7 +257,15 @@ class WirePlumberBackend:
 
     def list_nodes(self) -> list[WirePlumberNode]:
         self._ensure_connected()
-        return [self._node_from_proxy(node) for node in self._iterate_manager(self._node_manager)]
+        nodes: list[WirePlumberNode] = []
+
+        for node in self._iterate_manager(self._node_manager):
+            try:
+                nodes.append(self._node_from_proxy(node))
+            except UnicodeDecodeError:
+                continue
+
+        return nodes
 
     def list_audio_sinks(self) -> list[WirePlumberNode]:
         return [node for node in self.list_nodes() if node.is_audio_sink]
@@ -369,71 +378,19 @@ class WirePlumberBackend:
         if not target.object_serial:
             raise WirePlumberError(f"audio sink has no object.serial: {target_node_name}")
 
-        moved = self.set_metadata_and_wait(stream.bound_id, TARGET_OBJECT_KEY, SPA_ID_TYPE, target.object_serial)
-        if moved:
-            return
+        self.set_stream_target(stream.bound_id, target.bound_id, target.object_serial)
 
-        target_object, target_type = self.stream_target_object(stream.bound_id)
-        if target_object != target.object_serial or target_type not in {None, SPA_ID_TYPE}:
-            raise WirePlumberError(
-                f"WirePlumber did not acknowledge moving {stream.display_name} to {target_node_name}"
-            )
-
-    def stream_targets_node(self, stream_bound_id: int, target_node_name: str) -> bool:
-        target = self.audio_sink_by_name(target_node_name)
-        if target is None:
-            raise WirePlumberError(f"audio sink not found: {target_node_name}")
-
-        if not target.object_serial:
-            raise WirePlumberError(f"audio sink has no object.serial: {target_node_name}")
-
-        target_object, target_type = self.stream_target_object(stream_bound_id)
-        return target_object == target.object_serial and target_type in {None, SPA_ID_TYPE}
-
-    def stream_target_object(self, stream_bound_id: int) -> tuple[str | None, str | None]:
-        # WpMetadata reads from a cache. The upstream C API documents that this
-        # cache is updated on a later PipeWire round-trip after set(). In Python
-        # GI, repeated set()+find() on the same proxy can also expose stale
-        # internal strings. Use set_metadata_and_wait() for write acks.
-        value, type_name = self._default_metadata().find(stream_bound_id, TARGET_OBJECT_KEY)
-        return value, type_name
-
-    def set_metadata_and_wait(self, subject: int, key: str, type_name: str | None, value: str | None) -> bool:
+    def set_stream_target(self, stream_bound_id: int, target_bound_id: int, target_serial: str) -> None:
         metadata = self._default_metadata()
-        loop = self._GLib.MainLoop()
-        matched = False
 
-        def on_changed(_metadata, changed_subject, changed_key, changed_type, changed_value) -> None:
-            nonlocal matched
-            if changed_subject != subject or changed_key != key:
-                return
-            if changed_value != value:
-                return
-            if type_name is not None and changed_type != type_name:
-                return
-
-            matched = True
-            loop.quit()
-
-        def on_timeout() -> bool:
-            loop.quit()
-            return False
-
-        handler_id = self._GObject.Object.connect(metadata, "changed", on_changed)
-        timeout_id = self._GLib.timeout_add(self.timeout_ms, on_timeout)
-
-        try:
-            metadata.set(subject, key, type_name, value)
-            self._sync_core()
-            if not matched:
-                loop.run()
-        finally:
-            metadata.disconnect(handler_id)
-            source = self._GLib.MainContext.default().find_source_by_id(timeout_id)
-            if source is not None:
-                source.destroy()
-
-        return matched
+        # target.node keeps compatibility with older session-manager behavior,
+        # while target.object is the stable serial-based target used by modern
+        # WirePlumber. Write metadata and wait for a PipeWire round trip,
+        # without treating metadata readback as a separate acknowledgement
+        # protocol.
+        metadata.set(stream_bound_id, TARGET_NODE_KEY, SPA_ID_TYPE, str(target_bound_id))
+        metadata.set(stream_bound_id, TARGET_OBJECT_KEY, SPA_ID_TYPE, target_serial)
+        self._sync_core()
 
     def output_stream_by_bound_id(self, bound_id: int) -> WirePlumberNode | None:
         for stream in self.list_output_streams():
@@ -531,7 +488,7 @@ class WirePlumberBackend:
             value = self._Wp.PipewireObject.get_property(proxy, key)
             if value is not None:
                 return str(value)
-        except TypeError:
+        except (TypeError, UnicodeDecodeError):
             pass
 
         try:
@@ -559,10 +516,16 @@ class WirePlumberBackend:
             if not ok or item is None:
                 break
 
-            key = item.get_key()
-            value = item.get_value()
-            if key is not None and value is not None:
-                result[str(key)] = str(value)
+            try:
+                key = item.get_key()
+                value = item.get_value()
+                key_text = str(key) if key is not None else None
+                value_text = str(value) if value is not None else None
+            except UnicodeDecodeError:
+                continue
+
+            if key_text is not None and value_text is not None:
+                result[key_text] = value_text
 
         return result
 

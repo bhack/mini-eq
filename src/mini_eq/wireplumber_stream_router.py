@@ -8,6 +8,17 @@ from .core import OUTPUT_CLIENT_NAME, VIRTUAL_SINK_BASE
 from .glib_utils import destroy_glib_source
 from .wireplumber_backend import STREAM_OUTPUT_AUDIO, WirePlumberBackend, WirePlumberError, WirePlumberNode
 
+BLOCKLIST_MEDIA_ROLES = {"event", "Notification"}
+BLOCKLIST_STREAM_NAMES = {
+    "GNOME Shell",
+    "Mutter",
+    "gsd-media-keys",
+    "libcanberra",
+    "speech-dispatcher",
+    "speech-dispatcher-dummy",
+    "speech-dispatcher-espeak-ng",
+}
+
 
 class WirePlumberStreamRouter:
     def __init__(
@@ -28,9 +39,18 @@ class WirePlumberStreamRouter:
         self.object_added_handler_id = 0
         self.routed_stream_ids: set[int] = set()
         self.output_sink_name: str | None = None
+        self.last_warning_message = ""
 
     def emit_status(self, message: str) -> None:
         self.status_callback(message)
+
+    def emit_warning(self, exc: Exception) -> None:
+        message = f"routing warning: {exc}"
+        if message == self.last_warning_message:
+            return
+
+        self.last_warning_message = message
+        self.emit_status(message)
 
     def set_output_sink_name(self, sink_name: str) -> None:
         self.output_sink_name = sink_name
@@ -38,44 +58,51 @@ class WirePlumberStreamRouter:
     def _is_internal_stream(self, stream: WirePlumberNode) -> bool:
         node_name = stream.node_name or ""
         app_name = stream.application_name or ""
+        media_role = stream.property_value("media.role")
         return (
             app_name == OUTPUT_CLIENT_NAME
+            or media_role in BLOCKLIST_MEDIA_ROLES
+            or node_name in BLOCKLIST_STREAM_NAMES
+            or app_name in BLOCKLIST_STREAM_NAMES
             or node_name == self.internal_output_name
             or node_name.startswith(VIRTUAL_SINK_BASE)
             or node_name.startswith(f"{self.virtual_sink_name}.")
         )
 
     def iter_routable_output_streams(self) -> list[WirePlumberNode]:
-        return [stream for stream in self.backend.list_output_streams() if not self._is_internal_stream(stream)]
+        streams: list[WirePlumberNode] = []
+        for stream in self.backend.list_output_streams():
+            if not self._is_internal_stream(stream):
+                streams.append(stream)
 
-    def stream_targets_node(self, stream_id: int, target_node_name: str) -> bool:
-        try:
-            return self.backend.stream_targets_node(stream_id, target_node_name)
-        except Exception:
-            return False
+        return streams
 
     def is_stale_stream_error(self, exc: Exception, stream_id: int) -> bool:
         return isinstance(exc, WirePlumberError) and str(exc) == f"output stream not found: {stream_id}"
 
     def route_output_streams(self) -> int:
         routed_now = 0
+        failures: list[Exception] = []
 
         for stream in self.iter_routable_output_streams():
             was_tracked = stream.bound_id in self.routed_stream_ids
 
-            if not was_tracked or not self.stream_targets_node(stream.bound_id, self.virtual_sink_name):
-                try:
-                    self.backend.move_stream_to_target(stream.bound_id, self.virtual_sink_name)
-                except Exception as exc:
-                    if self.is_stale_stream_error(exc, stream.bound_id):
-                        self.routed_stream_ids.discard(stream.bound_id)
-                        continue
-                    raise
+            try:
+                self.backend.move_stream_to_target(stream.bound_id, self.virtual_sink_name)
+            except Exception as exc:
+                if self.is_stale_stream_error(exc, stream.bound_id):
+                    self.routed_stream_ids.discard(stream.bound_id)
+                    continue
+                failures.append(exc)
+                continue
 
-                if not was_tracked:
-                    routed_now += 1
+            if not was_tracked:
+                routed_now += 1
 
             self.routed_stream_ids.add(stream.bound_id)
+
+        if failures:
+            raise failures[0]
 
         return routed_now
 
@@ -84,12 +111,13 @@ class WirePlumberStreamRouter:
             self.routed_stream_ids.clear()
             return 0
 
-        streams = {stream.bound_id: stream for stream in self.backend.list_output_streams()}
+        streams = {stream.bound_id: stream for stream in self.iter_routable_output_streams()}
+        failures: list[Exception] = []
         restored = 0
 
         for stream_id in list(self.routed_stream_ids):
             stream = streams.get(stream_id)
-            if stream is None or self._is_internal_stream(stream):
+            if stream is None:
                 continue
 
             try:
@@ -98,8 +126,12 @@ class WirePlumberStreamRouter:
                 if self.is_stale_stream_error(exc, stream_id):
                     self.routed_stream_ids.discard(stream_id)
                     continue
-                raise
+                failures.append(exc)
+                continue
             restored += 1
+
+        if failures:
+            raise failures[0]
 
         self.routed_stream_ids.clear()
         return restored
@@ -111,9 +143,10 @@ class WirePlumberStreamRouter:
         try:
             routed_now = self.route_output_streams()
             if routed_now > 0:
+                self.last_warning_message = ""
                 self.emit_status(f"routed {routed_now} stream(s) to {self.virtual_sink_name}")
         except Exception as exc:
-            self.emit_status(f"routing warning: {exc}")
+            self.emit_warning(exc)
             if raise_errors:
                 raise
 

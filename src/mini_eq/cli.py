@@ -36,6 +36,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="run without the GTK window",
     )
     parser.add_argument(
+        "--background",
+        action="store_true",
+        help="start the GTK app hidden for background use",
+    )
+    parser.add_argument(
         "--duration",
         type=float,
         help="exit automatically after N seconds when running headless",

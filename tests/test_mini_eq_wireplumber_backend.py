@@ -93,6 +93,55 @@ class FakeNodeProxy:
         return self.set_result
 
 
+class FakePropertyItem:
+    def __init__(self, key: str, value: str, *, undecodable: bool = False) -> None:
+        self.key = key
+        self.value = value
+        self.undecodable = undecodable
+
+    def get_key(self) -> str:
+        return self.key
+
+    def get_value(self) -> str:
+        if self.undecodable:
+            raise UnicodeDecodeError("utf-8", b"\x96", 0, 1, "invalid start byte")
+        return self.value
+
+
+class FakePropertyIterator:
+    def __init__(self, items: list[FakePropertyItem]) -> None:
+        self.items = items
+        self.index = 0
+
+    def next(self) -> tuple[bool, FakePropertyItem | None]:
+        if self.index >= len(self.items):
+            return False, None
+
+        item = self.items[self.index]
+        self.index += 1
+        return True, item
+
+
+class FakeGlobalProperties:
+    def __init__(self, items: list[FakePropertyItem], values: dict[str, str] | None = None) -> None:
+        self.items = items
+        self.values = values or {}
+
+    def new_iterator(self) -> FakePropertyIterator:
+        return FakePropertyIterator(self.items)
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+
+class FakePropertyProxy:
+    def __init__(self, properties: FakeGlobalProperties) -> None:
+        self.properties = properties
+
+    def get_global_properties(self) -> FakeGlobalProperties:
+        return self.properties
+
+
 class FakeSource:
     def __init__(self) -> None:
         self.destroyed = False
@@ -267,43 +316,7 @@ def test_sync_core_removes_timeout_source_after_success() -> None:
     assert glib.timeout_callback is not None
 
 
-def test_stream_targets_node_matches_target_object_metadata() -> None:
-    backend = wp_backend.WirePlumberBackend()
-    sink = wp_backend.WirePlumberNode(
-        bound_id=39,
-        object_serial="67",
-        media_class=wp_backend.AUDIO_SINK,
-        node_name="alsa_output.test",
-        node_description="Test Sink",
-        application_name=None,
-        node_dont_move=False,
-    )
-
-    backend.audio_sink_by_name = lambda _name: sink
-    backend.stream_target_object = lambda _bound_id: ("67", wp_backend.SPA_ID_TYPE)
-
-    assert backend.stream_targets_node(126, "alsa_output.test") is True
-
-
-def test_stream_targets_node_rejects_different_target_object_metadata() -> None:
-    backend = wp_backend.WirePlumberBackend()
-    sink = wp_backend.WirePlumberNode(
-        bound_id=39,
-        object_serial="67",
-        media_class=wp_backend.AUDIO_SINK,
-        node_name="alsa_output.test",
-        node_description="Test Sink",
-        application_name=None,
-        node_dont_move=False,
-    )
-
-    backend.audio_sink_by_name = lambda _name: sink
-    backend.stream_target_object = lambda _bound_id: ("68", wp_backend.SPA_ID_TYPE)
-
-    assert backend.stream_targets_node(126, "alsa_output.test") is False
-
-
-def test_move_stream_to_target_raises_when_metadata_change_is_not_acknowledged() -> None:
+def test_move_stream_to_target_sets_stream_target_without_metadata_readback() -> None:
     backend = wp_backend.WirePlumberBackend()
     stream = wp_backend.WirePlumberNode(
         bound_id=126,
@@ -326,11 +339,12 @@ def test_move_stream_to_target_raises_when_metadata_change_is_not_acknowledged()
 
     backend.output_stream_by_bound_id = lambda _bound_id: stream
     backend.audio_sink_by_name = lambda _name: sink
-    backend.set_metadata_and_wait = lambda *_args: False
-    backend.stream_target_object = lambda _bound_id: ("64", wp_backend.SPA_ID_TYPE)
+    calls: list[tuple[int, int, str]] = []
+    backend.set_stream_target = lambda *args: calls.append(args)
 
-    with pytest.raises(wp_backend.WirePlumberError, match="did not acknowledge"):
-        backend.move_stream_to_target(126, "alsa_output.test")
+    backend.move_stream_to_target(126, "alsa_output.test")
+
+    assert calls == [(126, 39, "67")]
 
 
 def test_move_stream_to_target_skips_metadata_read_after_acknowledged_change() -> None:
@@ -356,10 +370,7 @@ def test_move_stream_to_target_skips_metadata_read_after_acknowledged_change() -
 
     backend.output_stream_by_bound_id = lambda _bound_id: stream
     backend.audio_sink_by_name = lambda _name: sink
-    backend.set_metadata_and_wait = lambda *_args: True
-    backend.stream_target_object = lambda _bound_id: (_ for _ in ()).throw(
-        AssertionError("acknowledged moves should not need metadata readback")
-    )
+    backend.set_stream_target = lambda *_args: None
 
     backend.move_stream_to_target(126, "alsa_output.test")
 
@@ -387,10 +398,91 @@ def test_move_stream_to_target_accepts_already_updated_metadata() -> None:
 
     backend.output_stream_by_bound_id = lambda _bound_id: stream
     backend.audio_sink_by_name = lambda _name: sink
-    backend.set_metadata_and_wait = lambda *_args: False
-    backend.stream_target_object = lambda _bound_id: ("67", wp_backend.SPA_ID_TYPE)
+    backend.set_stream_target = lambda *_args: None
 
     backend.move_stream_to_target(126, "alsa_output.test")
+
+
+def test_set_stream_target_writes_node_and_object_metadata() -> None:
+    backend = wp_backend.WirePlumberBackend()
+
+    class FakeMetadata:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, str, str, str]] = []
+
+        def set(self, subject: int, key: str, type_name: str, value: str) -> None:
+            self.calls.append((subject, key, type_name, value))
+
+    metadata = FakeMetadata()
+    syncs: list[str] = []
+    backend._default_metadata = lambda: metadata
+    backend._sync_core = lambda: syncs.append("sync")
+
+    backend.set_stream_target(126, 39, "67")
+
+    assert metadata.calls == [
+        (126, wp_backend.TARGET_NODE_KEY, wp_backend.SPA_ID_TYPE, "39"),
+        (126, wp_backend.TARGET_OBJECT_KEY, wp_backend.SPA_ID_TYPE, "67"),
+    ]
+    assert syncs == ["sync"]
+
+
+def test_properties_dict_skips_undecodable_property_values() -> None:
+    backend = wp_backend.WirePlumberBackend()
+    proxy = FakePropertyProxy(
+        FakeGlobalProperties(
+            [
+                FakePropertyItem("node.description", "", undecodable=True),
+                FakePropertyItem("node.name", "spotify"),
+            ]
+        )
+    )
+
+    assert backend._properties_dict(proxy) == {"node.name": "spotify"}
+
+
+def test_pw_property_falls_back_when_pipewire_property_is_undecodable() -> None:
+    backend = wp_backend.WirePlumberBackend()
+
+    class FakePipewireObject:
+        @staticmethod
+        def get_property(_proxy, _key: str):
+            raise UnicodeDecodeError("utf-8", b"\x96", 0, 1, "invalid start byte")
+
+    class FakeWirePlumber:
+        PipewireObject = FakePipewireObject
+
+    backend._Wp = FakeWirePlumber
+    proxy = FakePropertyProxy(FakeGlobalProperties([], {"node.name": "spotify"}))
+
+    assert backend._pw_property(proxy, "node.name") == "spotify"
+
+
+def test_list_nodes_skips_proxy_with_undecodable_identity() -> None:
+    backend = wp_backend.WirePlumberBackend()
+    good_node = object()
+    bad_node = object()
+    parsed_node = wp_backend.WirePlumberNode(
+        bound_id=1,
+        object_serial="1001",
+        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        node_name="spotify",
+        node_description=None,
+        application_name="Spotify",
+        node_dont_move=False,
+    )
+
+    def node_from_proxy(node):
+        if node is bad_node:
+            raise UnicodeDecodeError("utf-8", b"\xea", 3, 4, "invalid continuation byte")
+        return parsed_node
+
+    backend._ensure_connected = lambda: None
+    backend._node_manager = object()
+    backend._iterate_manager = lambda _manager: [bad_node, good_node]
+    backend._node_from_proxy = node_from_proxy
+
+    assert backend.list_nodes() == [parsed_node]
 
 
 def test_defaults_returns_cached_value_without_metadata_read(monkeypatch) -> None:

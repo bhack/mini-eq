@@ -11,6 +11,7 @@ def make_node(
     media_class: str,
     node_name: str,
     application_name: str | None = None,
+    properties: dict[str, str] | None = None,
 ) -> wp_backend.WirePlumberNode:
     return wp_backend.WirePlumberNode(
         bound_id=bound_id,
@@ -20,6 +21,7 @@ def make_node(
         node_description=None,
         application_name=application_name,
         node_dont_move=False,
+        properties=properties or {},
     )
 
 
@@ -56,9 +58,6 @@ class FakeWirePlumberBackend:
         self.moves.append((stream_bound_id, target_node_name))
         self.target_nodes[stream_bound_id] = target_node_name
 
-    def stream_targets_node(self, stream_bound_id: int, target_node_name: str) -> bool:
-        return self.target_nodes.get(stream_bound_id) == target_node_name
-
     def node_from_proxy(self, node):
         return node
 
@@ -76,6 +75,23 @@ def test_wireplumber_router_moves_only_external_output_streams() -> None:
             make_node(2, wp_backend.STREAM_OUTPUT_AUDIO, "mini_eq_sink_output"),
             make_node(3, wp_backend.STREAM_OUTPUT_AUDIO, "control", wp_router.OUTPUT_CLIENT_NAME),
             make_node(4, wp_backend.STREAM_OUTPUT_AUDIO, "mini_eq_sink_1_output"),
+        ]
+    )
+    router = wp_router.WirePlumberStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
+
+    routed_now = router.route_output_streams()
+
+    assert routed_now == 1
+    assert backend.moves == [(1, "mini_eq_sink")]
+    assert router.routed_stream_ids == {1}
+
+
+def test_wireplumber_router_skips_notification_and_system_event_streams() -> None:
+    backend = FakeWirePlumberBackend(
+        [
+            make_node(1, wp_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify"),
+            make_node(2, wp_backend.STREAM_OUTPUT_AUDIO, "bell", "libcanberra", {"media.role": "event"}),
+            make_node(3, wp_backend.STREAM_OUTPUT_AUDIO, "GNOME Shell", "GNOME Shell"),
         ]
     )
     router = wp_router.WirePlumberStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
@@ -105,7 +121,7 @@ def test_wireplumber_router_restores_tracked_external_streams() -> None:
     assert router.routed_stream_ids == set()
 
 
-def test_wireplumber_router_skips_redundant_route_move() -> None:
+def test_wireplumber_router_rewrites_tracked_route_target_without_metadata_readback() -> None:
     backend = FakeWirePlumberBackend(
         [make_node(1, wp_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
         {1: "mini_eq_sink"},
@@ -116,21 +132,16 @@ def test_wireplumber_router_skips_redundant_route_move() -> None:
     routed_now = router.route_output_streams()
 
     assert routed_now == 0
-    assert backend.moves == []
+    assert backend.moves == [(1, "mini_eq_sink")]
     assert router.routed_stream_ids == {1}
 
 
-def test_wireplumber_router_does_not_read_target_metadata_before_first_route() -> None:
+def test_wireplumber_router_routes_without_target_metadata_preflight() -> None:
     backend = FakeWirePlumberBackend(
         [make_node(1, wp_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
         {1: "mini_eq_sink"},
     )
     router = wp_router.WirePlumberStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
-
-    def fail_stream_targets_node(_stream_bound_id: int, _target_node_name: str) -> bool:
-        raise AssertionError("first route should move directly without metadata preflight")
-
-    backend.stream_targets_node = fail_stream_targets_node
 
     routed_now = router.route_output_streams()
 

@@ -69,6 +69,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._running = false;
         this._routed = false;
         this._eqEnabled = false;
+        this._capabilities = new Set();
         this.visible = false;
 
         const box = new St.BoxLayout({
@@ -118,6 +119,11 @@ class MiniEqIndicator extends PanelMenu.Button {
             this._scheduleRefresh(1000);
         });
         this.menu.addMenuItem(openItem);
+
+        this._quitItem = new PopupMenu.PopupMenuItem(_('Quit Mini EQ'));
+        this._quitItem.visible = false;
+        this._quitItem.connect('activate', () => this._quitMiniEq());
+        this.menu.addMenuItem(this._quitItem);
 
         this._signalId = Gio.DBus.session.signal_subscribe(
             BUS_NAME,
@@ -292,6 +298,16 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._call('PresentWindow', null, null, () => {});
     }
 
+    _quitMiniEq() {
+        this._call('Quit', null, null, () => {
+            this._setDisconnectedState();
+            this._scheduleRefresh(500);
+        }, () => {
+            this._quitItem.visible = false;
+            this._scheduleRefresh(500);
+        });
+    }
+
     _showWindow(event) {
         const app = Shell.AppSystem.get_default().lookup_app(APP_DESKTOP_ID);
         const windows = app?.get_windows().filter(window => !window.skip_taskbar) ?? [];
@@ -322,6 +338,9 @@ class MiniEqIndicator extends PanelMenu.Button {
         const routed = Boolean(unpackValue(state.routed));
         const presetName = unpackValue(state.preset_name) || _('Current State');
         const outputPresetName = unpackValue(state.output_preset_name) || '';
+        const capabilities = unpackValue(state.capabilities) || [];
+        this._capabilities = new Set(Array.isArray(capabilities) ? capabilities : []);
+        const canQuit = this._capabilities.has('quit');
 
         this._running = running;
         this._routed = routed;
@@ -345,12 +364,14 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsItem.label.text = running ? _('Preset: %s').format(presetName) : _('Presets');
         this._statusItem.label.text = this._statusText(running, routed, eqEnabled);
         this._outputPresetItem.label.text = this._outputPresetText(running, outputPresetName);
+        this._quitItem.visible = running && canQuit;
     }
 
     _setDisconnectedState() {
         this._running = false;
         this._routed = false;
         this._eqEnabled = false;
+        this._capabilities = new Set();
         this.visible = false;
         this._syncPanelStateStyle(false, false, false);
         this._updating = true;
@@ -367,6 +388,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsItem.label.text = _('Presets');
         this._statusItem.label.text = _('Mini EQ is not running');
         this._outputPresetItem.label.text = _('Output preset: None');
+        this._quitItem.visible = false;
         this._setAnalyzerLevels([]);
         this._setPresets([]);
     }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 - 2026-05-05
+
+- Add opt-in background mode so closing the window can keep Mini EQ active.
+- Add Start at Login support through the Background portal in Flatpak and XDG
+  autostart for native installs.
+- Add D-Bus state fields and a Quit method for Shell extension compatibility.
+- Keep GNOME event sounds, notifications, and other system streams out of
+  system-wide EQ routing.
+- Route streams by writing both PipeWire `target.node` and `target.object`
+  metadata, avoiding metadata readback as a routing acknowledgement.
+
 ## 0.3.2 - 2026-05-04
 
 - Fix Flatpak system-wide routing by requesting PipeWire manager access from the WirePlumber client.

@@ -67,6 +67,7 @@ class FakeWindow:
         self.loaded_presets: list[str] = []
         self.update_count = 0
         self.output_preset_auto_applied = False
+        self.visible = True
 
     def load_library_preset(self, name: str) -> None:
         self.current_preset_name = name
@@ -77,6 +78,9 @@ class FakeWindow:
 
     def present(self) -> None:
         pass
+
+    def get_visible(self) -> bool:
+        return self.visible
 
     def sync_ui_from_state(self) -> None:
         self.update_count += 1
@@ -106,7 +110,16 @@ class FakeWindow:
 def make_control() -> tuple[dbus_control.MiniEqDbusControl, FakeController, FakeWindow]:
     controller = FakeController()
     window = FakeWindow(controller)
-    app = SimpleNamespace(controller=controller, window=window, activate=lambda: None, get_dbus_connection=lambda: None)
+    app = SimpleNamespace(
+        controller=controller,
+        window=window,
+        background_mode=True,
+        start_at_login=False,
+        activate=lambda: None,
+        get_dbus_connection=lambda: None,
+        present_main_window=lambda: None,
+        quit_fully=lambda: None,
+    )
     return dbus_control.MiniEqDbusControl(app), controller, window
 
 
@@ -116,6 +129,9 @@ def test_dbus_control_state_contains_shell_summary() -> None:
     state = {key: value.unpack() for key, value in control.state().items()}
 
     assert state == {
+        "api_version": dbus_control.API_VERSION,
+        "app_version": dbus_control.__version__,
+        "capabilities": list(dbus_control.CAPABILITIES),
         "running": True,
         "eq_enabled": True,
         "routed": False,
@@ -123,6 +139,9 @@ def test_dbus_control_state_contains_shell_summary() -> None:
         "output_sink": "alsa_output.test",
         "output_preset_name": "Headphones",
         "output_preset_auto_applied": False,
+        "background_mode": True,
+        "start_at_login": False,
+        "window_visible": True,
     }
 
 
@@ -260,6 +279,25 @@ def test_dbus_control_set_preset_sanitizes_name() -> None:
     assert window.loaded_presets == ["Headphones"]
 
 
+def test_dbus_control_quit_delegates_to_application_full_quit() -> None:
+    calls: list[str] = []
+    app = SimpleNamespace(
+        controller=None,
+        window=None,
+        background_mode=False,
+        start_at_login=False,
+        activate=lambda: None,
+        get_dbus_connection=lambda: None,
+        present_main_window=lambda: None,
+        quit_fully=lambda: calls.append("quit"),
+    )
+    control = dbus_control.MiniEqDbusControl(app)
+
+    control.quit()
+
+    assert calls == ["quit"]
+
+
 def test_dbus_control_rejects_empty_preset_name() -> None:
     control, _controller, _window = make_control()
 
@@ -278,6 +316,7 @@ def test_dbus_introspection_exposes_expected_interface() -> None:
         "SetRoutingEnabled",
         "SetPreset",
         "PresentWindow",
+        "Quit",
     }
     assert {signal.name for signal in node_info.interfaces[0].signals} == {
         "AnalyzerLevelsChanged",

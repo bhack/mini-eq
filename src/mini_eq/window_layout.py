@@ -126,6 +126,7 @@ class MiniEqWindowLayoutMixin:
 
         add_window_action("import-apo", lambda: self.on_import_apo_clicked(tools_button))
         add_window_action("reset-eq", lambda: self.on_clear_clicked(tools_button))
+        add_window_action("preferences", self.show_preferences_dialog)
         add_window_action("about", self.show_about_dialog)
         self.appearance_action = Gio.SimpleAction.new_stateful(
             "appearance",
@@ -146,6 +147,7 @@ class MiniEqWindowLayoutMixin:
         tools_menu.append_section("Appearance", appearance_menu)
 
         app_menu = Gio.Menu()
+        app_menu.append("Preferences…", "win.preferences")
         app_menu.append("About Mini EQ", "win.about")
         tools_menu.append_section(None, app_menu)
 

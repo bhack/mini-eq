@@ -68,6 +68,11 @@ extension source changed since the relevant release tag. If it reports that an
 upload may be needed, test the extension and upload the generated zip to
 extensions.gnome.org after the release is ready.
 
+The preflight also prints a Flatpak background portal smoke notice when
+background mode, Start at Login, hidden-window lifecycle, Shell control, or
+Flatpak integration paths changed. That notice is change-aware; do the manual
+portal smoke only for releases that touch those paths.
+
 ## Check Locally
 
 ```bash
@@ -117,6 +122,20 @@ crash and streams are restored:
 ```bash
 flatpak run io.github.bhack.mini-eq//master --auto-route
 ```
+
+For background portal changes, run one clean-permission Flatpak smoke in a real
+GNOME session:
+
+```bash
+flatpak permission-remove background background io.github.bhack.mini-eq || true
+flatpak run --command=flathub-build org.flatpak.Builder --install io.github.bhack.mini-eq.yaml
+flatpak run io.github.bhack.mini-eq//master
+```
+
+Then enable **Keep Running in Background**, approve the portal prompt, enable
+**Start at Login**, close the window, and confirm the app stays available from
+the GNOME Shell extension. Use the Shell extension's **Show Mini EQ** and
+**Quit Mini EQ** actions to verify hidden-window recovery and full exit.
 
 There is also an experimental non-blocking GitHub Actions path for this check:
 manually dispatch the `CI` workflow with `flatpak_runtime_smoke=true` and, when
@@ -179,7 +198,17 @@ documentation.
 
 ## Security
 
-Before publishing release artifacts, run a focused leak scan:
+Before publishing release artifacts, run the full preflight. Its focused leak
+scan covers `HEAD`, tracked worktree changes, and untracked non-ignored text
+files, so run it again after any release-process edits:
+
+```bash
+python3 tools/release_preflight.py
+```
+
+If reproducing the scan manually, check committed history, the tracked worktree,
+and untracked non-ignored files. Do not rely on a `HEAD`-only scan before
+committing release files:
 
 ```bash
 git rev-list --count HEAD
@@ -191,6 +220,14 @@ git grep -n -I -E "$leak_pattern" HEAD -- . \
   ':(exclude)AGENTS.md' \
   ':(exclude)docs/release.md' \
   ':(exclude)tools/release_preflight.py'
+git grep -n -I -E "$leak_pattern" -- . \
+  ':(exclude)*.png' \
+  ':(exclude)AGENTS.md' \
+  ':(exclude)docs/release.md' \
+  ':(exclude)tools/release_preflight.py'
+git ls-files --others --exclude-standard -z -- . \
+  | grep -z -v -E '(^|/)(AGENTS\.md|docs/release\.md|tools/release_preflight\.py)$|\.png$' \
+  | xargs -0 -r grep -n -I -E "$leak_pattern" --
 ```
 
 Keep these GitHub security features enabled in Settings > Advanced Security:

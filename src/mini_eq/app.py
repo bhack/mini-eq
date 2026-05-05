@@ -11,8 +11,15 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, GLibUnix
 
 from .appearance import apply_appearance_preference, load_appearance_preference
+from .background import (
+    load_background_mode,
+    load_start_at_login,
+    save_background_mode,
+    save_start_at_login,
+    set_background_status,
+)
 from .cli import parse_args
-from .dbus_control import MiniEqDbusControl
+from .dbus_control import MiniEqDbusControl, call_present_window
 from .desktop_integration import APP_ICON_NAME, APP_ID, install_app_icon, install_desktop_integration
 from .glib_utils import destroy_glib_source
 from .instance import MiniEqAlreadyRunningError, MiniEqInstanceGuard
@@ -29,6 +36,8 @@ class MiniEqApplication(Adw.Application):
         self.dbus_control: MiniEqDbusControl | None = None
         self.signal_source_ids: list[int] = []
         self.window_present_source_id = 0
+        self.background_mode = load_background_mode() or bool(getattr(args, "background", False))
+        self.start_at_login = load_start_at_login()
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -37,7 +46,7 @@ class MiniEqApplication(Adw.Application):
         self.install_standard_actions()
         self.dbus_control = MiniEqDbusControl(self)
         self.dbus_control.register()
-        self.signal_source_ids = install_unix_signal_handlers(self.quit)
+        self.signal_source_ids = install_unix_signal_handlers(self.quit_fully)
 
     def install_standard_actions(self) -> None:
         quit_action = Gio.SimpleAction.new("quit", None)
@@ -51,11 +60,7 @@ class MiniEqApplication(Adw.Application):
         self.set_accels_for_action("app.close", ["<primary>w"])
 
     def on_quit_action(self, _action: Gio.SimpleAction, _parameter: GLib.Variant | None) -> None:
-        if self.window is not None and not self.window.ui_shutting_down:
-            self.window.close()
-            return
-
-        self.quit()
+        self.quit_fully()
 
     def on_close_action(self, _action: Gio.SimpleAction, _parameter: GLib.Variant | None) -> None:
         if self.window is not None and not self.window.ui_shutting_down:
@@ -65,12 +70,19 @@ class MiniEqApplication(Adw.Application):
         self.quit()
 
     def do_activate(self) -> None:
+        self.ensure_window(present=not bool(getattr(self.args, "background", False)))
+
+    def ensure_window(self, *, present: bool) -> None:
         install_app_icon()
 
         if self.window is not None:
             if self.window.ui_shutting_down:
                 return
-            self.window.present()
+            if present:
+                self.window.present_after_setup = True
+                self.window.set_visible(True)
+                self.window.present()
+                self.emit_control_state_changed()
             self.window.schedule_post_present_setup()
             return
 
@@ -90,10 +102,47 @@ class MiniEqApplication(Adw.Application):
         self.controller = controller
         self.window = MiniEqWindow(self, self.controller, self.args.auto_route)
         self.window.set_icon_name(APP_ICON_NAME)
-        self.window.set_visible(True)
-        self.window.present()
+        self.window.present_after_setup = present
+        self.window.set_visible(present)
+        if present:
+            self.window.present()
         self.window.schedule_post_present_setup()
-        self.window_present_source_id = GLib.idle_add(self.on_window_present_idle)
+        if present:
+            self.window_present_source_id = GLib.idle_add(self.on_window_present_idle)
+        else:
+            self.update_background_status()
+            self.emit_control_state_changed()
+
+    def present_main_window(self) -> None:
+        self.ensure_window(present=True)
+
+    def quit_fully(self) -> None:
+        if self.window is not None and not self.window.ui_shutting_down:
+            self.window.begin_close_request_shutdown(force_quit=True)
+            return
+
+        self.quit()
+
+    def set_background_mode(self, enabled: bool) -> None:
+        self.background_mode = bool(enabled)
+        save_background_mode(self.background_mode)
+        self.emit_control_state_changed()
+
+    def set_start_at_login(self, enabled: bool) -> None:
+        self.start_at_login = bool(enabled)
+        save_start_at_login(self.start_at_login)
+        self.emit_control_state_changed()
+
+    def update_background_status(self) -> None:
+        if self.controller is not None and self.controller.routed and self.controller.eq_enabled:
+            message = "System-wide EQ active"
+        else:
+            message = "Mini EQ ready"
+
+        try:
+            set_background_status(message)
+        except Exception:
+            pass
 
     def on_window_present_idle(self) -> bool:
         self.window_present_source_id = 0
@@ -104,6 +153,8 @@ class MiniEqApplication(Adw.Application):
         return False
 
     def emit_control_state_changed(self) -> None:
+        if self.window is not None and not self.window.get_visible():
+            self.update_background_status()
         if self.dbus_control is not None:
             self.dbus_control.emit_state_changed()
 
@@ -197,6 +248,15 @@ def run_from_args(args: Namespace) -> int:
     try:
         instance_guard = MiniEqInstanceGuard.acquire()
     except MiniEqAlreadyRunningError as exc:
+        if getattr(args, "background", False):
+            return 0
+
+        try:
+            call_present_window()
+            return 0
+        except Exception:
+            pass
+
         print(str(exc), file=sys.stderr)
         return 2
 

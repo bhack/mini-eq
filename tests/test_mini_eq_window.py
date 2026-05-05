@@ -90,6 +90,79 @@ def test_begin_close_request_shutdown_restores_routing_before_delayed_quit(monke
     assert application.quit_count == 1
 
 
+def test_begin_close_request_shutdown_hides_when_background_mode_is_enabled() -> None:
+    calls: list[object] = []
+    application = SimpleNamespace(background_mode=True)
+
+    fake_window = SimpleNamespace(
+        ui_shutting_down=False,
+        close_finish_source_id=0,
+        updating_ui=False,
+        route_switch=FakeSwitch(True),
+        controller=SimpleNamespace(
+            route_system_audio=lambda enabled, announce=True, refresh_output=True: calls.append(
+                ("route", enabled, announce, refresh_output)
+            )
+        ),
+        set_visible=lambda visible: calls.append(("visible", visible)),
+        notify_control_state_changed=lambda: calls.append("notify"),
+        get_application=lambda: application,
+    )
+    application.update_background_status = lambda: calls.append("background-status")
+
+    window.MiniEqWindow.begin_close_request_shutdown(fake_window)
+
+    assert fake_window.route_switch.get_active() is True
+    assert fake_window.close_finish_source_id == 0
+    assert calls == [
+        ("visible", False),
+        "notify",
+        "background-status",
+    ]
+
+
+def test_post_present_setup_routes_before_starting_monitor_for_auto_route() -> None:
+    calls: list[object] = []
+    fake_window = SimpleNamespace(
+        post_present_source_id=99,
+        ui_shutting_down=False,
+        post_present_ready=False,
+        auto_route_on_startup=True,
+        updating_ui=False,
+        present_after_setup=False,
+        route_switch=FakeSwitch(False),
+        controller=SimpleNamespace(route_system_audio=lambda enabled: calls.append(("route", enabled))),
+        start_preset_monitoring=lambda: calls.append("preset-monitor"),
+        apply_output_preset_for_current_output=lambda: calls.append("output-preset"),
+        update_eq_power_indicator=lambda: calls.append("power"),
+        update_info_label=lambda: calls.append("info"),
+        update_status_summary=lambda: calls.append("summary"),
+        update_focus_summary=lambda: calls.append("focus"),
+        start_analyzer_preview=lambda: calls.append("monitor"),
+        notify_control_state_changed=lambda: calls.append("notify"),
+        set_status=lambda message: calls.append(("status", message)),
+        present=lambda: calls.append("present"),
+    )
+
+    keep_source = window.MiniEqWindow.on_post_present_setup_idle(fake_window)
+
+    assert keep_source is False
+    assert fake_window.post_present_source_id == 0
+    assert fake_window.post_present_ready is True
+    assert fake_window.route_switch.get_active() is True
+    assert calls == [
+        "preset-monitor",
+        "output-preset",
+        ("route", True),
+        "power",
+        "info",
+        "summary",
+        "focus",
+        "monitor",
+        "notify",
+    ]
+
+
 def test_on_route_changed_resets_switch_when_routing_fails() -> None:
     calls: list[object] = []
 

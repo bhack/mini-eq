@@ -355,7 +355,9 @@ def test_analyzer_preview_frame_coalesces_to_30hz() -> None:
     assert window.tick_times == [pytest.approx(1.04)]
 
 
-def test_analyzer_toggle_off_emits_zero_level_signal() -> None:
+def test_analyzer_toggle_off_emits_zero_level_signal(monkeypatch) -> None:
+    saved_values: list[bool] = []
+    monkeypatch.setattr(window_analyzer, "save_monitor_enabled", saved_values.append)
     window = AnalyzerToggleWindow()
 
     window.on_analyzer_changed(FakeSwitch(False), None)
@@ -368,6 +370,7 @@ def test_analyzer_toggle_off_emits_zero_level_signal() -> None:
     assert window.application.analyzer_count == 1
     assert window.application.state_count == 1
     assert window.sync_count == 1
+    assert saved_values == [False]
 
 
 def test_analyzer_summary_prefers_live_shortterm_loudness() -> None:

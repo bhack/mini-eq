@@ -34,11 +34,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.2/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.4.0/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.3.2/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.4.0/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -46,6 +46,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.4.0" date="2026-05-05">
+      <description>
+        <ul>
+          <li>Add background mode and Start at Login support.</li>
+          <li>Keep GNOME event sounds and notifications out of system-wide EQ routing.</li>
+          <li>Add Shell extension controls for showing and quitting the background app.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-05-04">
       <description>
         <ul>

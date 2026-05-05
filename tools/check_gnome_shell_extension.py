@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
@@ -20,6 +21,7 @@ EXTENSION_DIR = ROOT / "extensions" / "gnome-shell" / EXTENSION_UUID
 EXTENSION_JS = EXTENSION_DIR / "extension.js"
 METADATA_JSON = EXTENSION_DIR / "metadata.json"
 PACK_SCRIPT = ROOT / "tools" / "pack_gnome_shell_extension.sh"
+FAKE_CONTROL = ROOT / "tools" / "gnome-shell-extension" / "fake_mini_eq_control.py"
 EXPECTED_ZIP_NAMES = {"extension.js", "metadata.json", "mini-eq-symbolic.svg"}
 
 DBUS_CALL_RE = re.compile(r"\bthis\._call\(\s*(['\"])(?P<method>[A-Za-z][A-Za-z0-9_]*)\1")
@@ -81,6 +83,31 @@ def dbus_exported_state_fields() -> set[str]:
     return set(dbus_control.MiniEqDbusControl(app).state())
 
 
+def fake_control_module() -> object:
+    spec = importlib.util.spec_from_file_location("fake_mini_eq_control", FAKE_CONTROL)
+    if spec is None or spec.loader is None:
+        raise ExtensionCheckError(f"Could not load fake control service from {FAKE_CONTROL}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def fake_control_exported_methods() -> set[str]:
+    node = ElementTree.fromstring(fake_control_module().INTROSPECTION_XML)
+    return {method.attrib["name"] for method in node.findall("./interface/method")}
+
+
+def fake_control_exported_signals() -> set[str]:
+    node = ElementTree.fromstring(fake_control_module().INTROSPECTION_XML)
+    return {signal.attrib["name"] for signal in node.findall("./interface/signal")}
+
+
+def fake_control_state_fields() -> set[str]:
+    fake_control = fake_control_module().FakeMiniEqControl()
+    return set(fake_control.state())
+
+
 def check_dbus_contract() -> None:
     missing_methods = extension_called_methods() - dbus_exported_methods()
     if missing_methods:
@@ -99,6 +126,29 @@ def check_dbus_contract() -> None:
     if missing_state_fields:
         raise ExtensionCheckError(
             "GNOME Shell extension reads D-Bus state field(s) not exported by Mini EQ: "
+            + ", ".join(sorted(missing_state_fields))
+        )
+
+
+def check_fake_control_contract() -> None:
+    missing_methods = extension_called_methods() - fake_control_exported_methods()
+    if missing_methods:
+        raise ExtensionCheckError(
+            "GNOME Shell fake control service is missing D-Bus method(s) used by the extension: "
+            + ", ".join(sorted(missing_methods))
+        )
+
+    missing_signals = extension_subscribed_signals() - fake_control_exported_signals()
+    if missing_signals:
+        raise ExtensionCheckError(
+            "GNOME Shell fake control service is missing D-Bus signal(s) used by the extension: "
+            + ", ".join(sorted(missing_signals))
+        )
+
+    missing_state_fields = extension_state_fields() - fake_control_state_fields()
+    if missing_state_fields:
+        raise ExtensionCheckError(
+            "GNOME Shell fake control service is missing D-Bus state field(s) used by the extension: "
             + ", ".join(sorted(missing_state_fields))
         )
 
@@ -161,6 +211,7 @@ def check_packaging() -> None:
 def run_checks(*, package: bool) -> None:
     check_metadata()
     check_dbus_contract()
+    check_fake_control_contract()
     if package:
         check_packaging()
 

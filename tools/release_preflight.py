@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fnmatch
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -12,8 +14,34 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LEAK_PATTERN = r"(/home/|/Users/|secret|token|api[_-]?key|github_pat|BEGIN (RSA|OPENSSH|PRIVATE) KEY)"
-ALLOWED_LEAK_MATCHES = ("${{ github.token }}", "id-token: write")
+ALLOWED_LEAK_MATCHES = (
+    "${{ github.token }}",
+    "handle_token",  # XDG desktop portal public request identifier.
+    "id-token: write",
+)
 EXTENSION_SOURCE_DIR = ROOT / "extensions" / "gnome-shell" / "mini-eq@bhack.github.io"
+LEAK_SCAN_EXCLUDES = (
+    ":(exclude)*.png",
+    ":(exclude)AGENTS.md",
+    ":(exclude)docs/release.md",
+    ":(exclude)tools/release_preflight.py",
+)
+UNTRACKED_LEAK_SCAN_EXCLUDES = (
+    "*.png",
+    "AGENTS.md",
+    "docs/release.md",
+    "tools/release_preflight.py",
+)
+BACKGROUND_PORTAL_REVIEW_PATHS = (
+    Path("io.github.bhack.mini-eq.yaml"),
+    Path("src/mini_eq/app.py"),
+    Path("src/mini_eq/background.py"),
+    Path("src/mini_eq/cli.py"),
+    Path("src/mini_eq/dbus_control.py"),
+    Path("src/mini_eq/window.py"),
+    Path("src/mini_eq/window_preferences.py"),
+    Path("extensions/gnome-shell/mini-eq@bhack.github.io/extension.js"),
+)
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -40,6 +68,10 @@ def require_tools(*tools: str) -> None:
     missing = [tool for tool in tools if shutil.which(tool) is None]
     if missing:
         raise SystemExit(f"Missing required release tool(s): {', '.join(missing)}")
+
+
+def allowed_leak_match(line: str) -> bool:
+    return any(allowed in line for allowed in ALLOWED_LEAK_MATCHES)
 
 
 def current_release_tag() -> str:
@@ -90,35 +122,66 @@ def run_gnome_shell_extension_upload_notice() -> None:
     print("Build and test the extension zip before uploading it to extensions.gnome.org.")
 
 
+def changed_paths_for_review(base_tag: str, paths: tuple[Path, ...]) -> list[str]:
+    path_args = [path.as_posix() for path in paths]
+    committed_changes = git_stdout("diff", "--name-only", f"{base_tag}..HEAD", "--", *path_args).splitlines()
+    worktree_changes = git_stdout("status", "--short", "--", *path_args).splitlines()
+    return [*committed_changes, *worktree_changes]
+
+
+def run_background_portal_smoke_notice() -> None:
+    base_tag = extension_comparison_base_tag()
+    if base_tag is None:
+        print("\nFlatpak background portal smoke notice skipped; no release tag found.")
+        return
+
+    changes = changed_paths_for_review(base_tag, BACKGROUND_PORTAL_REVIEW_PATHS)
+    if not changes:
+        print(f"\nFlatpak background portal smoke not indicated; background integration unchanged since {base_tag}.")
+        return
+
+    print(f"\nFlatpak background portal smoke may be needed; background integration changed since {base_tag}:")
+    for path in changes:
+        print(f"  {path}")
+    print("Run one clean-permission Flatpak portal smoke in a real GNOME session before releasing this change.")
+
+
 def run_leak_scan() -> None:
     run(["git", "rev-list", "--count", "HEAD"])
     run(["git", "ls-remote", "--heads", "origin"])
     run(["git", "ls-remote", "--tags", "origin"])
 
-    command = [
-        "git",
-        "grep",
-        "-n",
-        "-I",
-        "-E",
-        LEAK_PATTERN,
-        "HEAD",
-        "--",
-        ".",
-        ":(exclude)*.png",
-        ":(exclude)AGENTS.md",
-        ":(exclude)docs/release.md",
-        ":(exclude)tools/release_preflight.py",
+    matches = [
+        *git_leak_matches(
+            [
+                "git",
+                "grep",
+                "-n",
+                "-I",
+                "-E",
+                LEAK_PATTERN,
+                "HEAD",
+                "--",
+                ".",
+                *LEAK_SCAN_EXCLUDES,
+            ]
+        ),
+        *git_leak_matches(
+            [
+                "git",
+                "grep",
+                "-n",
+                "-I",
+                "-E",
+                LEAK_PATTERN,
+                "--",
+                ".",
+                *LEAK_SCAN_EXCLUDES,
+            ]
+        ),
+        *untracked_leak_matches(),
     ]
-    print(f"\n$ {format_command(command)}", flush=True)
-    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
-
-    if result.returncode not in (0, 1):
-        sys.stderr.write(result.stderr)
-        raise SystemExit(result.returncode)
-
-    matches = result.stdout.splitlines()
-    unexpected = [line for line in matches if not any(allowed in line for allowed in ALLOWED_LEAK_MATCHES)]
+    unexpected = [line for line in matches if not allowed_leak_match(line)]
     if unexpected:
         print("\nUnexpected leak-scan matches:", file=sys.stderr)
         for line in unexpected:
@@ -126,9 +189,49 @@ def run_leak_scan() -> None:
         raise SystemExit(1)
 
     if matches:
-        print("Leak scan found only allowed GitHub Actions token/id-token references.")
+        print("Leak scan found only allowed non-secret references.")
     else:
         print("Leak scan found no matches.")
+
+
+def git_leak_matches(command: list[str]) -> list[str]:
+    print(f"\n$ {format_command(command)}", flush=True)
+    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+
+    if result.returncode not in (0, 1):
+        sys.stderr.write(result.stderr)
+        raise SystemExit(result.returncode)
+
+    return result.stdout.splitlines()
+
+
+def untracked_leak_matches() -> list[str]:
+    command = ["git", "ls-files", "--others", "--exclude-standard", "-z", "--", "."]
+    print(f"\n$ {format_command(command)}", flush=True)
+    result = subprocess.run(command, cwd=ROOT, capture_output=True, check=True)
+    paths = [Path(os.fsdecode(path)) for path in result.stdout.split(b"\0") if path]
+    leak_re = re.compile(LEAK_PATTERN)
+    matches: list[str] = []
+
+    for relative_path in paths:
+        path_text = relative_path.as_posix()
+        if any(fnmatch.fnmatch(path_text, pattern) for pattern in UNTRACKED_LEAK_SCAN_EXCLUDES):
+            continue
+
+        path = ROOT / relative_path
+        try:
+            payload = path.read_bytes()
+        except OSError:
+            continue
+
+        if b"\0" in payload:
+            continue
+
+        for line_number, line in enumerate(payload.decode("utf-8", errors="ignore").splitlines(), start=1):
+            if leak_re.search(line):
+                matches.append(f"{path_text}:{line_number}:{line}")
+
+    return matches
 
 
 def run_wheel_smoke_test(python: Path, wheel: Path, scratch: Path) -> None:
@@ -185,6 +288,7 @@ def main() -> int:
     run([python, "-m", "pytest", "tests/test_version_metadata.py", "-q"])
     run([python, ROOT / "tools/check_gnome_shell_extension.py"])
     run_gnome_shell_extension_upload_notice()
+    run_background_portal_smoke_notice()
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])
     run([python, "-m", "pytest", "-q"])

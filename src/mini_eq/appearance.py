@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Final
 
@@ -10,7 +9,8 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw
 
-from .core import app_config_dir
+from .settings import load_settings, update_setting
+from .settings import settings_path as _settings_path
 
 APPEARANCE_SYSTEM: Final = "system"
 APPEARANCE_LIGHT: Final = "light"
@@ -29,40 +29,15 @@ def normalize_appearance(value: object) -> str:
 
 
 def settings_path() -> Path:
-    return app_config_dir() / SETTINGS_FILE_NAME
+    return _settings_path()
 
 
 def load_appearance_preference() -> str:
-    path = settings_path()
-    if not path.is_file():
-        return DEFAULT_APPEARANCE
-
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return DEFAULT_APPEARANCE
-
-    if not isinstance(payload, dict):
-        return DEFAULT_APPEARANCE
-
-    return normalize_appearance(payload.get(APPEARANCE_KEY))
+    return normalize_appearance(load_settings().get(APPEARANCE_KEY))
 
 
 def save_appearance_preference(appearance: str) -> None:
-    path = settings_path()
-    payload: dict[str, object] = {}
-
-    if path.is_file():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            loaded = {}
-        if isinstance(loaded, dict):
-            payload = loaded
-
-    payload[APPEARANCE_KEY] = normalize_appearance(appearance)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    update_setting(APPEARANCE_KEY, normalize_appearance(appearance))
 
 
 def color_scheme_for_appearance(appearance: str):

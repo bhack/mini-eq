@@ -19,3 +19,7 @@ def test_gnome_shell_extension_metadata_is_publishable() -> None:
 
 def test_gnome_shell_extension_dbus_contract_matches_app() -> None:
     check_gnome_shell_extension.check_dbus_contract()
+
+
+def test_gnome_shell_extension_fake_control_matches_shell_usage() -> None:
+    check_gnome_shell_extension.check_fake_control_contract()

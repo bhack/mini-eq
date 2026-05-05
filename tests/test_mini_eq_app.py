@@ -20,12 +20,17 @@ class FakeWindow:
         self.ui_shutting_down = ui_shutting_down
         self.present_count = 0
         self.close_count = 0
+        self.shutdown_count = 0
 
     def present(self) -> None:
         self.present_count += 1
 
     def close(self) -> None:
         self.close_count += 1
+
+    def begin_close_request_shutdown(self, *, force_quit: bool = False) -> None:
+        del force_quit
+        self.shutdown_count += 1
 
 
 class FakeApplication:
@@ -35,6 +40,12 @@ class FakeApplication:
 
     def quit(self) -> None:
         self.quit_count += 1
+
+    def quit_fully(self) -> None:
+        if self.window is not None and not self.window.ui_shutting_down:
+            self.window.begin_close_request_shutdown(force_quit=True)
+            return
+        self.quit()
 
 
 def test_window_present_idle_skips_window_during_shutdown() -> None:
@@ -87,5 +98,36 @@ def test_quit_action_closes_active_window_before_quitting() -> None:
 
     app.MiniEqApplication.on_quit_action(application, None, None)
 
-    assert window.close_count == 1
+    assert window.shutdown_count == 1
+    assert window.close_count == 0
     assert application.quit_count == 0
+
+
+def test_second_normal_launch_presents_running_instance(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+
+    def fail_acquire():
+        raise app.MiniEqAlreadyRunningError("Mini EQ is already running")
+
+    monkeypatch.setattr(app.MiniEqInstanceGuard, "acquire", fail_acquire)
+    monkeypatch.setattr(app, "call_present_window", lambda: calls.append("present"))
+    args = SimpleNamespace(check_deps=False, install_desktop=False, background=False)
+
+    assert app.run_from_args(args) == 0
+    assert calls == ["present"]
+    assert capsys.readouterr().err == ""
+
+
+def test_second_background_launch_exits_without_presenting(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+
+    def fail_acquire():
+        raise app.MiniEqAlreadyRunningError("Mini EQ is already running")
+
+    monkeypatch.setattr(app.MiniEqInstanceGuard, "acquire", fail_acquire)
+    monkeypatch.setattr(app, "call_present_window", lambda: calls.append("present"))
+    args = SimpleNamespace(check_deps=False, install_desktop=False, background=True)
+
+    assert app.run_from_args(args) == 0
+    assert calls == []
+    assert capsys.readouterr().err == ""

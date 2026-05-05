@@ -18,6 +18,18 @@ BUS_NAME = "io.github.bhack.mini-eq"
 OBJECT_PATH = "/io/github/bhack/mini_eq/Control"
 INTERFACE_NAME = "io.github.bhack.MiniEq.Control"
 ANALYZER_DB_FLOOR = -100.0
+API_VERSION = 1
+APP_VERSION = "dev"
+CAPABILITIES = (
+    "present-window",
+    "quit",
+    "background-mode",
+    "start-at-login",
+    "set-routing",
+    "set-preset",
+    "output-presets",
+    "analyzer-levels",
+)
 
 INTROSPECTION_XML = f"""
 <node>
@@ -38,6 +50,7 @@ INTROSPECTION_XML = f"""
       <arg name="name" type="s" direction="in"/>
     </method>
     <method name="PresentWindow"/>
+    <method name="Quit"/>
     <signal name="StateChanged">
       <arg name="state" type="a{{sv}}"/>
     </signal>
@@ -84,6 +97,7 @@ class FakeMiniEqControl:
         self.eq_enabled = True
         self.routed = True
         self.preset_name = "Studio Reference"
+        self.output_preset_name = "Demo Output Link"
         self.presets = ["Studio Reference", "Flat", "Voice Focus"]
         self.analyzer_levels = [0.0] * 10
         self.animation_step = 0
@@ -96,11 +110,19 @@ class FakeMiniEqControl:
 
     def state(self) -> dict[str, GLib.Variant]:
         return {
+            "api_version": GLib.Variant("u", API_VERSION),
+            "app_version": GLib.Variant("s", APP_VERSION),
+            "capabilities": GLib.Variant("as", CAPABILITIES),
             "running": GLib.Variant("b", True),
             "eq_enabled": GLib.Variant("b", self.eq_enabled),
             "routed": GLib.Variant("b", self.routed),
             "preset_name": GLib.Variant("s", self.preset_name),
             "output_sink": GLib.Variant("s", "Demo Output"),
+            "output_preset_name": GLib.Variant("s", self.output_preset_name),
+            "output_preset_auto_applied": GLib.Variant("b", True),
+            "background_mode": GLib.Variant("b", True),
+            "start_at_login": GLib.Variant("b", False),
+            "window_visible": GLib.Variant("b", False),
         }
 
     def emit_state_changed(self) -> None:
@@ -163,6 +185,9 @@ class FakeMiniEqControl:
             self.emit_state_changed()
         elif method_name == "PresentWindow":
             invocation.return_value(None)
+        elif method_name == "Quit":
+            invocation.return_value(None)
+            GLib.idle_add(lambda: (self.loop.quit(), False)[1])
         else:
             invocation.return_dbus_error(f"{INTERFACE_NAME}.UnknownMethod", method_name)
 
