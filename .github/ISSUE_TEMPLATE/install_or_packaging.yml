@@ -1,0 +1,74 @@
+name: Install or packaging issue
+description: Report install, launch, dependency, Flatpak, AUR, pipx, or source packaging problems.
+title: "[Packaging]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for install and packaging failures. For app behavior after a successful install, use the bug report template.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before opening
+      options:
+        - label: I searched existing issues for a similar report.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - Flathub
+        - AUR
+        - pipx
+        - Source checkout
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: package_version
+    attributes:
+      label: Package or source version
+      placeholder: "0.4.0, AUR pkgver/pkgrel, commit hash, ..."
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution and version
+      placeholder: "Fedora 42, Arch Linux, Ubuntu 24.04, ..."
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Useful for pipx/source installs.
+      placeholder: "python --version"
+    validations:
+      required: false
+  - type: textarea
+    id: command
+    attributes:
+      label: Install or launch command
+      description: Paste the exact command that failed.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: Redact usernames, hostnames, device names, local paths, private preset names, and credentials.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Mention whether GTK, Libadwaita, PipeWire, WirePlumber, and PipeWire JACK are installed when relevant.
+    validations:
+      required: false

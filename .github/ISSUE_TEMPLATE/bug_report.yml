@@ -1,0 +1,104 @@
+name: Bug report
+description: Report a crash, broken behavior, routing issue, analyzer issue, or extension issue.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a Mini EQ bug. Please do not report security vulnerabilities here; use the Security tab and follow SECURITY.md instead.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before opening
+      options:
+        - label: I searched existing issues for a similar report.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected area
+      options:
+        - App UI
+        - PipeWire routing or default output following
+        - WirePlumber integration
+        - Analyzer or loudness monitoring
+        - Presets or AutoEq/Equalizer APO import
+        - GNOME Shell extension
+        - Packaging or installation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mini EQ version
+      description: Run `mini-eq --version` when possible.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - Flathub
+        - AUR
+        - pipx
+        - Source checkout
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution and version
+      placeholder: "Fedora 42, Arch Linux, Ubuntu 24.04, ..."
+    validations:
+      required: true
+  - type: input
+    id: session
+    attributes:
+      label: Desktop/session
+      placeholder: "GNOME Wayland, GNOME X11, KDE Wayland, ..."
+    validations:
+      required: false
+  - type: input
+    id: pipewire_wireplumber
+    attributes:
+      label: PipeWire and WirePlumber versions
+      placeholder: "pipewire --version; wireplumber --version"
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the shortest sequence that triggers the problem.
+      placeholder: |
+        1. Open Mini EQ
+        2. Enable system-wide EQ
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or terminal output
+      description: Redact usernames, hostnames, device names, Bluetooth device names, local paths, private preset names, and credentials.
+      render: shell
+    validations:
+      required: false

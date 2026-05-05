@@ -1,0 +1,59 @@
+name: Feature request
+description: Suggest a new Mini EQ capability, workflow, or integration.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user problem first. Specific use cases are easier to evaluate than broad feature names.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before opening
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Equalizer controls
+        - Analyzer or loudness monitoring
+        - Presets or AutoEq/Equalizer APO import
+        - Per-output behavior
+        - PipeWire routing
+        - GNOME Shell extension
+        - Packaging or distribution
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what makes it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the behavior you would expect from Mini EQ.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Mention workarounds, other tools, or different designs you considered.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Optional screenshots, links, or technical context.
+    validations:
+      required: false
