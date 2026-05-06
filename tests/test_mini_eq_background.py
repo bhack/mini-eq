@@ -14,6 +14,7 @@ def test_background_preferences_default_to_off(tmp_path, monkeypatch) -> None:
 
     assert background.load_background_mode() is False
     assert background.load_start_at_login() is False
+    assert background.load_start_active_at_login() is False
 
 
 def test_background_preferences_round_trip_in_settings_file(tmp_path, monkeypatch) -> None:
@@ -22,12 +23,15 @@ def test_background_preferences_round_trip_in_settings_file(tmp_path, monkeypatc
 
     background.save_background_mode(True)
     background.save_start_at_login(True)
+    background.save_start_active_at_login(True)
 
     assert background.load_background_mode() is True
     assert background.load_start_at_login() is True
+    assert background.load_start_active_at_login() is True
     assert json.loads(settings.settings_path().read_text(encoding="utf-8")) == {
         background.BACKGROUND_MODE_KEY: True,
         background.START_AT_LOGIN_KEY: True,
+        background.START_ACTIVE_AT_LOGIN_KEY: True,
     }
 
 
@@ -40,6 +44,7 @@ def test_invalid_settings_json_keeps_background_preferences_off(tmp_path, monkey
 
     assert background.load_background_mode() is False
     assert background.load_start_at_login() is False
+    assert background.load_start_active_at_login() is False
 
 
 def test_native_autostart_file_creation_and_removal(tmp_path, monkeypatch) -> None:
@@ -53,9 +58,23 @@ def test_native_autostart_file_creation_and_removal(tmp_path, monkeypatch) -> No
     assert 'Exec="/opt/mini-eq/bin/mini-eq" "--background"' in contents
     assert "NoDisplay=true" in contents
 
+    background.set_native_start_at_login(True, executable="/opt/mini-eq/bin/mini-eq", auto_route=True)
+
+    contents = autostart_file.read_text(encoding="utf-8")
+    assert 'Exec="/opt/mini-eq/bin/mini-eq" "--background" "--auto-route"' in contents
+
     background.set_native_start_at_login(False)
 
     assert not autostart_file.exists()
+
+
+def test_background_command_can_start_active() -> None:
+    assert background.mini_eq_background_command("mini-eq") == ["mini-eq", "--background"]
+    assert background.mini_eq_background_command("mini-eq", auto_route=True) == [
+        "mini-eq",
+        "--background",
+        "--auto-route",
+    ]
 
 
 def test_resolve_mini_eq_executable_prefers_path_lookup(monkeypatch) -> None:

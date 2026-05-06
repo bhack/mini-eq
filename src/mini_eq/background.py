@@ -15,6 +15,7 @@ from .settings import load_settings, update_setting
 
 BACKGROUND_MODE_KEY: Final = "background_mode"
 START_AT_LOGIN_KEY: Final = "start_at_login"
+START_ACTIVE_AT_LOGIN_KEY: Final = "start_active_at_login"
 BACKGROUND_PORTAL_REASON: Final = "Keep equalizer settings active for desktop audio."
 BACKGROUND_PORTAL_BUS_NAME: Final = "org.freedesktop.portal.Desktop"
 BACKGROUND_PORTAL_OBJECT_PATH: Final = "/org/freedesktop/portal/desktop"
@@ -51,6 +52,14 @@ def save_start_at_login(enabled: bool) -> None:
     update_setting(START_AT_LOGIN_KEY, bool(enabled))
 
 
+def load_start_active_at_login() -> bool:
+    return normalize_bool(load_settings().get(START_ACTIVE_AT_LOGIN_KEY))
+
+
+def save_start_active_at_login(enabled: bool) -> None:
+    update_setting(START_ACTIVE_AT_LOGIN_KEY, bool(enabled))
+
+
 def running_in_flatpak() -> bool:
     return Path("/.flatpak-info").exists()
 
@@ -80,12 +89,21 @@ def resolve_mini_eq_executable(argv0: str | None = None) -> str:
     raise FileNotFoundError("Could not resolve the mini-eq executable")
 
 
-def native_autostart_command(executable: str | None = None) -> list[str]:
-    return [executable or resolve_mini_eq_executable(), "--background"]
+def mini_eq_background_command(executable: str, *, auto_route: bool = False) -> list[str]:
+    command = [executable, "--background"]
+    if auto_route:
+        command.append("--auto-route")
+    return command
 
 
-def build_native_autostart_desktop_file(command: list[str] | None = None) -> str:
-    exec_line = " ".join(quote_desktop_exec_arg(part) for part in (command or native_autostart_command()))
+def native_autostart_command(executable: str | None = None, *, auto_route: bool = False) -> list[str]:
+    return mini_eq_background_command(executable or resolve_mini_eq_executable(), auto_route=auto_route)
+
+
+def build_native_autostart_desktop_file(command: list[str] | None = None, *, auto_route: bool = False) -> str:
+    exec_line = " ".join(
+        quote_desktop_exec_arg(part) for part in (command or native_autostart_command(auto_route=auto_route))
+    )
     return "\n".join(
         [
             "[Desktop Entry]",
@@ -103,7 +121,7 @@ def build_native_autostart_desktop_file(command: list[str] | None = None) -> str
     )
 
 
-def set_native_start_at_login(enabled: bool, executable: str | None = None) -> None:
+def set_native_start_at_login(enabled: bool, executable: str | None = None, *, auto_route: bool = False) -> None:
     path = autostart_desktop_path()
     if not enabled:
         try:
@@ -114,7 +132,7 @@ def set_native_start_at_login(enabled: bool, executable: str | None = None) -> N
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        build_native_autostart_desktop_file(native_autostart_command(executable)),
+        build_native_autostart_desktop_file(native_autostart_command(executable, auto_route=auto_route)),
         encoding="utf-8",
     )
     path.chmod(0o644)
@@ -141,9 +159,10 @@ def set_background_status(message: str) -> None:
 
 
 class BackgroundPortalRequest:
-    def __init__(self, autostart: bool, callback: PortalCallback) -> None:
+    def __init__(self, autostart: bool, callback: PortalCallback, *, auto_route: bool = False) -> None:
         self.autostart = autostart
         self.callback = callback
+        self.auto_route = auto_route
         self.connection: Gio.DBusConnection | None = None
         self.handle_path = ""
         self.response_subscription_id = 0
@@ -176,7 +195,10 @@ class BackgroundPortalRequest:
             "handle_token": GLib.Variant("s", handle_token),
         }
         if self.autostart:
-            options["commandline"] = GLib.Variant("as", ["mini-eq", "--background"])
+            options["commandline"] = GLib.Variant(
+                "as",
+                mini_eq_background_command("mini-eq", auto_route=self.auto_route),
+            )
 
         self.timeout_source_id = GLib.timeout_add(PORTAL_CALL_TIMEOUT_MS, self.on_timeout)
         self.connection.call(
@@ -247,8 +269,13 @@ class BackgroundPortalRequest:
         self.callback(background_allowed, autostart_enabled, error)
 
 
-def request_background_portal(autostart: bool, callback: PortalCallback) -> BackgroundPortalRequest:
-    request = BackgroundPortalRequest(autostart, callback)
+def request_background_portal(
+    autostart: bool,
+    callback: PortalCallback,
+    *,
+    auto_route: bool = False,
+) -> BackgroundPortalRequest:
+    request = BackgroundPortalRequest(autostart, callback, auto_route=auto_route)
     request.start()
     return request
 
@@ -266,12 +293,13 @@ def request_start_at_login(
     callback: PortalCallback,
     *,
     executable: str | None = None,
+    auto_route: bool = False,
 ) -> BackgroundPortalRequest | None:
     if running_in_flatpak():
-        return request_background_portal(enabled, callback)
+        return request_background_portal(enabled, callback, auto_route=auto_route)
 
     try:
-        set_native_start_at_login(enabled, executable=executable)
+        set_native_start_at_login(enabled, executable=executable, auto_route=auto_route)
     except Exception as exc:
         callback(False, False, exc)
         return None

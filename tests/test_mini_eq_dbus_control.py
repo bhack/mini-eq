@@ -122,6 +122,7 @@ def make_control() -> tuple[dbus_control.MiniEqDbusControl, FakeController, Fake
         window=window,
         background_mode=True,
         start_at_login=False,
+        start_active_at_login=False,
         activate=lambda: None,
         get_dbus_connection=lambda: None,
         present_main_window=lambda: None,
@@ -148,6 +149,7 @@ def test_dbus_control_state_contains_shell_summary() -> None:
         "output_preset_auto_applied": False,
         "background_mode": True,
         "start_at_login": False,
+        "start_active_at_login": False,
         "window_visible": True,
     }
 
@@ -293,6 +295,7 @@ def test_dbus_control_quit_delegates_to_application_full_quit() -> None:
         window=None,
         background_mode=False,
         start_at_login=False,
+        start_active_at_login=False,
         activate=lambda: None,
         get_dbus_connection=lambda: None,
         present_main_window=lambda: None,

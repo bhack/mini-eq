@@ -18,6 +18,7 @@ CAPABILITIES = (
     "quit",
     "background-mode",
     "start-at-login",
+    "start-active-at-login",
     "set-routing",
     "set-preset",
     "output-presets",
@@ -111,6 +112,7 @@ class ApplicationProtocol(Protocol):
     window: WindowProtocol | None
     background_mode: bool
     start_at_login: bool
+    start_active_at_login: bool
 
     def activate(self) -> None: ...
 
@@ -176,6 +178,10 @@ class MiniEqDbusControl:
             ),
             "background_mode": GLib.Variant("b", bool(getattr(self.app, "background_mode", False))),
             "start_at_login": GLib.Variant("b", bool(getattr(self.app, "start_at_login", False))),
+            "start_active_at_login": GLib.Variant(
+                "b",
+                bool(getattr(self.app, "start_active_at_login", False)),
+            ),
             "window_visible": GLib.Variant(
                 "b",
                 bool(

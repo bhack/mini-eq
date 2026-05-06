@@ -103,6 +103,61 @@ def test_quit_action_closes_active_window_before_quitting() -> None:
     assert application.quit_count == 0
 
 
+def test_disabling_start_at_login_clears_start_active_setting(monkeypatch) -> None:
+    saved_start: list[bool] = []
+    saved_active: list[bool] = []
+    calls: list[str] = []
+    application = SimpleNamespace(
+        start_at_login=True,
+        start_active_at_login=True,
+        emit_control_state_changed=lambda: calls.append("state"),
+    )
+    monkeypatch.setattr(app, "save_start_at_login", lambda enabled: saved_start.append(enabled))
+    monkeypatch.setattr(app, "save_start_active_at_login", lambda enabled: saved_active.append(enabled))
+
+    app.MiniEqApplication.set_start_at_login(application, False)
+
+    assert application.start_at_login is False
+    assert application.start_active_at_login is False
+    assert saved_start == [False]
+    assert saved_active == [False]
+    assert calls == ["state"]
+
+
+def test_start_active_at_login_requires_start_at_login(monkeypatch) -> None:
+    saved_active: list[bool] = []
+    calls: list[str] = []
+    application = SimpleNamespace(
+        start_at_login=False,
+        start_active_at_login=False,
+        emit_control_state_changed=lambda: calls.append("state"),
+    )
+    monkeypatch.setattr(app, "save_start_active_at_login", lambda enabled: saved_active.append(enabled))
+
+    app.MiniEqApplication.set_start_active_at_login(application, True)
+
+    assert application.start_active_at_login is False
+    assert saved_active == [False]
+    assert calls == ["state"]
+
+
+def test_start_active_at_login_can_be_saved_when_start_at_login_is_enabled(monkeypatch) -> None:
+    saved_active: list[bool] = []
+    calls: list[str] = []
+    application = SimpleNamespace(
+        start_at_login=True,
+        start_active_at_login=False,
+        emit_control_state_changed=lambda: calls.append("state"),
+    )
+    monkeypatch.setattr(app, "save_start_active_at_login", lambda enabled: saved_active.append(enabled))
+
+    app.MiniEqApplication.set_start_active_at_login(application, True)
+
+    assert application.start_active_at_login is True
+    assert saved_active == [True]
+    assert calls == ["state"]
+
+
 def test_second_normal_launch_presents_running_instance(monkeypatch, capsys) -> None:
     calls: list[str] = []
 

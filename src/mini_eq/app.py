@@ -13,8 +13,10 @@ from gi.repository import Adw, Gio, GLib, GLibUnix
 from .appearance import apply_appearance_preference, load_appearance_preference
 from .background import (
     load_background_mode,
+    load_start_active_at_login,
     load_start_at_login,
     save_background_mode,
+    save_start_active_at_login,
     save_start_at_login,
     set_background_status,
 )
@@ -38,6 +40,7 @@ class MiniEqApplication(Adw.Application):
         self.window_present_source_id = 0
         self.background_mode = load_background_mode() or bool(getattr(args, "background", False))
         self.start_at_login = load_start_at_login()
+        self.start_active_at_login = load_start_active_at_login() and self.start_at_login
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -131,6 +134,14 @@ class MiniEqApplication(Adw.Application):
     def set_start_at_login(self, enabled: bool) -> None:
         self.start_at_login = bool(enabled)
         save_start_at_login(self.start_at_login)
+        if not self.start_at_login and self.start_active_at_login:
+            self.start_active_at_login = False
+            save_start_active_at_login(False)
+        self.emit_control_state_changed()
+
+    def set_start_active_at_login(self, enabled: bool) -> None:
+        self.start_active_at_login = bool(enabled) and self.start_at_login
+        save_start_active_at_login(self.start_active_at_login)
         self.emit_control_state_changed()
 
     def update_background_status(self) -> None:
