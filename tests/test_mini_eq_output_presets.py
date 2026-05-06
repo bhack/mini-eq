@@ -88,6 +88,7 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.saved_preset_signature = controller.state_signature()
         self.default_preset_signature = controller.default_state_signature()
         self.output_preset_auto_applied = False
+        self.output_preset_curve_auto_loaded = False
         self.updating_output_preset_switch = False
         self.selected_band_index = None
         self.visible_band_count = core.DEFAULT_ACTIVE_BANDS
@@ -107,7 +108,10 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.preset_revert_button = FakeButton()
         self.preset_save_button = FakeButton()
         self.preset_save_as_button = FakeButton()
+        self.default_preset_set_button = FakeButton()
+        self.default_preset_clear_button = FakeButton()
         self.output_preset_switch = FakeSwitch()
+        self.default_preset_state_label = FakeLabel()
 
     def set_visible_band_count(self, count: int) -> None:
         self.visible_band_count = count
@@ -156,6 +160,7 @@ def test_initial_output_preset_auto_loads_linked_preset(monkeypatch, tmp_path) -
 
     assert test_window.current_preset_name == "Headphones"
     assert test_window.output_preset_auto_applied is True
+    assert test_window.output_preset_curve_auto_loaded is True
     assert controller.bands[0].gain_db == 2.5
     assert test_window.output_preset_state_label.text == ""
     assert test_window.output_preset_switch.active is True
@@ -175,7 +180,106 @@ def test_output_preset_auto_apply_protects_unsaved_edits(monkeypatch, tmp_path) 
     assert test_window.current_preset_name is None
     assert test_window.output_preset_auto_applied is False
     assert controller.bands[0].gain_db == -4.0
-    assert test_window.statuses[-1] == "Skipped Output Preset: Unsaved Changes"
+    assert test_window.statuses[-1] == "Kept Unsaved Changes"
+
+
+def test_output_change_without_link_resets_previous_auto_preset(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    controller = make_controller("alsa_output.speakers")
+    controller.bands[0].gain_db = 2.5
+    test_window = OutputPresetWindow(controller)
+    test_window.current_preset_name = "Headphones"
+    test_window.saved_preset_signature = controller.state_signature()
+    test_window.visible_band_count = core.MAX_BANDS
+
+    assert test_window.apply_output_preset_for_current_output(reset_auto_preset_without_link=True) is True
+
+    assert test_window.current_preset_name is None
+    assert controller.state_signature() == controller.default_state_signature()
+    assert test_window.visible_band_count == core.DEFAULT_ACTIVE_BANDS
+    assert test_window.output_preset_auto_applied is False
+    assert test_window.output_preset_curve_auto_loaded is False
+    assert test_window.sync_count == 1
+    assert test_window.statuses[-1] == "Reset to Neutral"
+
+
+def test_output_change_without_link_applies_default_preset(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Neutral", -1.5)
+    core.set_default_preset_name("Neutral")
+    controller = make_controller("alsa_output.speakers")
+    controller.bands[0].gain_db = 2.5
+    test_window = OutputPresetWindow(controller)
+    test_window.current_preset_name = "Headphones"
+    test_window.saved_preset_signature = controller.state_signature()
+
+    assert test_window.apply_output_preset_for_current_output(reset_auto_preset_without_link=True) is True
+
+    assert test_window.current_preset_name == "Neutral"
+    assert controller.bands[0].gain_db == -1.5
+    assert test_window.output_preset_auto_applied is False
+    assert test_window.output_preset_curve_auto_loaded is True
+    assert test_window.statuses[-1] == "Applied Default Preset"
+
+
+def test_default_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Neutral", -1.5)
+    core.set_default_preset_name("Neutral")
+    controller = make_controller("alsa_output.speakers")
+    test_window = OutputPresetWindow(controller)
+
+    assert test_window.apply_output_preset_for_current_output() is True
+
+    assert test_window.current_preset_name == "Neutral"
+    assert controller.bands[0].gain_db == -1.5
+    assert test_window.statuses[-1] == "Applied Default Preset"
+
+
+def test_output_change_without_link_keeps_manual_preset(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Neutral", -1.5)
+    core.set_default_preset_name("Neutral")
+    controller = make_controller("alsa_output.speakers")
+    controller.bands[0].gain_db = 2.5
+    test_window = OutputPresetWindow(controller)
+    test_window.current_preset_name = "Manual"
+    test_window.saved_preset_signature = controller.state_signature()
+
+    assert test_window.apply_output_preset_for_current_output(announce_no_output_preset=True) is True
+
+    assert test_window.current_preset_name == "Manual"
+    assert controller.bands[0].gain_db == 2.5
+    assert test_window.sync_count == 0
+    assert test_window.statuses[-1] == "Kept Current Curve"
+
+
+def test_output_change_without_link_keeps_unsaved_auto_preset_edits(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    controller = make_controller("alsa_output.speakers")
+    controller.bands[0].gain_db = 2.5
+    test_window = OutputPresetWindow(controller)
+    test_window.current_preset_name = "Headphones"
+    test_window.saved_preset_signature = controller.state_signature()
+    controller.bands[0].gain_db = 3.5
+
+    assert (
+        test_window.apply_output_preset_for_current_output(
+            reset_auto_preset_without_link=True,
+            announce_no_output_preset=True,
+        )
+        is True
+    )
+
+    assert test_window.current_preset_name == "Headphones"
+    assert controller.bands[0].gain_db == 3.5
+    assert test_window.sync_count == 0
+    assert test_window.statuses[-1] == "Kept Unsaved Changes"
 
 
 def test_deleted_output_preset_link_is_left_clearable(monkeypatch, tmp_path) -> None:
@@ -208,11 +312,40 @@ def test_output_preset_actions_link_and_clear_current_output(monkeypatch, tmp_pa
     assert test_window.output_preset_state_label.text == ""
     assert test_window.output_preset_switch.active is True
 
+    test_window.output_preset_curve_auto_loaded = True
     test_window.on_clear_output_preset_link_clicked(FakeButton())
 
     assert core.get_output_preset_link("alsa_output.headphones") is None
+    assert test_window.output_preset_curve_auto_loaded is False
     assert test_window.output_preset_state_label.text == ""
     assert test_window.output_preset_switch.active is False
+
+
+def test_default_preset_actions_set_and_clear(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Headphones", 2.5)
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+    test_window.refresh_preset_list()
+    test_window.load_library_preset("Headphones")
+
+    test_window.on_use_preset_as_default_clicked(FakeButton())
+
+    assert core.get_default_preset_name() == "Headphones"
+    assert test_window.output_preset_curve_auto_loaded is False
+    assert test_window.default_preset_state_label.text == "Headphones"
+    assert test_window.default_preset_clear_button.sensitive is True
+    assert test_window.statuses[-1] == "Default Preset Set: Headphones"
+
+    test_window.output_preset_curve_auto_loaded = True
+    test_window.on_clear_default_preset_clicked(FakeButton())
+
+    assert core.get_default_preset_name() is None
+    assert test_window.output_preset_curve_auto_loaded is False
+    assert test_window.default_preset_state_label.text == "None"
+    assert test_window.default_preset_clear_button.sensitive is False
+    assert test_window.statuses[-1] == "Cleared Default Preset: Headphones"
 
 
 def test_output_preset_link_state_shows_different_selected_preset(monkeypatch, tmp_path) -> None:
@@ -269,12 +402,14 @@ def test_manual_output_change_runs_output_preset_auto_apply() -> None:
     calls: list[object] = []
     fake_window = SimpleNamespace(
         updating_output_combo=False,
+        output_preset_auto_applied=True,
+        output_preset_curve_auto_loaded=True,
         output_sink_names=[None, "alsa_output.headphones"],
         controller=SimpleNamespace(change_output_sink=lambda sink: calls.append(("change", sink))),
         refresh_output_sinks=lambda *, auto_apply_output_preset=True: calls.append(
             ("refresh", auto_apply_output_preset)
         ),
-        apply_output_preset_for_current_output=lambda: calls.append("auto") or True,
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("auto", kwargs)) or True,
         set_status=lambda message: calls.append(("status", message)),
     )
 
@@ -283,7 +418,31 @@ def test_manual_output_change_runs_output_preset_auto_apply() -> None:
     assert calls == [
         ("change", "alsa_output.headphones"),
         ("refresh", False),
-        "auto",
+        ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
+    ]
+
+
+def test_manual_output_change_uses_auto_loaded_source_for_reset_decision() -> None:
+    calls: list[object] = []
+    fake_window = SimpleNamespace(
+        updating_output_combo=False,
+        output_preset_auto_applied=True,
+        output_preset_curve_auto_loaded=False,
+        output_sink_names=[None, "alsa_output.headphones"],
+        controller=SimpleNamespace(change_output_sink=lambda sink: calls.append(("change", sink))),
+        refresh_output_sinks=lambda *, auto_apply_output_preset=True: calls.append(
+            ("refresh", auto_apply_output_preset)
+        ),
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("auto", kwargs)) or True,
+        set_status=lambda message: calls.append(("status", message)),
+    )
+
+    window.MiniEqWindow.on_output_changed(fake_window, FakeCombo(selected=1), None)
+
+    assert calls == [
+        ("change", "alsa_output.headphones"),
+        ("refresh", False),
+        ("auto", {"reset_auto_preset_without_link": False, "announce_no_output_preset": True}),
     ]
 
 
@@ -298,6 +457,8 @@ def test_system_default_output_change_runs_output_preset_auto_apply() -> None:
             get_sink=lambda _sink_name: None,
         ),
         last_output_preset_sink_name="alsa_output.speakers",
+        output_preset_auto_applied=True,
+        output_preset_curve_auto_loaded=True,
         post_present_ready=True,
         list_visible_output_sinks=lambda: [],
         build_output_sink_labels=lambda _sinks: [],
@@ -310,10 +471,15 @@ def test_system_default_output_change_runs_output_preset_auto_apply() -> None:
         update_preset_state=lambda: calls.append("preset-state"),
         update_info_label=lambda: calls.append("info"),
         update_status_summary=lambda: calls.append("summary"),
-        apply_output_preset_for_current_output=lambda: calls.append("auto"),
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("auto", kwargs)),
     )
 
     window.MiniEqWindow.refresh_output_sinks(fake_window)
 
-    assert calls == ["preset-state", "info", "summary", "auto"]
+    assert calls == [
+        "preset-state",
+        "info",
+        "summary",
+        ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
+    ]
     assert fake_window.last_output_preset_sink_name == "alsa_output.usb"

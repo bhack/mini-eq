@@ -113,6 +113,7 @@ class MiniEqWindow(
         self.saved_preset_signature = self.controller.state_signature()
         self.default_preset_signature = self.controller.default_state_signature()
         self.output_preset_auto_applied = False
+        self.output_preset_curve_auto_loaded = False
         self.updating_output_preset_switch = False
         self.last_output_preset_sink_name: str | None = None
         self.preset_monitor: Gio.FileMonitor | None = None
@@ -155,6 +156,7 @@ class MiniEqWindow(
 
         self.output_combo = Gtk.DropDown(model=self.output_sink_model)
         self.preset_combo = Gtk.DropDown(model=self.preset_model)
+        self.default_preset_state_label = Gtk.Label(xalign=1.0)
         self.mode_combo = create_dropdown_from_strings(MODE_ORDER)
         self.mode_combo.set_sensitive(False)
         self.route_switch = Gtk.Switch()
@@ -665,6 +667,7 @@ class MiniEqWindow(
 
         active = self.controller.output_sink
         previous_output = self.last_output_preset_sink_name
+        previous_output_preset_auto_loaded = self.output_preset_curve_auto_loaded
         default_sink_name = self.controller.get_default_output_sink_name()
         visible_sinks = self.list_visible_output_sinks()
         visible_sink_names = [sink.node_name for sink in visible_sinks if sink.node_name is not None]
@@ -695,7 +698,10 @@ class MiniEqWindow(
         self.update_status_summary()
 
         if self.post_present_ready and auto_apply_output_preset and output_changed:
-            self.apply_output_preset_for_current_output()
+            self.apply_output_preset_for_current_output(
+                reset_auto_preset_without_link=previous_output_preset_auto_loaded,
+                announce_no_output_preset=True,
+            )
 
     def update_info_label(self) -> None:
         return
@@ -727,6 +733,7 @@ class MiniEqWindow(
             imported_count = self.controller.import_apo_preset(path)
             self.selected_band_index = None
             self.set_visible_band_count(imported_count)
+            self.output_preset_curve_auto_loaded = False
             self.sync_ui_from_state()
         except Exception as exc:
             self.set_status(str(exc))
@@ -735,6 +742,7 @@ class MiniEqWindow(
         self.controller.reset_state()
         self.selected_band_index = None
         self.set_visible_band_count(DEFAULT_ACTIVE_BANDS)
+        self.output_preset_curve_auto_loaded = False
         self.sync_ui_from_state()
         self.set_status("Equalizer Reset")
 
@@ -747,18 +755,25 @@ class MiniEqWindow(
             return
 
         sink_name = self.output_sink_names[selected]
+        previous_output_preset_auto_loaded = self.output_preset_curve_auto_loaded
 
         try:
             if sink_name is None:
                 self.controller.follow_system_default_output()
                 self.refresh_output_sinks(auto_apply_output_preset=False)
-                if not self.apply_output_preset_for_current_output():
+                if not self.apply_output_preset_for_current_output(
+                    reset_auto_preset_without_link=previous_output_preset_auto_loaded,
+                    announce_no_output_preset=True,
+                ):
                     self.set_status("Output Target Set to System Default")
                 return
 
             self.controller.change_output_sink(sink_name)
             self.refresh_output_sinks(auto_apply_output_preset=False)
-            if not self.apply_output_preset_for_current_output():
+            if not self.apply_output_preset_for_current_output(
+                reset_auto_preset_without_link=previous_output_preset_auto_loaded,
+                announce_no_output_preset=True,
+            ):
                 self.set_status("Output Target Updated")
         except Exception as exc:
             self.set_status(str(exc))

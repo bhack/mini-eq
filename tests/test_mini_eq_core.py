@@ -83,6 +83,7 @@ def test_output_preset_links_roundtrip_and_sanitize_values(monkeypatch: pytest.M
         "alsa_output.speakers": "Headphones",
         "alsa_output.usb": "USB",
     }
+    assert core.get_default_preset_name() is None
 
     payload = json.loads(links_path.read_text(encoding="utf-8"))
     assert payload == {
@@ -131,6 +132,19 @@ def test_clear_output_preset_link_keeps_other_outputs(monkeypatch: pytest.Monkey
     assert core.clear_output_preset_link("alsa_output.speakers") == "Speakers"
     assert core.load_output_preset_links() == {"alsa_output.usb": "USB"}
     assert core.clear_output_preset_link("missing") is None
+
+
+def test_default_preset_roundtrip_preserves_output_links(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    core.set_output_preset_link("alsa_output.speakers", "Speakers")
+
+    assert core.set_default_preset_name("../Neutral...") == "Neutral"
+    assert core.get_default_preset_name() == "Neutral"
+    assert core.load_output_preset_links() == {"alsa_output.speakers": "Speakers"}
+
+    assert core.clear_default_preset_name() == "Neutral"
+    assert core.get_default_preset_name() is None
+    assert core.load_output_preset_links() == {"alsa_output.speakers": "Speakers"}
 
 
 def test_delete_preset_file_removes_only_named_storage_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 - 2026-05-06
+
+- Add a Default Preset fallback for outputs that do not have their own linked
+  preset.
+- Reset to neutral only when changing away from an auto-applied output preset
+  and the new output has no linked preset or default fallback.
+- Keep manual preset choices and unsaved curve edits when the selected output
+  has no linked preset.
+- Add a Start Active at Login option so startup routing can automatically apply
+  the EQ path.
+- Improve analyzer band resolution and preset-state refresh after preamp edits.
+
 ## 0.4.0 - 2026-05-05
 
 - Add opt-in background mode so closing the window can keep Mini EQ active.

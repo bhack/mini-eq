@@ -343,10 +343,18 @@ def normalize_output_preset_links(links: dict[object, object]) -> dict[str, str]
     return normalized
 
 
-def load_output_preset_links() -> dict[str, str]:
+def normalize_default_preset_name(preset_name: object) -> str | None:
+    if preset_name is None:
+        return None
+
+    default_preset = sanitize_preset_name(str(preset_name))
+    return default_preset or None
+
+
+def load_output_preset_config() -> tuple[dict[str, str], str | None]:
     links_path = output_preset_links_path()
     if not links_path.exists():
-        return {}
+        return {}, None
 
     try:
         payload = json.loads(links_path.read_text(encoding="utf-8"))
@@ -364,18 +372,31 @@ def load_output_preset_links() -> dict[str, str]:
     if not isinstance(links, dict):
         raise ValueError("output preset links file does not contain a valid links object")
 
-    return normalize_output_preset_links(links)
+    return normalize_output_preset_links(links), normalize_default_preset_name(payload.get("default"))
 
 
-def write_output_preset_links(links: dict[str, str]) -> None:
+def load_output_preset_links() -> dict[str, str]:
+    links, _default_preset = load_output_preset_config()
+    return links
+
+
+def write_output_preset_config(links: dict[str, str], default_preset_name: str | None = None) -> None:
     normalized = dict(sorted(normalize_output_preset_links(links).items(), key=lambda item: item[0].casefold()))
     payload = {
         "version": OUTPUT_PRESET_LINKS_VERSION,
         "links": normalized,
     }
+    default_preset = normalize_default_preset_name(default_preset_name)
+    if default_preset is not None:
+        payload["default"] = default_preset
+
     links_path = output_preset_links_path()
     links_path.parent.mkdir(parents=True, exist_ok=True)
     links_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def write_output_preset_links(links: dict[str, str]) -> None:
+    write_output_preset_config(links)
 
 
 def get_output_preset_link(sink_name: str | None) -> str | None:
@@ -383,7 +404,13 @@ def get_output_preset_link(sink_name: str | None) -> str | None:
     if not output_key:
         return None
 
-    return load_output_preset_links().get(output_key)
+    links, _default_preset = load_output_preset_config()
+    return links.get(output_key)
+
+
+def get_default_preset_name() -> str | None:
+    _links, default_preset = load_output_preset_config()
+    return default_preset
 
 
 def set_output_preset_link(sink_name: str, preset_name: str) -> str:
@@ -395,9 +422,9 @@ def set_output_preset_link(sink_name: str, preset_name: str) -> str:
     if not linked_preset:
         raise ValueError("preset name is empty")
 
-    links = load_output_preset_links()
+    links, default_preset = load_output_preset_config()
     links[output_key] = linked_preset
-    write_output_preset_links(links)
+    write_output_preset_config(links, default_preset)
     return linked_preset
 
 
@@ -406,10 +433,26 @@ def clear_output_preset_link(sink_name: str | None) -> str | None:
     if not output_key:
         return None
 
-    links = load_output_preset_links()
+    links, default_preset = load_output_preset_config()
     removed = links.pop(output_key, None)
-    write_output_preset_links(links)
+    write_output_preset_config(links, default_preset)
     return removed
+
+
+def set_default_preset_name(preset_name: str) -> str:
+    default_preset = normalize_default_preset_name(preset_name)
+    if default_preset is None:
+        raise ValueError("preset name is empty")
+
+    links, _previous_default = load_output_preset_config()
+    write_output_preset_config(links, default_preset)
+    return default_preset
+
+
+def clear_default_preset_name() -> str | None:
+    links, previous_default = load_output_preset_config()
+    write_output_preset_config(links)
+    return previous_default
 
 
 def load_mini_eq_preset_file(path: str | Path) -> dict[str, object]:

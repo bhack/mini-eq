@@ -58,6 +58,18 @@ class MiniEqWindowUtilityPaneMixin:
         output_preset_row.append(self.output_preset_switch)
         preset_section.append(output_preset_row)
 
+        self.default_preset_state_label.set_hexpand(True)
+        self.default_preset_state_label.add_css_class("dim-label")
+        self.default_preset_state_label.set_ellipsize(Pango.EllipsizeMode.END)
+        set_accessible_label(self.default_preset_state_label, "Default Preset Status")
+
+        default_preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        default_preset_row.add_css_class("utility-row")
+        default_preset_label = Gtk.Label(label="Default Preset", xalign=0.0)
+        default_preset_row.append(default_preset_label)
+        default_preset_row.append(self.default_preset_state_label)
+        preset_section.append(default_preset_row)
+
         self.preset_save_button = Gtk.Button(label="Save")
         self.preset_save_button.set_can_shrink(True)
         self.preset_save_button.add_css_class("toolbar-button")
@@ -93,6 +105,18 @@ class MiniEqWindowUtilityPaneMixin:
         self.preset_revert_button.set_tooltip_text("Loaded Preset")
         connect_preset_action(self.preset_revert_button, self.on_preset_revert_clicked)
         preset_more_box.append(self.preset_revert_button)
+
+        append_preset_separator()
+
+        self.default_preset_set_button = Gtk.Button(label="Use Selected as Default")
+        self.default_preset_set_button.add_css_class("popover-action")
+        connect_preset_action(self.default_preset_set_button, self.on_use_preset_as_default_clicked)
+        preset_more_box.append(self.default_preset_set_button)
+
+        self.default_preset_clear_button = Gtk.Button(label="Clear Default")
+        self.default_preset_clear_button.add_css_class("popover-action")
+        connect_preset_action(self.default_preset_clear_button, self.on_clear_default_preset_clicked)
+        preset_more_box.append(self.default_preset_clear_button)
 
         append_preset_separator()
 
