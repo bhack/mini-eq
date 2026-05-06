@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from tests._mini_eq_imports import import_mini_eq_module
 
 core = import_mini_eq_module("core")
@@ -28,6 +30,14 @@ class FakeSwitch:
 
     def get_active(self) -> bool:
         return self.active
+
+
+class FakeScale:
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    def get_value(self) -> float:
+        return self.value
 
 
 class FocusSummaryWindow(window_graph.MiniEqWindowGraphMixin):
@@ -68,3 +78,21 @@ def test_focus_summary_handles_no_selected_band() -> None:
     assert window.focus_label.text == "No band selected"
     assert window.band_count_label.visible is False
     assert window.inspector_summary_label.text == "No Band"
+
+
+def test_preamp_change_refreshes_preset_metadata() -> None:
+    calls: list[object] = []
+    controller = SimpleNamespace(set_preamp_db=lambda value: calls.append(("preamp", value)))
+    test_window = SimpleNamespace(
+        updating_ui=False,
+        preamp_label=FakeLabel(),
+        controller=controller,
+        invalidate_graph_response_cache=lambda: calls.append("invalidate"),
+        queue_response_draw=lambda: calls.append("draw"),
+        schedule_curve_metadata_refresh=lambda: calls.append("metadata"),
+    )
+
+    window_graph.MiniEqWindowGraphMixin.on_preamp_changed(test_window, FakeScale(-3.5))
+
+    assert test_window.preamp_label.text == "-3.5 dB"
+    assert calls == [("preamp", -3.5), "invalidate", "draw", "metadata"]

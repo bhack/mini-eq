@@ -347,9 +347,9 @@ class MiniEqWindowGraphMixin:
             return
 
         self.controller.set_preamp_db(value)
-        self.update_status_summary()
         self.invalidate_graph_response_cache()
         self.queue_response_draw()
+        self.schedule_curve_metadata_refresh()
 
     def on_band_card_pressed(
         self, gesture: Gtk.GestureClick, _press_count: int, _x: float, _y: float, index: int
