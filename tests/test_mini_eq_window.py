@@ -190,3 +190,48 @@ def test_on_route_changed_resets_switch_when_routing_fails() -> None:
     assert route_switch.get_active() is False
     assert fake_window.updating_ui is False
     assert ("status", "metadata permission denied") in calls
+
+
+def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
+    calls: list[object] = []
+    controller = SimpleNamespace(eq_enabled=False, routed=False)
+
+    def route_system_audio(enabled: bool) -> None:
+        calls.append(("route", enabled))
+        controller.eq_enabled = True
+        controller.routed = enabled
+
+    controller.route_system_audio = route_system_audio
+
+    fake_window = SimpleNamespace(
+        updating_ui=False,
+        controller=controller,
+        bypass_switch=FakeSwitch(False),
+        update_eq_power_indicator=lambda: calls.append("power"),
+        update_info_label=lambda: calls.append("info"),
+        update_status_summary=lambda: calls.append("summary"),
+        update_focus_summary=lambda: calls.append("focus"),
+        invalidate_graph_response_cache=lambda: calls.append("invalidate"),
+        queue_graph_draw=lambda: calls.append("draw"),
+        update_preset_state=lambda: calls.append("preset-state"),
+        set_status=lambda message: calls.append(("status", message)),
+        notify_control_state_changed=lambda: calls.append("notify"),
+    )
+    route_switch = FakeSwitch(True)
+
+    window.MiniEqWindow.on_route_changed(fake_window, route_switch, None)
+
+    assert fake_window.bypass_switch.get_active() is True
+    assert fake_window.updating_ui is False
+    assert calls == [
+        ("route", True),
+        "power",
+        "info",
+        "summary",
+        "focus",
+        "invalidate",
+        "draw",
+        "preset-state",
+        ("status", "System-wide EQ On"),
+        "notify",
+    ]

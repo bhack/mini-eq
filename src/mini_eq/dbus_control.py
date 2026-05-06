@@ -265,12 +265,8 @@ class MiniEqDbusControl:
 
         eq_was_enabled = controller.eq_enabled
         try:
-            if not controller.eq_enabled:
-                controller.set_eq_enabled(True)
             controller.route_system_audio(enabled)
         except Exception:
-            if controller.eq_enabled != eq_was_enabled:
-                controller.set_eq_enabled(eq_was_enabled)
             if window is not None and not window.ui_shutting_down:
                 window.updating_ui = True
                 try:

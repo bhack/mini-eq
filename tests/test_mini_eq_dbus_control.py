@@ -24,7 +24,14 @@ class FakeController:
         self.enabled_values.append(enabled)
 
     def route_system_audio(self, enabled: bool) -> None:
+        eq_enabled_for_route = False
+        if enabled and not self.eq_enabled:
+            self.set_eq_enabled(True)
+            eq_enabled_for_route = True
+
         if self.route_error is not None:
+            if eq_enabled_for_route:
+                self.set_eq_enabled(False)
             raise self.route_error
         self.routed = enabled
         self.routed_values.append(enabled)

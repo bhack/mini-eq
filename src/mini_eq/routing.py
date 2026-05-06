@@ -365,21 +365,37 @@ class SystemWideEqController:
         if refresh_output:
             self.refresh_followed_output_sink()
 
-        stream_router = self.ensure_stream_router()
+        eq_enabled_for_route = False
+        try:
+            if enabled:
+                if not self.running or self.filter_node_id is None:
+                    raise RuntimeError("filter-chain PipeWire EQ is not ready")
+                if not self.eq_enabled:
+                    eq_enabled_for_route = True
+                    self.set_eq_enabled(True)
 
-        if enabled and not self.routed:
-            stream_router.enable()
-            self.routed = True
-            if announce:
-                self.emit_status(f"system audio routed to {self.virtual_sink_name}")
-            return
+            stream_router = self.ensure_stream_router()
 
-        if not enabled and self.routed:
-            stream_router.disable(announce=announce)
-            self.routed = False
-            if announce:
-                self.emit_status("system audio routing disabled")
-            return
+            if enabled and not self.routed:
+                stream_router.enable()
+                self.routed = True
+                if announce:
+                    self.emit_status(f"system audio routed to {self.virtual_sink_name}")
+                return
+
+            if not enabled and self.routed:
+                stream_router.disable(announce=announce)
+                self.routed = False
+                if announce:
+                    self.emit_status("system audio routing disabled")
+                return
+        except Exception:
+            if eq_enabled_for_route:
+                try:
+                    self.set_eq_enabled(False)
+                except Exception:
+                    pass
+            raise
 
     def build_default_bands(self) -> list[EqBand]:
         return default_eq_bands()

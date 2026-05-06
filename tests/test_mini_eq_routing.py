@@ -545,6 +545,140 @@ def test_route_system_audio_does_not_enable_during_shutdown() -> None:
     assert controller.routed is False
 
 
+def test_route_system_audio_requires_ready_engine_before_enabling() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.shutting_down = False
+    controller.running = False
+    controller.filter_node_id = None
+    controller.routed = False
+    controller.eq_enabled = True
+    calls: list[str] = []
+
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.ensure_stream_router = lambda: calls.append("router")
+
+    with pytest.raises(RuntimeError, match="filter-chain PipeWire EQ is not ready"):
+        routing.SystemWideEqController.route_system_audio(controller, True)
+
+    assert calls == ["refresh"]
+    assert controller.routed is False
+
+
+def test_route_system_audio_enables_eq_before_routing() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.shutting_down = False
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.routed = False
+    controller.eq_enabled = False
+    controller.virtual_sink_name = "mini_eq_sink"
+    calls: list[str] = []
+
+    class FakeRouter:
+        def enable(self) -> None:
+            calls.append("enable")
+
+    def set_eq_enabled(enabled: bool) -> None:
+        calls.append(f"eq:{enabled}")
+        controller.eq_enabled = enabled
+
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.set_eq_enabled = set_eq_enabled
+    controller.ensure_stream_router = lambda: calls.append("router") or FakeRouter()
+    controller.emit_status = lambda message: calls.append(f"status:{message}")
+
+    routing.SystemWideEqController.route_system_audio(controller, True)
+
+    assert calls == [
+        "refresh",
+        "eq:True",
+        "router",
+        "enable",
+        "status:system audio routed to mini_eq_sink",
+    ]
+    assert controller.eq_enabled is True
+    assert controller.routed is True
+
+
+def test_route_system_audio_restores_eq_when_route_enable_fails() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.shutting_down = False
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.routed = False
+    controller.eq_enabled = False
+    calls: list[str] = []
+
+    class FailingRouter:
+        def enable(self) -> None:
+            calls.append("enable")
+            raise RuntimeError("route failed")
+
+    def set_eq_enabled(enabled: bool) -> None:
+        calls.append(f"eq:{enabled}")
+        controller.eq_enabled = enabled
+
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.set_eq_enabled = set_eq_enabled
+    controller.ensure_stream_router = lambda: calls.append("router") or FailingRouter()
+
+    with pytest.raises(RuntimeError, match="route failed"):
+        routing.SystemWideEqController.route_system_audio(controller, True)
+
+    assert calls == ["refresh", "eq:True", "router", "enable", "eq:False"]
+    assert controller.eq_enabled is False
+    assert controller.routed is False
+
+
+def test_route_system_audio_restores_eq_when_engine_enable_fails() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.shutting_down = False
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.routed = False
+    controller.eq_enabled = False
+    calls: list[str] = []
+
+    def set_eq_enabled(enabled: bool) -> None:
+        calls.append(f"eq:{enabled}")
+        controller.eq_enabled = enabled
+        if enabled:
+            raise RuntimeError("control update failed")
+
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.set_eq_enabled = set_eq_enabled
+    controller.ensure_stream_router = lambda: calls.append("router")
+
+    with pytest.raises(RuntimeError, match="control update failed"):
+        routing.SystemWideEqController.route_system_audio(controller, True)
+
+    assert calls == ["refresh", "eq:True", "eq:False"]
+    assert controller.eq_enabled is False
+    assert controller.routed is False
+
+
+def test_route_system_audio_can_disable_when_engine_is_not_ready() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.shutting_down = False
+    controller.running = False
+    controller.filter_node_id = None
+    controller.routed = True
+    calls: list[str] = []
+
+    class FakeRouter:
+        def disable(self, announce: bool = True) -> None:
+            calls.append(f"disable:{announce}")
+
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.ensure_stream_router = lambda: calls.append("router") or FakeRouter()
+    controller.emit_status = lambda message: calls.append(f"status:{message}")
+
+    routing.SystemWideEqController.route_system_audio(controller, False)
+
+    assert calls == ["refresh", "router", "disable:True", "status:system audio routing disabled"]
+    assert controller.routed is False
+
+
 def test_emit_status_is_silent_during_shutdown(capsys: pytest.CaptureFixture[str]) -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.shutting_down = True

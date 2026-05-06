@@ -784,16 +784,14 @@ class MiniEqWindow(
         route_changed = False
 
         try:
-            if not self.controller.eq_enabled:
-                self.controller.set_eq_enabled(True)
-                self.updating_ui = True
-                try:
-                    self.bypass_switch.set_active(True)
-                finally:
-                    self.updating_ui = False
-
             self.controller.route_system_audio(enabled)
             route_changed = True
+            if self.controller.eq_enabled != eq_was_enabled:
+                self.updating_ui = True
+                try:
+                    self.bypass_switch.set_active(self.controller.eq_enabled)
+                finally:
+                    self.updating_ui = False
         except Exception as exc:
             self.updating_ui = True
             try:
