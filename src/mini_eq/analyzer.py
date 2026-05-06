@@ -49,8 +49,8 @@ ANALYZER_BIN_COUNT = len(ANALYZER_BAND_FREQUENCIES)
 ANALYZER_DB_FLOOR = -100.0
 ANALYZER_INTERVAL_MS = 33
 ANALYZER_FFT_WINDOW_SECONDS = 0.085
-ANALYZER_FFT_MIN_SIZE = 4096
-ANALYZER_FFT_MAX_SIZE = 16384
+ANALYZER_FFT_MIN_SIZE = 8192
+ANALYZER_FFT_MAX_SIZE = 32768
 ANALYZER_SAMPLE_WIDTH_BYTES = 4
 ANALYZER_QUEUE_WAIT_SECONDS = 0.005
 ANALYZER_READER_JOIN_TIMEOUT_SECONDS = 0.2
@@ -261,57 +261,50 @@ def analyzer_fft_amplitude_normalizer(fft_size: int) -> float:
 
 
 @lru_cache(maxsize=64)
-def analyzer_fft_band_bin_ranges(
-    fft_size: int,
-    sample_rate: float,
-    center_frequencies: tuple[float, ...] = ANALYZER_BAND_FREQUENCIES,
-) -> tuple[tuple[int, int], ...]:
-    np = require_numpy()
-    size = max(2, int(fft_size))
-    frequencies = np.fft.rfftfreq(size, 1.0 / max(1.0, float(sample_rate)))
-    edges = analyzer_band_edges(center_frequencies)
-    ranges: list[tuple[int, int]] = []
-
-    for index, center in enumerate(center_frequencies):
-        left = edges[index]
-        right = edges[index + 1]
-        start = int(np.searchsorted(frequencies, left, side="left"))
-        stop_side = "right" if index == len(center_frequencies) - 1 else "left"
-        stop = int(np.searchsorted(frequencies, right, side=stop_side))
-        start = max(1, start)
-
-        if stop <= start:
-            nearest = int(np.abs(frequencies - center).argmin())
-            start = max(1, nearest)
-            stop = min(len(frequencies), start + 1)
-
-        ranges.append((start, stop))
-
-    return tuple(ranges)
-
-
-@lru_cache(maxsize=64)
-def analyzer_fft_band_reduce_indexes(
+def analyzer_fft_band_overlap_weights(
     fft_size: int,
     sample_rate: float,
     center_frequencies: tuple[float, ...] = ANALYZER_BAND_FREQUENCIES,
 ):
     np = require_numpy()
-    ranges = analyzer_fft_band_bin_ranges(fft_size, sample_rate, center_frequencies)
-    if not ranges:
-        indexes = np.array([], dtype=np.intp)
-        offsets = np.array([], dtype=np.intp)
-    else:
-        lengths = np.array([stop - start for start, stop in ranges], dtype=np.intp)
-        offsets = np.empty(len(lengths), dtype=np.intp)
-        offsets[0] = 0
-        if len(lengths) > 1:
-            np.cumsum(lengths[:-1], out=offsets[1:])
-        indexes = np.concatenate([np.arange(start, stop, dtype=np.intp) for start, stop in ranges])
+    size = max(2, int(fft_size))
+    sample_rate_hz = max(1.0, float(sample_rate))
+    band_count = len(center_frequencies)
+    frequencies = np.fft.rfftfreq(size, 1.0 / sample_rate_hz)
+    if band_count == 0 or len(frequencies) == 0:
+        band_indexes = np.array([], dtype=np.intp)
+        bin_indexes = np.array([], dtype=np.intp)
+        weights = np.array([], dtype=np.float64)
+        band_indexes.setflags(write=False)
+        bin_indexes.setflags(write=False)
+        weights.setflags(write=False)
+        return band_indexes, bin_indexes, weights, band_count
 
-    indexes.setflags(write=False)
-    offsets.setflags(write=False)
-    return indexes, offsets
+    bin_width = max(sample_rate_hz / size, 1e-12)
+    bin_left = frequencies - (bin_width * 0.5)
+    bin_right = frequencies + (bin_width * 0.5)
+    bin_left[0] = 0.0
+    bin_right[-1] = min(sample_rate_hz * 0.5, bin_right[-1])
+    bin_widths = np.maximum(bin_right - bin_left, 1e-12)
+
+    edges = np.asarray(analyzer_band_edges(center_frequencies), dtype=np.float64)
+    nyquist = sample_rate_hz * 0.5
+    band_left = np.clip(edges[:-1], 0.0, nyquist)
+    band_right = np.clip(edges[1:], 0.0, nyquist)
+
+    overlap_left = np.maximum(band_left[:, None], bin_left[None, :])
+    overlap_right = np.minimum(band_right[:, None], bin_right[None, :])
+    overlaps = np.maximum(0.0, overlap_right - overlap_left)
+    band_indexes, bin_indexes = np.nonzero(overlaps > 0.0)
+    weights = overlaps[band_indexes, bin_indexes] / bin_widths[bin_indexes]
+
+    band_indexes = band_indexes.astype(np.intp, copy=False)
+    bin_indexes = bin_indexes.astype(np.intp, copy=False)
+    weights = weights.astype(np.float64, copy=False)
+    band_indexes.setflags(write=False)
+    bin_indexes.setflags(write=False)
+    weights.setflags(write=False)
+    return band_indexes, bin_indexes, weights, band_count
 
 
 def samples_to_log_band_powers(
@@ -335,11 +328,19 @@ def samples_to_log_band_powers(
     if len(bin_powers) > 0:
         bin_powers[0] = 0.0
 
-    indexes, offsets = analyzer_fft_band_reduce_indexes(size, sample_rate, center_frequencies)
-    if len(indexes) == 0:
+    band_indexes, bin_indexes, weights, band_count = analyzer_fft_band_overlap_weights(
+        size,
+        sample_rate,
+        center_frequencies,
+    )
+    if band_count == 0:
         return ()
 
-    band_powers = np.add.reduceat(bin_powers[indexes], offsets)
+    if len(bin_indexes) == 0:
+        return (0.0,) * band_count
+
+    weighted_bin_powers = bin_powers[bin_indexes] * weights
+    band_powers = np.bincount(band_indexes, weights=weighted_bin_powers, minlength=band_count)
     return tuple(float(power) for power in band_powers)
 
 

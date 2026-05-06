@@ -74,9 +74,11 @@ def test_analyzer_frame_count_uses_fixed_update_interval() -> None:
 
 
 def test_analyzer_fft_size_uses_power_of_two_window() -> None:
-    assert analyzer.analyzer_fft_size() == 4096
-    assert analyzer.analyzer_fft_size(44100.0) == 4096
+    assert analyzer.analyzer_fft_size() == 8192
+    assert analyzer.analyzer_fft_size(44100.0) == 8192
     assert analyzer.analyzer_fft_size(96000.0) == 8192
+    assert analyzer.analyzer_fft_size(192000.0) == 16384
+    assert analyzer.analyzer_fft_size(384000.0) == 32768
 
 
 def test_analyzer_smoothing_alpha_uses_sample_rate_time_constant() -> None:
@@ -113,7 +115,26 @@ def test_samples_to_log_band_powers_use_fft_log_band_energy() -> None:
     assert bands[loudest_index] > bands[0] * 100.0
 
 
-def test_samples_to_log_band_powers_match_direct_band_sums() -> None:
+def test_analyzer_fft_band_overlap_weights_split_boundary_bins() -> None:
+    band_indexes, bin_indexes, weights, band_count = analyzer.analyzer_fft_band_overlap_weights(
+        8,
+        8.0,
+        (2.0,),
+    )
+
+    assert band_count == 1
+    assert band_indexes.tolist() == [0, 0, 0]
+    assert bin_indexes.tolist() == [1, 2, 3]
+    assert weights.tolist() == pytest.approx(
+        [
+            1.5 - (2.0 / math.sqrt(2.0)),
+            1.0,
+            (2.0 * math.sqrt(2.0)) - 2.5,
+        ]
+    )
+
+
+def test_samples_to_log_band_powers_match_weighted_band_overlap() -> None:
     fft_size = analyzer.analyzer_fft_size()
     samples = array(
         "f",
@@ -130,12 +151,17 @@ def test_samples_to_log_band_powers_match_direct_band_sums() -> None:
     amplitude_normalizer = max(float(window.sum()) / 2.0, 1e-12)
     bin_powers = (np.abs(np.fft.rfft(fft_samples * window)) / amplitude_normalizer) ** 2
     bin_powers[0] = 0.0
-    expected = tuple(
-        float(bin_powers[start:stop].sum())
-        for start, stop in analyzer.analyzer_fft_band_bin_ranges(fft_size, analyzer.SAMPLE_RATE)
+    band_indexes, bin_indexes, weights, band_count = analyzer.analyzer_fft_band_overlap_weights(
+        fft_size,
+        analyzer.SAMPLE_RATE,
+    )
+    expected = np.bincount(
+        band_indexes,
+        weights=bin_powers[bin_indexes] * weights,
+        minlength=band_count,
     )
 
-    assert analyzer.samples_to_log_band_powers(samples, fft_size=fft_size) == pytest.approx(expected)
+    assert analyzer.samples_to_log_band_powers(samples, fft_size=fft_size) == pytest.approx(tuple(expected))
 
 
 def test_samples_to_log_band_db_values_detects_sine_frequency() -> None:
