@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 - 2026-05-07
+
+- Keep routing, EQ, analyzer, and output-preset switches synchronized with
+  confirmed state after errors and D-Bus control calls.
+- Retarget the running PipeWire filter-chain output when the selected output
+  changes, avoiding a full engine restart when WirePlumber can move the stream.
+- Pause routed stream monitoring during engine restarts and restore streams
+  before routing them through the restarted EQ path.
+- Improve headroom meter range, peak formatting, and compact label stability.
+
 ## 0.5.0 - 2026-05-06
 
 - Add a Default Preset fallback for outputs that do not have their own linked
