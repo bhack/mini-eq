@@ -24,12 +24,19 @@ class FakeSwitch(FakeButton):
     def __init__(self) -> None:
         super().__init__()
         self.active = False
+        self.state = False
 
     def get_active(self) -> bool:
         return self.active
 
     def set_active(self, active: bool) -> None:
         self.active = active
+
+    def get_state(self) -> bool:
+        return self.state
+
+    def set_state(self, state: bool) -> None:
+        self.state = state
 
 
 class FakeLabel:
@@ -374,10 +381,12 @@ def test_output_preset_link_toggle_clears_different_selected_preset(monkeypatch,
     test_window.update_output_preset_state()
 
     test_window.output_preset_switch.set_active(False)
-    test_window.on_output_preset_switch_changed(test_window.output_preset_switch)
+    handled = test_window.on_output_preset_switch_changed(test_window.output_preset_switch)
 
+    assert handled is True
     assert core.get_output_preset_link("alsa_output.headphones") is None
     assert test_window.output_preset_switch.active is False
+    assert test_window.output_preset_switch.state is False
 
 
 def test_output_preset_link_toggle_links_and_clears_current_output(monkeypatch, tmp_path) -> None:
@@ -388,14 +397,17 @@ def test_output_preset_link_toggle_links_and_clears_current_output(monkeypatch, 
     test_window.current_preset_name = "Headphones"
 
     test_window.output_preset_switch.set_active(True)
-    test_window.on_output_preset_switch_changed(test_window.output_preset_switch)
+    handled = test_window.on_output_preset_switch_changed(test_window.output_preset_switch)
 
+    assert handled is True
     assert core.get_output_preset_link("alsa_output.headphones") == "Headphones"
+    assert test_window.output_preset_switch.state is True
 
     test_window.output_preset_switch.set_active(False)
     test_window.on_output_preset_switch_changed(test_window.output_preset_switch)
 
     assert core.get_output_preset_link("alsa_output.headphones") is None
+    assert test_window.output_preset_switch.state is False
 
 
 def test_manual_output_change_runs_output_preset_auto_apply() -> None:
@@ -462,7 +474,7 @@ def test_system_default_output_change_runs_output_preset_auto_apply() -> None:
         post_present_ready=True,
         list_visible_output_sinks=lambda: [],
         build_output_sink_labels=lambda _sinks: [],
-        follow_default_output_label=lambda: "System default",
+        follow_default_output_label=lambda: "Follow system output",
         output_sink_names=[],
         output_sink_labels=[],
         output_sink_model=FakeModel(),

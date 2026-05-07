@@ -29,6 +29,7 @@ from .core import (
     total_response_db,
     total_response_db_at_frequencies,
 )
+from .window_utils import set_switch_confirmed_state
 
 ENGINE_CONTROL_REFRESH_INTERVAL_MS = 16
 FOCUS_BLUE = (0.47, 0.72, 1.0)
@@ -288,10 +289,10 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
 
         try:
-            self.bypass_switch.set_active(self.controller.eq_enabled)
+            set_switch_confirmed_state(self.bypass_switch, self.controller.eq_enabled)
             self.update_eq_power_indicator()
-            self.analyzer_switch.set_active(self.analyzer_enabled)
-            self.analyzer_freeze_switch.set_active(self.analyzer_frozen)
+            set_switch_confirmed_state(self.analyzer_switch, self.analyzer_enabled)
+            set_switch_confirmed_state(self.analyzer_freeze_switch, self.analyzer_frozen)
             self.analyzer_state_label.set_text(
                 "Frozen"
                 if self.analyzer_frozen and self.analyzer_enabled

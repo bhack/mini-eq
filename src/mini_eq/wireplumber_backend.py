@@ -399,6 +399,20 @@ class WirePlumberBackend:
 
         return None
 
+    def output_stream_by_name(self, node_name: str) -> WirePlumberNode | None:
+        for stream in self.list_output_streams():
+            if stream.node_name == node_name:
+                return stream
+
+        return None
+
+    def move_named_output_stream_to_target(self, stream_node_name: str, target_node_name: str) -> None:
+        stream = self.output_stream_by_name(stream_node_name)
+        if stream is None:
+            raise WirePlumberError(f"output stream not found: {stream_node_name}")
+
+        self.move_stream_to_target(stream.bound_id, target_node_name)
+
     def audio_sink_by_name(self, node_name: str) -> WirePlumberNode | None:
         for sink in self.list_audio_sinks():
             if sink.node_name == node_name:

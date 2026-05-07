@@ -10,6 +10,26 @@ from .appearance import style_manager_is_dark
 from .core import EQ_PREAMP_MAX_DB, EQ_PREAMP_MIN_DB, clamp
 from .window_utils import bind_label_to_control, set_accessible_label
 
+HEADROOM_METER_MIN_DB = -12.0
+HEADROOM_METER_MAX_DB = 24.0
+HEADROOM_SAFE_LIMIT_DB = -3.0
+HEADROOM_RISK_LIMIT_DB = 0.0
+
+
+def headroom_meter_norm(value_db: float) -> float:
+    span = HEADROOM_METER_MAX_DB - HEADROOM_METER_MIN_DB
+    return clamp((value_db - HEADROOM_METER_MIN_DB) / span, 0.0, 1.0)
+
+
+def format_headroom_peak_db(peak_db: float) -> str:
+    if peak_db > HEADROOM_METER_MAX_DB:
+        return f">{HEADROOM_METER_MAX_DB:+.0f} dB"
+    if peak_db < HEADROOM_METER_MIN_DB:
+        return f"<{abs(HEADROOM_METER_MIN_DB):.0f} dB"
+    if peak_db < HEADROOM_RISK_LIMIT_DB:
+        return f"{abs(peak_db):.1f} dB"
+    return f"{peak_db:+.1f} dB"
+
 
 class MiniEqWindowHeadroomMixin:
     def make_headroom_panel(self) -> Gtk.Box:
@@ -29,21 +49,24 @@ class MiniEqWindowHeadroomMixin:
         self.headroom_fix_button = Gtk.Button(label="Set Safe")
         self.headroom_fix_button.add_css_class("headroom-fix-button")
         self.headroom_fix_button.set_tooltip_text("Restore Headroom")
-        self.headroom_fix_button.set_visible(False)
+        self.headroom_fix_button.set_opacity(0.0)
+        self.headroom_fix_button.set_sensitive(False)
         self.headroom_fix_button.connect("clicked", self.on_set_safe_preamp_clicked)
         header.append(self.headroom_fix_button)
 
         self.headroom_peak_label = Gtk.Label(label="Peak --", xalign=1.0)
         self.headroom_peak_label.add_css_class("headroom-peak-chip")
         self.headroom_peak_label.add_css_class("numeric")
+        self.headroom_peak_label.set_width_chars(8)
+        self.headroom_peak_label.set_xalign(0.5)
         header.append(self.headroom_peak_label)
         panel.append(header)
 
         self.headroom_state_label = Gtk.Label(label="EQ off", xalign=0.0)
         self.headroom_state_label.add_css_class("headroom-state")
         self.headroom_state_label.add_css_class("numeric")
-        self.headroom_state_label.set_wrap(True)
-        self.headroom_state_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.headroom_state_label.set_width_chars(13)
+        self.headroom_state_label.set_ellipsize(Pango.EllipsizeMode.END)
         panel.append(self.headroom_state_label)
 
         self.headroom_meter_area = Gtk.DrawingArea()
@@ -59,8 +82,8 @@ class MiniEqWindowHeadroomMixin:
         self.headroom_detail_label = Gtk.Label(xalign=0.0)
         self.headroom_detail_label.add_css_class("headroom-detail")
         self.headroom_detail_label.add_css_class("dim-label")
-        self.headroom_detail_label.set_wrap(True)
-        self.headroom_detail_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.headroom_detail_label.set_width_chars(27)
+        self.headroom_detail_label.set_ellipsize(Pango.EllipsizeMode.END)
         panel.append(self.headroom_detail_label)
 
         preamp_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -83,6 +106,8 @@ class MiniEqWindowHeadroomMixin:
         preamp_row.append(self.preamp_scale)
 
         self.preamp_label.add_css_class("numeric")
+        self.preamp_label.set_width_chars(8)
+        self.preamp_label.set_xalign(1.0)
         preamp_row.append(self.preamp_label)
         panel.append(preamp_row)
 
@@ -122,7 +147,10 @@ class MiniEqWindowHeadroomMixin:
             self.headroom_panel.add_css_class(f"headroom-panel-{kind}")
 
         if self.headroom_fix_button is not None:
-            self.headroom_fix_button.set_visible(kind == "risk")
+            risk = kind == "risk"
+            self.headroom_fix_button.set_opacity(1.0 if risk else 0.0)
+            self.headroom_fix_button.set_sensitive(risk)
+            self.headroom_fix_button.set_can_target(risk)
 
         self.headroom_meter_area.queue_draw()
 
@@ -153,7 +181,7 @@ class MiniEqWindowHeadroomMixin:
             cr.close_path()
 
         def x_for_db(value: float) -> float:
-            return width_f * clamp((value + 12.0) / 18.0, 0.0, 1.0)
+            return width_f * headroom_meter_norm(value)
 
         application = self.get_application()
         style_manager = application.get_style_manager() if application is not None else None
@@ -176,9 +204,9 @@ class MiniEqWindowHeadroomMixin:
             return
 
         segments = (
-            (-12.0, -3.0, (0.38, 0.78, 0.50, 0.78)),
-            (-3.0, 0.0, (0.58, 0.66, 0.76, 0.64)),
-            (0.0, 6.0, (1.0, 0.35, 0.28, 0.86)),
+            (HEADROOM_METER_MIN_DB, HEADROOM_SAFE_LIMIT_DB, (0.38, 0.78, 0.50, 0.78)),
+            (HEADROOM_SAFE_LIMIT_DB, HEADROOM_RISK_LIMIT_DB, (0.58, 0.66, 0.76, 0.64)),
+            (HEADROOM_RISK_LIMIT_DB, HEADROOM_METER_MAX_DB, (1.0, 0.35, 0.28, 0.86)),
         )
         cr.save()
         rounded_rect(0.0, track_y, width_f, track_height, radius)

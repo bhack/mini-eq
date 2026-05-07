@@ -40,9 +40,13 @@ class FakeController:
 class FakeSwitch:
     def __init__(self, active: bool = False) -> None:
         self.active = active
+        self.state = active
 
     def set_active(self, active: bool) -> None:
         self.active = active
+
+    def set_state(self, state: bool) -> None:
+        self.state = state
 
 
 class FakeConnection:
@@ -234,6 +238,7 @@ def test_dbus_control_set_eq_enabled_updates_controller_and_window() -> None:
     assert controller.eq_enabled is False
     assert controller.enabled_values == [False]
     assert window.bypass_switch.active is False
+    assert window.bypass_switch.state is False
     assert window.update_count == 6
 
 
@@ -245,6 +250,7 @@ def test_dbus_control_set_routing_enabled_updates_controller_and_window() -> Non
     assert controller.routed is True
     assert controller.routed_values == [True]
     assert window.route_switch.active is True
+    assert window.route_switch.state is True
     assert window.update_count == 4
 
 
@@ -259,7 +265,9 @@ def test_dbus_control_set_routing_enabled_restores_equalized_output() -> None:
     assert controller.eq_enabled is True
     assert controller.enabled_values == [True]
     assert window.route_switch.active is True
+    assert window.route_switch.state is True
     assert window.bypass_switch.active is True
+    assert window.bypass_switch.state is True
     assert window.update_count == 7
 
 
@@ -276,7 +284,9 @@ def test_dbus_control_set_routing_enabled_restores_ui_on_failure() -> None:
     assert controller.eq_enabled is False
     assert controller.enabled_values == [True, False]
     assert window.route_switch.active is False
+    assert window.route_switch.state is False
     assert window.bypass_switch.active is False
+    assert window.bypass_switch.state is False
     assert window.update_count == 0
 
 

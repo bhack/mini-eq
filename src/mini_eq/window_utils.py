@@ -19,6 +19,18 @@ def bind_label_to_control(label: Gtk.Label, widget: Gtk.Widget) -> None:
     label.set_mnemonic_widget(widget)
 
 
+def requested_switch_state(switch: Gtk.Switch, state: object | None) -> bool:
+    if state is None:
+        return bool(switch.get_active())
+
+    return bool(state)
+
+
+def set_switch_confirmed_state(switch: Gtk.Switch, active: bool) -> None:
+    switch.set_active(active)
+    switch.set_state(active)
+
+
 def constrain_editor_label(label: Gtk.Label, width_chars: int) -> None:
     label.set_width_chars(width_chars)
     label.set_max_width_chars(width_chars)

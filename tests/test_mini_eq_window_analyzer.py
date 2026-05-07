@@ -126,9 +126,19 @@ class PreviewFrameWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
 class FakeSwitch:
     def __init__(self, active: bool) -> None:
         self.active = active
+        self.state = active
 
     def get_active(self) -> bool:
         return self.active
+
+    def set_active(self, active: bool) -> None:
+        self.active = active
+
+    def get_state(self) -> bool:
+        return self.state
+
+    def set_state(self, state: bool) -> None:
+        self.state = state
 
 
 class AnalyzerToggleWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
@@ -359,9 +369,12 @@ def test_analyzer_toggle_off_emits_zero_level_signal(monkeypatch) -> None:
     saved_values: list[bool] = []
     monkeypatch.setattr(window_analyzer, "save_monitor_enabled", saved_values.append)
     window = AnalyzerToggleWindow()
+    monitor_switch = FakeSwitch(False)
 
-    window.on_analyzer_changed(FakeSwitch(False), None)
+    handled = window.on_analyzer_changed(monitor_switch, None)
 
+    assert handled is True
+    assert monitor_switch.get_state() is False
     assert window.controller.enabled_values == [False]
     assert window.analyzer_enabled is False
     assert window.analyzer_levels == [0.0, 0.0]

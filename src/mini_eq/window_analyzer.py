@@ -18,6 +18,7 @@ from .appearance import style_manager_is_dark
 from .core import clamp
 from .glib_utils import destroy_glib_source
 from .settings import save_monitor_enabled
+from .window_utils import requested_switch_state, set_switch_confirmed_state
 
 ANALYZER_REDRAW_INTERVAL_S = 1.0 / 30.0
 ANALYZER_PREVIEW_INTERVAL_S = 1.0 / 30.0
@@ -179,7 +180,7 @@ class MiniEqWindowAnalyzerMixin:
             self.analyzer_enabled = False
             self.updating_ui = True
             try:
-                self.analyzer_switch.set_active(False)
+                set_switch_confirmed_state(self.analyzer_switch, False)
             finally:
                 self.updating_ui = False
             self.sync_ui_from_state()
@@ -399,25 +400,39 @@ class MiniEqWindowAnalyzerMixin:
 
         return True
 
-    def on_analyzer_changed(self, switch: Gtk.Switch, _param: object) -> None:
-        if self.updating_ui:
-            return
+    def on_analyzer_changed(self, switch: Gtk.Switch, state: object | None) -> bool:
+        enabled = requested_switch_state(switch, state)
 
-        self.analyzer_enabled = switch.get_active()
+        if self.updating_ui:
+            return False
+
+        previous_enabled = self.analyzer_enabled
+        self.analyzer_enabled = enabled
         if self.analyzer_enabled:
             self.analyzer_loudness_snapshot = None
             self.analyzer_session_max_shortterm_lufs = None
             self.start_analyzer_preview()
         else:
-            self.stop_analyzer_preview()
-            self.analyzer_levels = [0.0] * len(self.analyzer_levels)
-            self.analyzer_loudness_snapshot = None
-            self.analyzer_session_max_shortterm_lufs = None
-            self.queue_analyzer_draw(force=True)
-            self.emit_control_analyzer_levels_changed()
+            try:
+                self.stop_analyzer_preview()
+            except Exception as exc:
+                self.analyzer_enabled = previous_enabled
+                self.set_status(f"Monitor Unavailable: {exc}")
+            else:
+                self.analyzer_levels = [0.0] * len(self.analyzer_levels)
+                self.analyzer_loudness_snapshot = None
+                self.analyzer_session_max_shortterm_lufs = None
+                self.queue_analyzer_draw(force=True)
+                self.emit_control_analyzer_levels_changed()
         save_monitor_enabled(self.analyzer_enabled)
         self.sync_ui_from_state()
+        self.updating_ui = True
+        try:
+            set_switch_confirmed_state(switch, self.analyzer_enabled)
+        finally:
+            self.updating_ui = False
         self.emit_control_state_changed()
+        return True
 
     def update_analyzer_summary_label(self) -> None:
         display_gain = f"{self.analyzer_display_gain_db:+.0f} dB"
@@ -445,13 +460,21 @@ class MiniEqWindowAnalyzerMixin:
         for widget in tooltip_widgets:
             widget.set_tooltip_text(analyzer_tooltip)
 
-    def on_analyzer_freeze_changed(self, switch: Gtk.Switch, _param: object) -> None:
-        if self.updating_ui:
-            return
+    def on_analyzer_freeze_changed(self, switch: Gtk.Switch, state: object | None) -> bool:
+        frozen = requested_switch_state(switch, state)
 
-        self.analyzer_frozen = switch.get_active()
+        if self.updating_ui:
+            return False
+
+        self.analyzer_frozen = frozen
         self.sync_ui_from_state()
+        self.updating_ui = True
+        try:
+            set_switch_confirmed_state(switch, self.analyzer_frozen)
+        finally:
+            self.updating_ui = False
         self.emit_control_state_changed()
+        return True
 
     def on_analyzer_smoothing_changed(self, scale: Gtk.Scale) -> None:
         self.analyzer_smoothing = clamp(scale.get_value() / 100.0, 0.15, 0.95)

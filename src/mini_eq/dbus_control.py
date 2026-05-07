@@ -7,6 +7,7 @@ from gi.repository import Gio, GLib
 from . import __version__
 from .analyzer import analyzer_level_to_display_norm
 from .core import list_preset_names, sanitize_preset_name
+from .window_utils import set_switch_confirmed_state
 
 BUS_NAME = "io.github.bhack.mini-eq"
 OBJECT_PATH = "/io/github/bhack/mini_eq/Control"
@@ -69,6 +70,7 @@ class ControllerProtocol(Protocol):
 
 class SwitchProtocol(Protocol):
     def set_active(self, active: bool) -> None: ...
+    def set_state(self, state: bool) -> None: ...
 
 
 class WindowProtocol(Protocol):
@@ -247,7 +249,7 @@ class MiniEqDbusControl:
         if window is not None and not window.ui_shutting_down:
             window.updating_ui = True
             try:
-                window.bypass_switch.set_active(enabled)
+                set_switch_confirmed_state(window.bypass_switch, enabled)
             finally:
                 window.updating_ui = False
 
@@ -276,8 +278,8 @@ class MiniEqDbusControl:
             if window is not None and not window.ui_shutting_down:
                 window.updating_ui = True
                 try:
-                    window.bypass_switch.set_active(controller.eq_enabled)
-                    window.route_switch.set_active(controller.routed)
+                    set_switch_confirmed_state(window.bypass_switch, controller.eq_enabled)
+                    set_switch_confirmed_state(window.route_switch, controller.routed)
                 finally:
                     window.updating_ui = False
             raise
@@ -285,8 +287,8 @@ class MiniEqDbusControl:
         if window is not None and not window.ui_shutting_down:
             window.updating_ui = True
             try:
-                window.bypass_switch.set_active(controller.eq_enabled)
-                window.route_switch.set_active(controller.routed)
+                set_switch_confirmed_state(window.bypass_switch, controller.eq_enabled)
+                set_switch_confirmed_state(window.route_switch, controller.routed)
             finally:
                 window.updating_ui = False
             window.update_eq_power_indicator()

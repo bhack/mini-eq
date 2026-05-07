@@ -347,6 +347,35 @@ def test_move_stream_to_target_sets_stream_target_without_metadata_readback() ->
     assert calls == [(126, 39, "67")]
 
 
+def test_move_named_output_stream_to_target_uses_matching_stream() -> None:
+    backend = wp_backend.WirePlumberBackend()
+    stream = wp_backend.WirePlumberNode(
+        bound_id=126,
+        object_serial="300",
+        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        node_name="mini_eq_sink_output",
+        node_description=None,
+        application_name=None,
+        node_dont_move=False,
+    )
+    calls: list[tuple[int, str]] = []
+
+    backend.output_stream_by_name = lambda _name: stream
+    backend.move_stream_to_target = lambda *args: calls.append(args)
+
+    backend.move_named_output_stream_to_target("mini_eq_sink_output", "alsa_output.test")
+
+    assert calls == [(126, "alsa_output.test")]
+
+
+def test_move_named_output_stream_to_target_requires_existing_stream() -> None:
+    backend = wp_backend.WirePlumberBackend()
+    backend.output_stream_by_name = lambda _name: None
+
+    with pytest.raises(wp_backend.WirePlumberError, match="output stream not found: mini_eq_sink_output"):
+        backend.move_named_output_stream_to_target("mini_eq_sink_output", "alsa_output.test")
+
+
 def test_set_stream_target_writes_node_and_object_metadata() -> None:
     backend = wp_backend.WirePlumberBackend()
 

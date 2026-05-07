@@ -29,6 +29,7 @@ from .core import (
     set_output_preset_link,
     write_mini_eq_preset_file,
 )
+from .window_utils import requested_switch_state, set_switch_confirmed_state
 
 
 class MiniEqWindowPresetMixin:
@@ -82,7 +83,7 @@ class MiniEqWindowPresetMixin:
 
             self.updating_output_preset_switch = True
             try:
-                switch.set_active(active)
+                set_switch_confirmed_state(switch, active)
             finally:
                 self.updating_output_preset_switch = False
             switch.set_sensitive(sensitive)
@@ -105,11 +106,11 @@ class MiniEqWindowPresetMixin:
 
         if not linked_preset:
             if not has_output:
-                tooltip = "Select an Output"
+                tooltip = "Select an EQ Output"
             elif not has_named_preset:
                 tooltip = "Save a Preset First"
             else:
-                tooltip = "Use Selected Preset for This Output"
+                tooltip = "Use Selected Preset for This EQ Output"
             sync_output_preset_switch(
                 active=False,
                 sensitive=has_output and has_named_preset,
@@ -533,16 +534,22 @@ class MiniEqWindowPresetMixin:
         except Exception as exc:
             self.set_status(str(exc))
 
-    def on_output_preset_switch_changed(self, switch: Gtk.Switch, _param: object | None = None) -> None:
+    def on_output_preset_switch_changed(self, switch: Gtk.Switch, state: object | None = None) -> bool:
         if self.updating_output_preset_switch:
-            return
+            return False
 
-        if switch.get_active():
+        if requested_switch_state(switch, state):
             self.on_use_preset_for_output_clicked(switch)
         else:
             self.on_clear_output_preset_link_clicked(switch)
 
         self.update_preset_state()
+        self.updating_output_preset_switch = True
+        try:
+            set_switch_confirmed_state(switch, switch.get_active())
+        finally:
+            self.updating_output_preset_switch = False
+        return True
 
     def on_preset_delete_clicked(self, button: Gtk.Button) -> None:
         if self.current_preset_name is None:

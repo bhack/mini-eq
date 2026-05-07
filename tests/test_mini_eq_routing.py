@@ -136,6 +136,86 @@ def test_follow_system_default_output_enables_follow_mode_and_refreshes() -> Non
     assert calls == ["refresh"]
 
 
+def test_switch_output_sink_retargets_running_filter_output_without_restart() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[object] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def move_named_output_stream_to_target(self, stream_node_name: str, target_node_name: str) -> None:
+            calls.append(("retarget", stream_node_name, target_node_name))
+
+    class FakeRouter:
+        def set_output_sink_name(self, sink_name: str) -> None:
+            calls.append(("router-target", sink_name))
+
+    controller.output_backend = FakeBackend([make_node(1, "speakers"), make_node(2, "hdmi")])
+    controller.output_sink = "speakers"
+    controller.follow_default_output = True
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.filter_output_name = "mini_eq_sink_output"
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.stream_router = FakeRouter()
+    controller.output_analyzer = None
+    controller.apply_state_to_engine = lambda: calls.append("apply")
+    controller.emit_status = lambda message: calls.append(("status", message))
+    controller.stop_engine = lambda *_args, **_kwargs: calls.append("stop")
+    controller.start_engine = lambda: calls.append("start")
+
+    routing.SystemWideEqController.switch_output_sink(controller, "hdmi", explicit=True)
+
+    assert controller.output_sink == "hdmi"
+    assert controller.follow_default_output is False
+    assert calls == [
+        ("router-target", "hdmi"),
+        ("retarget", "mini_eq_sink_output", "hdmi"),
+        "apply",
+        ("status", "filter-chain PipeWire EQ ready: mini_eq_sink -> hdmi"),
+    ]
+
+
+def test_switch_output_sink_falls_back_to_restart_when_filter_retarget_fails() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[object] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def move_named_output_stream_to_target(self, stream_node_name: str, target_node_name: str) -> None:
+            calls.append(("retarget", stream_node_name, target_node_name))
+            raise RuntimeError("filter output missing")
+
+    def stop_engine(*, announce: bool = True) -> None:
+        calls.append(("stop", announce))
+        controller.running = False
+
+    def start_engine() -> None:
+        calls.append("start")
+        controller.running = True
+
+    controller.output_backend = FakeBackend([make_node(1, "speakers"), make_node(2, "hdmi")])
+    controller.output_sink = "speakers"
+    controller.follow_default_output = True
+    controller.running = True
+    controller.routed = False
+    controller.filter_node_id = 42
+    controller.filter_output_name = "mini_eq_sink_output"
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.stream_router = None
+    controller.output_analyzer = None
+    controller.apply_state_to_engine = lambda: calls.append("apply")
+    controller.emit_status = lambda message: calls.append(("status", message))
+    controller.stop_engine = stop_engine
+    controller.start_engine = start_engine
+
+    routing.SystemWideEqController.switch_output_sink(controller, "hdmi", explicit=True)
+
+    assert calls == [
+        ("retarget", "mini_eq_sink_output", "hdmi"),
+        ("status", "filter-chain output retarget warning: filter output missing"),
+        ("stop", False),
+        "start",
+    ]
+
+
 def test_enabling_analyzer_while_engine_runs_opens_jack_before_restarting_engine() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.running = True
@@ -677,6 +757,76 @@ def test_route_system_audio_can_disable_when_engine_is_not_ready() -> None:
 
     assert calls == ["refresh", "router", "disable:True", "status:system audio routing disabled"]
     assert controller.routed is False
+
+
+def test_restart_engine_pauses_stream_router_monitoring_during_restart() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.running = True
+    controller.routed = True
+    calls: list[str] = []
+
+    class FakeRouter:
+        def stop_monitoring(self) -> None:
+            calls.append("stop-monitoring")
+
+        def restore_output_streams(self) -> None:
+            calls.append("restore")
+
+        def emit_warning(self, exc: Exception) -> None:
+            calls.append(f"warning:{exc}")
+
+        def start_monitoring(self, *, require_initial_route: bool = False) -> None:
+            calls.append(f"start-monitoring:{require_initial_route}")
+
+    controller.stream_router = FakeRouter()
+    controller.stop_engine = lambda *, announce=True: calls.append(f"stop-engine:{announce}")
+    controller.start_engine = lambda: calls.append("start-engine")
+
+    routing.SystemWideEqController.restart_engine(controller)
+
+    assert calls == [
+        "stop-monitoring",
+        "restore",
+        "stop-engine:False",
+        "start-engine",
+        "start-monitoring:True",
+    ]
+
+
+def test_restart_engine_continues_when_routed_stream_restore_fails() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.running = True
+    controller.routed = True
+    calls: list[str] = []
+
+    class FakeRouter:
+        def stop_monitoring(self) -> None:
+            calls.append("stop-monitoring")
+
+        def restore_output_streams(self) -> None:
+            calls.append("restore")
+            raise RuntimeError("restore failed")
+
+        def emit_warning(self, exc: Exception) -> None:
+            calls.append(f"warning:{exc}")
+
+        def start_monitoring(self, *, require_initial_route: bool = False) -> None:
+            calls.append(f"start-monitoring:{require_initial_route}")
+
+    controller.stream_router = FakeRouter()
+    controller.stop_engine = lambda *, announce=True: calls.append(f"stop-engine:{announce}")
+    controller.start_engine = lambda: calls.append("start-engine")
+
+    routing.SystemWideEqController.restart_engine(controller)
+
+    assert calls == [
+        "stop-monitoring",
+        "restore",
+        "warning:restore failed",
+        "stop-engine:False",
+        "start-engine",
+        "start-monitoring:True",
+    ]
 
 
 def test_emit_status_is_silent_during_shutdown(capsys: pytest.CaptureFixture[str]) -> None:

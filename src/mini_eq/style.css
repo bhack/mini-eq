@@ -235,14 +235,12 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
 }
 
 .headroom-panel {
-    padding: 4px 0;
+    padding: 4px 8px;
     border-radius: 8px;
     background-color: transparent;
 }
 
 .headroom-panel-risk {
-    padding-left: 8px;
-    padding-right: 8px;
     background-color: rgba(255, 92, 80, 0.055);
 }
 

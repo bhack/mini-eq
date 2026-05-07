@@ -54,7 +54,7 @@ class MiniEqWindowUtilityPaneMixin:
         output_preset_row.append(self.output_preset_state_label)
         self.output_preset_switch.set_valign(Gtk.Align.CENTER)
         set_accessible_label(self.output_preset_switch, "Output Preset")
-        self.output_preset_switch.connect("notify::active", self.on_output_preset_switch_changed)
+        self.output_preset_switch.connect("state-set", self.on_output_preset_switch_changed)
         output_preset_row.append(self.output_preset_switch)
         preset_section.append(output_preset_row)
 

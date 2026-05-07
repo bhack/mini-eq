@@ -40,11 +40,12 @@ from .routing import SystemWideEqController
 from .settings import load_monitor_enabled
 from .window_analyzer import MiniEqWindowAnalyzerMixin
 from .window_graph import MiniEqWindowGraphMixin
-from .window_headroom import MiniEqWindowHeadroomMixin
+from .window_headroom import MiniEqWindowHeadroomMixin, format_headroom_peak_db
 from .window_layout import MiniEqWindowLayoutMixin
 from .window_preferences import MiniEqWindowPreferencesMixin
 from .window_presets import MiniEqWindowPresetMixin
 from .window_utility import MiniEqWindowUtilityPaneMixin
+from .window_utils import requested_switch_state, set_switch_confirmed_state
 from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positive_int
 
 TOAST_TIMEOUT_SECONDS = 2
@@ -244,12 +245,6 @@ class MiniEqWindow(
             return False
 
         if self.auto_route_on_startup:
-            self.updating_ui = True
-            try:
-                self.route_switch.set_active(True)
-            finally:
-                self.updating_ui = False
-
             try:
                 self.controller.route_system_audio(True)
             except Exception as exc:
@@ -259,6 +254,12 @@ class MiniEqWindow(
                 self.update_info_label()
                 self.update_status_summary()
                 self.update_focus_summary()
+            finally:
+                self.updating_ui = True
+                try:
+                    set_switch_confirmed_state(self.route_switch, self.controller.routed)
+                finally:
+                    self.updating_ui = False
 
         self.start_analyzer_preview()
         self.notify_control_state_changed()
@@ -365,7 +366,7 @@ class MiniEqWindow(
         if routed:
             self.updating_ui = True
             try:
-                self.route_switch.set_active(False)
+                set_switch_confirmed_state(self.route_switch, False)
             finally:
                 self.updating_ui = False
 
@@ -561,9 +562,9 @@ class MiniEqWindow(
         default_sink_name = self.controller.get_default_output_sink_name()
         default_sink = self.controller.get_sink(default_sink_name)
         if default_sink is None:
-            return "System default"
+            return "Follow system output"
 
-        return f"System default ({self.output_display_name(default_sink)})"
+        return f"Follow system output ({self.output_display_name(default_sink)})"
 
     def profile_summary(self, sink: WirePlumberNode | None) -> tuple[str, str, bool, list[str]]:
         if sink is None:
@@ -612,7 +613,7 @@ class MiniEqWindow(
                 headroom_needs_attention = True
                 self.set_headroom_state(
                     state="Clipping risk",
-                    peak_text=f"{peak:+.1f} dB",
+                    peak_text=format_headroom_peak_db(peak),
                     detail=f"Lower preamp by {peak + 1.0:.1f} dB.",
                     peak_db=peak,
                     kind="risk",
@@ -620,7 +621,7 @@ class MiniEqWindow(
             elif peak > -0.5:
                 self.set_headroom_state(
                     state="Tight",
-                    peak_text=f"{peak:+.1f} dB",
+                    peak_text=format_headroom_peak_db(peak),
                     detail="Small boosts may clip.",
                     peak_db=peak,
                     kind="tight",
@@ -628,7 +629,7 @@ class MiniEqWindow(
             else:
                 self.set_headroom_state(
                     state="Safe margin",
-                    peak_text=f"{abs(peak):.1f} dB",
+                    peak_text=format_headroom_peak_db(peak),
                     detail="Curve stays below 0 dBFS.",
                     peak_db=peak,
                     kind="safe",
@@ -765,7 +766,7 @@ class MiniEqWindow(
                     reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                     announce_no_output_preset=True,
                 ):
-                    self.set_status("Output Target Set to System Default")
+                    self.set_status("EQ Output Follows System Output")
                 return
 
             self.controller.change_output_sink(sink_name)
@@ -774,7 +775,7 @@ class MiniEqWindow(
                 reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                 announce_no_output_preset=True,
             ):
-                self.set_status("Output Target Updated")
+                self.set_status("EQ Output Updated")
         except Exception as exc:
             self.set_status(str(exc))
 
@@ -790,27 +791,29 @@ class MiniEqWindow(
         self.invalidate_graph_response_cache()
         self.queue_graph_draw()
 
-    def on_route_changed(self, switch: Gtk.Switch, _param: object) -> None:
-        if self.updating_ui:
-            return
+    def on_route_changed(self, switch: Gtk.Switch, state: object | None) -> bool:
+        enabled = requested_switch_state(switch, state)
 
-        enabled = switch.get_active()
+        if self.updating_ui:
+            return False
+
         eq_was_enabled = self.controller.eq_enabled
         route_changed = False
 
         try:
             self.controller.route_system_audio(enabled)
             route_changed = True
-            if self.controller.eq_enabled != eq_was_enabled:
-                self.updating_ui = True
-                try:
-                    self.bypass_switch.set_active(self.controller.eq_enabled)
-                finally:
-                    self.updating_ui = False
+            self.updating_ui = True
+            try:
+                set_switch_confirmed_state(switch, self.controller.routed)
+                if self.controller.eq_enabled != eq_was_enabled:
+                    set_switch_confirmed_state(self.bypass_switch, self.controller.eq_enabled)
+            finally:
+                self.updating_ui = False
         except Exception as exc:
             self.updating_ui = True
             try:
-                switch.set_active(self.controller.routed)
+                set_switch_confirmed_state(switch, self.controller.routed)
             finally:
                 self.updating_ui = False
             self.set_status(str(exc))
@@ -826,16 +829,22 @@ class MiniEqWindow(
             if route_changed:
                 self.set_status("System-wide EQ On" if enabled else "System-wide EQ Off")
             self.notify_control_state_changed()
+        return True
 
-    def on_bypass_changed(self, switch: Gtk.Switch, _param: object) -> None:
-        enabled = switch.get_active()
+    def on_bypass_changed(self, switch: Gtk.Switch, state: object | None) -> bool:
+        enabled = requested_switch_state(switch, state)
 
         if self.updating_ui:
             self.update_eq_power_indicator()
-            return
+            return False
 
         try:
             self.controller.set_eq_enabled(enabled)
+            self.updating_ui = True
+            try:
+                set_switch_confirmed_state(switch, self.controller.eq_enabled)
+            finally:
+                self.updating_ui = False
             self.update_eq_power_indicator()
             self.update_info_label()
             self.update_status_summary()
@@ -845,5 +854,11 @@ class MiniEqWindow(
             self.set_status("Equalizer On" if enabled else "Equalizer Off")
             self.notify_control_state_changed()
         except Exception as exc:
+            self.updating_ui = True
+            try:
+                set_switch_confirmed_state(switch, self.controller.eq_enabled)
+            finally:
+                self.updating_ui = False
             self.update_eq_power_indicator()
             self.set_status(str(exc))
+        return True

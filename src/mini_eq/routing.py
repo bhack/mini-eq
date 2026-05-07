@@ -231,10 +231,10 @@ class SystemWideEqController:
             output_sink_description = output_sink.node_description if output_sink is not None else None
             self.output_analyzer.set_output_sink_name(sink_name, output_sink_description)
 
-        self.restart_engine()
+        if self.retarget_filter_output():
+            return
 
-        if self.stream_router is not None and self.routed:
-            self.stream_router.start_monitoring()
+        self.restart_engine()
 
     def follow_system_default_output(self) -> None:
         self.follow_default_output = True
@@ -472,6 +472,19 @@ class SystemWideEqController:
                 pass
             raise
 
+    def retarget_filter_output(self) -> bool:
+        if not self.running or self.filter_node_id is None:
+            return False
+
+        try:
+            self.output_backend.move_named_output_stream_to_target(self.filter_output_name, self.output_sink)
+            self.apply_state_to_engine()
+            self.emit_status(f"filter-chain PipeWire EQ ready: {self.virtual_sink_name} -> {self.output_sink}")
+            return True
+        except Exception as exc:
+            self.emit_status(f"filter-chain output retarget warning: {exc}")
+            return False
+
     def restore_engine_after_analyzer_failure(self) -> None:
         if self.running or self.engine_module is not None:
             return
@@ -503,11 +516,19 @@ class SystemWideEqController:
         if not was_running:
             return
 
-        self.stop_engine()
+        stream_router = self.stream_router if self.routed else None
+        if stream_router is not None:
+            stream_router.stop_monitoring()
+            try:
+                stream_router.restore_output_streams()
+            except Exception as exc:
+                stream_router.emit_warning(exc)
+
+        self.stop_engine(announce=False)
         self.start_engine()
 
-        if self.routed and self.stream_router is not None:
-            self.stream_router.route_output_streams()
+        if stream_router is not None:
+            stream_router.start_monitoring(require_initial_route=True)
 
     def set_filter_controls(self, controls: dict[str, float]) -> None:
         if self.filter_node_id is None or not self.running:
