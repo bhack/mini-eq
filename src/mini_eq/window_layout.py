@@ -56,6 +56,7 @@ ROOMY_FADER_WIDGET_HEIGHT = 300
 DEFAULT_FADER_SCROLLER_MIN_HEIGHT = 200
 COMPACT_FADER_SCROLLER_MIN_HEIGHT = 150
 ROOMY_FADER_SCROLLER_MIN_HEIGHT = 290
+UTILITY_DENSE_HEIGHT = 660
 
 
 class MiniEqWindowLayoutMixin:
@@ -623,6 +624,10 @@ class MiniEqWindowLayoutMixin:
                 ROOMY_FADER_SCROLLER_MIN_HEIGHT,
                 layout_height,
             )
+            if layout_height <= UTILITY_DENSE_HEIGHT:
+                right_column.add_css_class("utility-pane-dense")
+            else:
+                right_column.remove_css_class("utility-pane-dense")
             right_column.set_spacing(responsive_value(6, 12, layout_height))
             right_column.set_margin_top(responsive_value(2, 4, layout_height))
             right_column.set_margin_bottom(responsive_value(0, 2, layout_height))

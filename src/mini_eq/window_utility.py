@@ -41,19 +41,32 @@ class MiniEqWindowUtilityPaneMixin:
         preset_row.append(self.preset_combo)
         preset_section.append(preset_row)
 
+        self.output_scope_state_label.set_hexpand(True)
+        self.output_scope_state_label.add_css_class("dim-label")
+        self.output_scope_state_label.add_css_class("output-scope-state-label")
+        self.output_scope_state_label.set_ellipsize(Pango.EllipsizeMode.END)
+        set_accessible_label(self.output_scope_state_label, "Auto Preset Scope")
+
+        output_scope_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        output_scope_row.add_css_class("utility-row")
+        output_scope_label = Gtk.Label(label="Scope", xalign=0.0)
+        output_scope_row.append(output_scope_label)
+        output_scope_row.append(self.output_scope_state_label)
+        preset_section.append(output_scope_row)
+
         self.output_preset_state_label.set_hexpand(True)
         self.output_preset_state_label.add_css_class("dim-label")
         self.output_preset_state_label.set_ellipsize(Pango.EllipsizeMode.END)
-        set_accessible_label(self.output_preset_state_label, "Output Preset Status")
+        set_accessible_label(self.output_preset_state_label, "Auto Preset Status")
 
         output_preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         output_preset_row.add_css_class("utility-row")
-        output_preset_label = Gtk.Label(label="Output Preset", xalign=0.0)
-        bind_label_to_control(output_preset_label, self.output_preset_switch)
-        output_preset_row.append(output_preset_label)
+        self.output_preset_scope_label = Gtk.Label(label="Auto Preset", xalign=0.0)
+        bind_label_to_control(self.output_preset_scope_label, self.output_preset_switch)
+        output_preset_row.append(self.output_preset_scope_label)
         output_preset_row.append(self.output_preset_state_label)
         self.output_preset_switch.set_valign(Gtk.Align.CENTER)
-        set_accessible_label(self.output_preset_switch, "Output Preset")
+        set_accessible_label(self.output_preset_switch, "Auto Preset")
         self.output_preset_switch.connect("state-set", self.on_output_preset_switch_changed)
         output_preset_row.append(self.output_preset_switch)
         preset_section.append(output_preset_row)
@@ -76,17 +89,19 @@ class MiniEqWindowUtilityPaneMixin:
         self.preset_save_button.connect("clicked", self.on_preset_save_clicked)
 
         self.preset_more_popover = Gtk.Popover()
-        preset_more_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        preset_more_box.set_margin_top(8)
-        preset_more_box.set_margin_bottom(8)
-        preset_more_box.set_margin_start(8)
-        preset_more_box.set_margin_end(8)
+        self.preset_more_popover.add_css_class("preset-more-popover")
+        preset_more_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        preset_more_box.add_css_class("preset-more-menu")
+        preset_more_box.set_margin_top(6)
+        preset_more_box.set_margin_bottom(6)
+        preset_more_box.set_margin_start(6)
+        preset_more_box.set_margin_end(6)
 
-        def append_preset_separator() -> None:
+        def append_preset_separator() -> Gtk.Separator:
             separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-            separator.set_margin_top(3)
-            separator.set_margin_bottom(3)
+            separator.add_css_class("preset-menu-separator")
             preset_more_box.append(separator)
+            return separator
 
         def connect_preset_action(button: Gtk.Button, callback) -> None:
             def on_clicked(clicked_button: Gtk.Button) -> None:
@@ -95,48 +110,69 @@ class MiniEqWindowUtilityPaneMixin:
 
             button.connect("clicked", on_clicked)
 
-        self.preset_save_as_button = Gtk.Button(label="Save As…")
-        self.preset_save_as_button.add_css_class("popover-action")
-        connect_preset_action(self.preset_save_as_button, self.on_preset_save_as_clicked)
-        preset_more_box.append(self.preset_save_as_button)
+        def make_preset_action(label: str, callback, *, destructive: bool = False) -> tuple[Gtk.Button, Gtk.Label]:
+            button = Gtk.Button()
+            button.set_can_shrink(True)
+            button.set_hexpand(True)
+            button.add_css_class("popover-action")
+            button.add_css_class("flat")
+            if destructive:
+                button.add_css_class("destructive-action")
+            action_label = Gtk.Label(label=label, xalign=0.0)
+            action_label.set_hexpand(True)
+            action_label.set_ellipsize(Pango.EllipsizeMode.END)
+            button.set_child(action_label)
+            connect_preset_action(button, callback)
+            preset_more_box.append(button)
+            return button, action_label
 
-        self.preset_revert_button = Gtk.Button(label="Revert")
-        self.preset_revert_button.add_css_class("popover-action")
+        self.preset_save_as_button, self.preset_save_as_button_label = make_preset_action(
+            "Save As…",
+            self.on_preset_save_as_clicked,
+        )
+
+        self.preset_revert_button, self.preset_revert_button_label = make_preset_action(
+            "Revert",
+            self.on_preset_revert_clicked,
+        )
         self.preset_revert_button.set_tooltip_text("Loaded Preset")
-        connect_preset_action(self.preset_revert_button, self.on_preset_revert_clicked)
-        preset_more_box.append(self.preset_revert_button)
 
-        append_preset_separator()
+        self.preset_reset_to_neutral_button, self.preset_reset_to_neutral_button_label = make_preset_action(
+            "Reset to Neutral",
+            self.on_preset_reset_to_neutral_clicked,
+        )
 
-        self.default_preset_set_button = Gtk.Button(label="Use Selected as Default")
-        self.default_preset_set_button.add_css_class("popover-action")
-        connect_preset_action(self.default_preset_set_button, self.on_use_preset_as_default_clicked)
-        preset_more_box.append(self.default_preset_set_button)
+        self.preset_default_separator = append_preset_separator()
 
-        self.default_preset_clear_button = Gtk.Button(label="Clear Default")
-        self.default_preset_clear_button.add_css_class("popover-action")
-        connect_preset_action(self.default_preset_clear_button, self.on_clear_default_preset_clicked)
-        preset_more_box.append(self.default_preset_clear_button)
+        self.default_preset_set_button, self.default_preset_set_button_label = make_preset_action(
+            "Set as Default",
+            self.on_use_preset_as_default_clicked,
+        )
 
-        append_preset_separator()
+        self.default_preset_clear_button, self.default_preset_clear_button_label = make_preset_action(
+            "Clear Default",
+            self.on_clear_default_preset_clicked,
+        )
 
-        self.preset_import_button = Gtk.Button(label="Import Preset…")
-        self.preset_import_button.add_css_class("popover-action")
-        connect_preset_action(self.preset_import_button, self.on_preset_import_clicked)
-        preset_more_box.append(self.preset_import_button)
+        self.preset_file_separator = append_preset_separator()
 
-        self.preset_export_button = Gtk.Button(label="Export Preset…")
-        self.preset_export_button.add_css_class("popover-action")
-        connect_preset_action(self.preset_export_button, self.on_preset_export_clicked)
-        preset_more_box.append(self.preset_export_button)
+        self.preset_import_button, self.preset_import_button_label = make_preset_action(
+            "Import Preset…",
+            self.on_preset_import_clicked,
+        )
 
-        append_preset_separator()
+        self.preset_export_button, self.preset_export_button_label = make_preset_action(
+            "Export Preset…",
+            self.on_preset_export_clicked,
+        )
 
-        self.preset_delete_button = Gtk.Button(label="Delete")
-        self.preset_delete_button.add_css_class("popover-action")
-        self.preset_delete_button.add_css_class("destructive-action")
-        connect_preset_action(self.preset_delete_button, self.on_preset_delete_clicked)
-        preset_more_box.append(self.preset_delete_button)
+        self.preset_library_separator = append_preset_separator()
+
+        self.preset_delete_button, self.preset_delete_button_label = make_preset_action(
+            "Delete Preset",
+            self.on_preset_delete_clicked,
+            destructive=True,
+        )
 
         self.preset_more_popover.set_child(preset_more_box)
         preset_more_button = Gtk.MenuButton(label="More")

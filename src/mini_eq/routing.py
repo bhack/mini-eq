@@ -49,6 +49,7 @@ from .pipewire_backend import (
     PipeWireNode,
     node_sample_rate,
 )
+from .pipewire_routes import PipeWireOutputPresetTarget
 from .pipewire_stream_router import PipeWireStreamRouter
 
 
@@ -60,6 +61,8 @@ class SystemWideEqController:
         self.original_default_sink = self.resolve_default_output_sink_name()
         self.follow_default_output = output_sink is None
         self.output_sink = output_sink or self.original_default_sink
+        self._output_preset_target_sink: str | None = None
+        self._output_preset_target: PipeWireOutputPresetTarget | None = None
         self.filter_output_name = f"{self.virtual_sink_name}{FILTER_OUTPUT_SUFFIX}"
         self.engine_module = None
         self.filter_node_id: int | None = None
@@ -67,6 +70,8 @@ class SystemWideEqController:
         self.output_object_added_handler_id = 0
         self.output_object_removed_handler_id = 0
         self.output_metadata_changed_handler_id = 0
+        self.output_route_param_handler_id = 0
+        self.output_route_param_device_id = 0
         self.accept_output_events = False
         self.routed = False
         self.running = False
@@ -138,6 +143,27 @@ class SystemWideEqController:
             return None
 
         return self.output_backend.audio_sink_by_name(sink_name)
+
+    def output_preset_keys(self) -> tuple[str, ...]:
+        return self.output_preset_target().keys
+
+    def output_preset_link_key(self) -> str:
+        return self.output_preset_target().link_key
+
+    def invalidate_output_preset_target(self) -> None:
+        self._output_preset_target_sink = None
+        self._output_preset_target = None
+
+    def output_preset_target(self, *, refresh: bool = False) -> PipeWireOutputPresetTarget:
+        cached_target = getattr(self, "_output_preset_target", None)
+        cached_sink = getattr(self, "_output_preset_target_sink", None)
+        if not refresh and cached_target is not None and cached_sink == self.output_sink:
+            return cached_target
+
+        target = self.output_backend.output_preset_target_for_sink_name(self.output_sink)
+        self._output_preset_target_sink = self.output_sink
+        self._output_preset_target = target
+        return target
 
     def default_output_sink_candidates(self, *, refresh: bool = False) -> tuple[str, ...]:
         defaults = self.output_backend.refresh_defaults() if refresh else self.output_backend.defaults()
@@ -245,6 +271,8 @@ class SystemWideEqController:
             self.follow_default_output = False
 
         self.output_sink = sink_name
+        self.invalidate_output_preset_target()
+        self.refresh_output_route_param_monitor()
         if self.stream_router is not None:
             self.stream_router.set_output_sink_name(sink_name)
         if self.output_analyzer is not None:
@@ -253,13 +281,20 @@ class SystemWideEqController:
             self.output_analyzer.set_output_sink_name(sink_name, output_sink_description)
 
         if self.retarget_filter_output():
+            if explicit:
+                self.schedule_output_event_refresh()
             return
 
         self.restart_engine()
+        if explicit:
+            self.schedule_output_event_refresh()
 
     def follow_system_default_output(self) -> None:
+        previous_output_sink = getattr(self, "output_sink", None)
         self.follow_default_output = True
         self.refresh_followed_output_sink()
+        if getattr(self, "output_sink", None) != previous_output_sink:
+            self.schedule_output_event_refresh()
 
     def refresh_followed_output_sink(self) -> bool:
         if not self.follow_default_output:
@@ -277,7 +312,7 @@ class SystemWideEqController:
         return True
 
     def schedule_output_event_refresh(self) -> None:
-        if not self.accept_output_events:
+        if not getattr(self, "accept_output_events", False):
             return
 
         if self.output_event_source_id == 0:
@@ -312,13 +347,51 @@ class SystemWideEqController:
             self.output_backend.remember_default_metadata_change(key, _value)
             self.schedule_output_event_refresh()
 
+    def handle_output_route_param_changed(self) -> None:
+        self.schedule_output_event_refresh()
+
+    def refresh_output_route_param_monitor(self) -> None:
+        if not getattr(self, "accept_output_events", False):
+            return
+
+        output_sink_name = getattr(self, "output_sink", "")
+        if not output_sink_name:
+            self.disconnect_output_route_param_monitor()
+            return
+
+        output_sink = self.get_sink(output_sink_name)
+        device_id = output_sink.device_id if output_sink is not None else 0
+        if device_id == getattr(self, "output_route_param_device_id", 0):
+            return
+
+        self.disconnect_output_route_param_monitor()
+        self.output_route_param_device_id = device_id
+        if device_id <= 0:
+            return
+
+        self.output_route_param_handler_id = self.output_backend.connect_device_route_changed(
+            device_id,
+            self.handle_output_route_param_changed,
+        )
+        if self.output_route_param_handler_id == 0:
+            self.output_route_param_device_id = 0
+
+    def disconnect_output_route_param_monitor(self) -> None:
+        if getattr(self, "output_route_param_handler_id", 0) > 0:
+            self.output_backend.disconnect_device_handler(self.output_route_param_handler_id)
+            self.output_route_param_handler_id = 0
+
+        self.output_route_param_device_id = 0
+
     def on_output_event_idle(self) -> bool:
         self.output_event_source_id = 0
 
         if not self.accept_output_events:
             return False
 
+        self.invalidate_output_preset_target()
         self.refresh_followed_output_sink()
+        self.refresh_output_route_param_monitor()
 
         if self.outputs_changed_callback is not None:
             self.outputs_changed_callback()
@@ -343,7 +416,9 @@ class SystemWideEqController:
                 self.handle_output_metadata_changed
             )
 
+        self.invalidate_output_preset_target()
         self.refresh_followed_output_sink()
+        self.refresh_output_route_param_monitor()
 
         if self.outputs_changed_callback is not None:
             self.outputs_changed_callback()
@@ -366,6 +441,8 @@ class SystemWideEqController:
         if self.output_metadata_changed_handler_id > 0:
             self.output_backend.disconnect_metadata_handler(self.output_metadata_changed_handler_id)
             self.output_metadata_changed_handler_id = 0
+
+        self.disconnect_output_route_param_monitor()
 
     def pick_virtual_sink_name(self) -> str:
         existing = {sink.node_name for sink in self.list_sinks() if sink.node_name is not None}

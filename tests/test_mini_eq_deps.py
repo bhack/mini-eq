@@ -93,9 +93,11 @@ def test_gi_repository_attribute_reports_missing_attribute(monkeypatch) -> None:
 
 def test_pipewire_gobject_check_requires_current_library_version(monkeypatch) -> None:
     fake_pwg = SimpleNamespace(
-        get_library_version=lambda: "0.3.2",
+        get_library_version=lambda: "0.3.4",
         Core=SimpleNamespace(set_pipewire_property=object()),
+        Device=SimpleNamespace(enum_all_params=object(), enum_params=object(), new=object()),
         Param=SimpleNamespace(new_props_controls=object()),
+        RouteInfo=SimpleNamespace(new_from_param=object()),
         Stream=SimpleNamespace(set_pipewire_property=object()),
     )
 
@@ -114,14 +116,16 @@ def test_pipewire_gobject_check_requires_current_library_version(monkeypatch) ->
     check = deps.check_pipewire_gobject()
 
     assert not check.ok
-    assert "older than required 0.3.4" in check.detail
+    assert "older than required 0.3.5" in check.detail
 
 
 def test_pipewire_gobject_check_requires_property_override_symbols(monkeypatch) -> None:
     fake_pwg = SimpleNamespace(
-        get_library_version=lambda: "0.3.4",
+        get_library_version=lambda: "0.3.5",
         Core=SimpleNamespace(),
+        Device=SimpleNamespace(enum_all_params=object(), enum_params=object(), new=object()),
         Param=SimpleNamespace(new_props_controls=object()),
+        RouteInfo=SimpleNamespace(new_from_param=object()),
         Stream=SimpleNamespace(set_pipewire_property=object()),
     )
 

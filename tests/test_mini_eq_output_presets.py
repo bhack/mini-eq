@@ -12,12 +12,20 @@ class FakeButton:
     def __init__(self) -> None:
         self.sensitive = True
         self.tooltip = ""
+        self.visible = True
+        self.label = ""
 
     def set_sensitive(self, sensitive: bool) -> None:
         self.sensitive = sensitive
 
     def set_tooltip_text(self, text: str) -> None:
         self.tooltip = text
+
+    def set_visible(self, visible: bool) -> None:
+        self.visible = visible
+
+    def set_label(self, text: str) -> None:
+        self.label = text
 
 
 class FakeSwitch(FakeButton):
@@ -88,6 +96,14 @@ class FakeCombo:
         self.sensitive = sensitive
 
 
+class FakeDeleteDialog:
+    def __init__(self, response: str = "delete") -> None:
+        self.response = response
+
+    def choose_finish(self, _result: object) -> str:
+        return self.response
+
+
 class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
     def __init__(self, controller) -> None:
         self.controller = controller
@@ -108,13 +124,19 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.state_count = 0
         self.presets_count = 0
         self.preset_state_label = FakeLabel()
+        self.output_scope_state_label = FakeLabel()
         self.output_preset_state_label = FakeLabel()
+        self.output_preset_scope_label = FakeLabel()
         self.preset_delete_button = FakeButton()
         self.preset_export_button = FakeButton()
         self.preset_import_button = FakeButton()
         self.preset_revert_button = FakeButton()
+        self.preset_reset_to_neutral_button = FakeButton()
         self.preset_save_button = FakeButton()
         self.preset_save_as_button = FakeButton()
+        self.preset_default_separator = FakeButton()
+        self.preset_file_separator = FakeButton()
+        self.preset_library_separator = FakeButton()
         self.default_preset_set_button = FakeButton()
         self.default_preset_clear_button = FakeButton()
         self.output_preset_switch = FakeSwitch()
@@ -156,6 +178,74 @@ def write_test_preset(name: str, gain_db: float) -> None:
     core.write_mini_eq_preset_file(core.preset_path_for_name(name), payload)
 
 
+class FakeSink:
+    def __init__(
+        self,
+        *,
+        node_name: str,
+        node_description: str | None,
+        properties: dict[str, str],
+    ) -> None:
+        self.node_name = node_name
+        self.node_description = node_description
+        self.properties = properties
+
+    def property_value(self, key: str) -> str | None:
+        return self.properties.get(key)
+
+
+def test_output_dropdown_uses_device_first_labels() -> None:
+    fake_window = SimpleNamespace(controller=SimpleNamespace(output_sink="alsa_output.fallback"))
+    sink = FakeSink(
+        node_name="alsa_output.hdmi",
+        node_description="Audio interno Stereo digitale HDMI",
+        properties={"device.description": "Audio interno"},
+    )
+
+    assert window.MiniEqWindow.output_display_name(fake_window, sink) == "Audio interno"
+    assert window.MiniEqWindow.output_sink_detail_name(fake_window, sink, "Audio interno") == "Stereo digitale HDMI"
+
+
+def test_output_dropdown_detail_preserves_nested_parentheses() -> None:
+    fake_window = SimpleNamespace(controller=SimpleNamespace(output_sink="alsa_output.fallback"))
+    sink = FakeSink(
+        node_name="alsa_output.hdmi",
+        node_description="Audio interno Stereo digitale (HDMI)",
+        properties={"device.description": "Audio interno"},
+    )
+
+    assert window.MiniEqWindow.output_sink_detail_name(fake_window, sink, "Audio interno") == "Stereo digitale (HDMI)"
+
+
+def test_output_dropdown_disambiguates_duplicate_device_labels() -> None:
+    fake_window = SimpleNamespace(controller=SimpleNamespace(output_sink="alsa_output.fallback"))
+    fake_window.output_display_name = lambda sink: window.MiniEqWindow.output_display_name(fake_window, sink)
+    fake_window.output_sink_detail_name = lambda sink, label: window.MiniEqWindow.output_sink_detail_name(
+        fake_window,
+        sink,
+        label,
+    )
+    fake_window.format_sample_spec = lambda _sink: "48 kHz stereo"
+    fake_window.transport_label_for_sink = lambda _sink: "ALSA"
+    sinks = [
+        FakeSink(
+            node_name="alsa_output.hdmi",
+            node_description="Audio interno HDMI",
+            properties={"device.description": "Audio interno"},
+        ),
+        FakeSink(
+            node_name="alsa_output.speakers",
+            node_description="Audio interno Speakers",
+            properties={"device.description": "Audio interno"},
+        ),
+    ]
+
+    assert window.MiniEqWindow.build_output_sink_labels(fake_window, sinks) == [
+        "Audio interno (HDMI • 48 kHz stereo)",
+        "Audio interno (Speakers • 48 kHz stereo)",
+    ]
+
+
 def test_revert_action_explains_missing_loaded_preset() -> None:
     controller = make_controller()
     controller.bands[0].gain_db = 2.0
@@ -164,8 +254,32 @@ def test_revert_action_explains_missing_loaded_preset() -> None:
 
     test_window.refresh_preset_actions()
 
+    assert test_window.preset_revert_button.visible is False
     assert test_window.preset_revert_button.sensitive is False
-    assert test_window.preset_revert_button.tooltip == "Load or import a preset first"
+    assert test_window.preset_reset_to_neutral_button.visible is True
+    assert test_window.preset_save_button.label == "Save As…"
+    assert test_window.preset_save_as_button.visible is False
+
+
+def test_neutral_curve_uses_neutral_state_and_contextual_menu() -> None:
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    test_window.update_preset_state()
+
+    assert test_window.preset_state_label.text == "Neutral"
+    assert test_window.preset_state_label.tooltip == "Current curve is neutral"
+    assert test_window.preset_state_label.classes == {"preset-state-neutral"}
+    assert test_window.preset_save_button.label == "Save As…"
+    assert test_window.preset_save_as_button.visible is False
+    assert test_window.preset_revert_button.visible is False
+    assert test_window.preset_reset_to_neutral_button.visible is False
+    assert test_window.default_preset_set_button.visible is False
+    assert test_window.default_preset_clear_button.visible is False
+    assert test_window.preset_default_separator.visible is False
+    assert test_window.preset_file_separator.visible is False
+    assert test_window.preset_delete_button.visible is False
+    assert test_window.preset_export_button.label == "Export Current Curve…"
 
 
 def test_revert_action_tracks_initial_neutral_baseline() -> None:
@@ -174,14 +288,46 @@ def test_revert_action_tracks_initial_neutral_baseline() -> None:
 
     test_window.refresh_preset_actions()
 
+    assert test_window.preset_revert_button.visible is False
     assert test_window.preset_revert_button.sensitive is False
-    assert test_window.preset_revert_button.tooltip == "No curve changes to revert"
+    assert test_window.preset_reset_to_neutral_button.visible is False
 
     controller.bands[0].gain_db = 2.0
     test_window.refresh_preset_actions()
 
-    assert test_window.preset_revert_button.sensitive is True
-    assert test_window.preset_revert_button.tooltip == "Revert to Neutral"
+    assert test_window.preset_revert_button.visible is False
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.preset_reset_to_neutral_button.visible is True
+    assert test_window.preset_reset_to_neutral_button.sensitive is True
+
+
+def test_reset_to_neutral_action_tracks_current_curve() -> None:
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_reset_to_neutral_button.visible is False
+    assert test_window.preset_reset_to_neutral_button.sensitive is False
+    assert test_window.preset_reset_to_neutral_button.tooltip == "Curve is already neutral"
+
+    controller.bands[0].gain_db = 2.0
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_revert_button.visible is False
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.preset_reset_to_neutral_button.visible is True
+    assert test_window.preset_reset_to_neutral_button.sensitive is True
+    assert test_window.preset_reset_to_neutral_button.tooltip == "Reset all bands and preamp to neutral"
+
+    test_window.on_preset_reset_to_neutral_clicked(FakeButton())
+
+    assert test_window.current_preset_name is None
+    assert controller.state_signature() == controller.default_state_signature()
+    assert test_window.visible_band_count == core.DEFAULT_ACTIVE_BANDS
+    assert test_window.output_preset_auto_applied is False
+    assert test_window.output_preset_curve_auto_loaded is False
+    assert test_window.statuses[-1] == "Reset to Neutral"
 
 
 def test_revert_action_updates_for_named_preset_changes() -> None:
@@ -192,14 +338,22 @@ def test_revert_action_updates_for_named_preset_changes() -> None:
 
     test_window.refresh_preset_actions()
 
+    assert test_window.preset_save_button.label == "Save"
+    assert test_window.preset_save_as_button.visible is True
+    assert test_window.preset_revert_button.visible is False
     assert test_window.preset_revert_button.sensitive is False
-    assert test_window.preset_revert_button.tooltip == "No curve changes to revert"
+    assert test_window.default_preset_set_button.visible is True
+    assert test_window.preset_export_button.label == "Export Preset…"
+    assert test_window.preset_delete_button.visible is True
 
     controller.bands[0].gain_db = 2.0
     test_window.refresh_preset_actions()
 
+    assert test_window.preset_revert_button.visible is True
     assert test_window.preset_revert_button.sensitive is True
     assert test_window.preset_revert_button.tooltip == "Revert to Headphones"
+    assert test_window.preset_revert_button.label == "Revert to Headphones"
+    assert test_window.preset_reset_to_neutral_button.visible is True
 
 
 def test_revert_action_tracks_unsaved_import_baseline() -> None:
@@ -210,6 +364,7 @@ def test_revert_action_tracks_unsaved_import_baseline() -> None:
 
     test_window.refresh_preset_actions()
 
+    assert test_window.preset_revert_button.visible is False
     assert test_window.preset_revert_button.sensitive is False
     assert test_window.preset_revert_button.tooltip == "No curve changes to revert"
 
@@ -217,6 +372,7 @@ def test_revert_action_tracks_unsaved_import_baseline() -> None:
     test_window.update_preset_state()
 
     assert test_window.preset_state_label.text == "Modified"
+    assert test_window.preset_revert_button.visible is True
     assert test_window.preset_revert_button.sensitive is True
     assert test_window.preset_revert_button.tooltip == "Revert to Imported APO Preset"
 
@@ -243,7 +399,8 @@ def test_initial_output_preset_auto_loads_linked_preset(monkeypatch, tmp_path) -
     assert test_window.output_preset_auto_applied is True
     assert test_window.output_preset_curve_auto_loaded is True
     assert controller.bands[0].gain_db == 2.5
-    assert test_window.output_preset_state_label.text == ""
+    assert test_window.output_preset_state_label.text == "Linked to EQ output"
+    assert test_window.output_scope_state_label.text == "Output-wide"
     assert test_window.output_preset_switch.active is True
 
 
@@ -282,7 +439,7 @@ def test_output_change_without_link_resets_previous_auto_preset(monkeypatch, tmp
     assert test_window.output_preset_auto_applied is False
     assert test_window.output_preset_curve_auto_loaded is False
     assert test_window.sync_count == 1
-    assert test_window.statuses[-1] == "Reset to Neutral"
+    assert test_window.statuses[-1] == "No Auto Preset: Reset to Neutral"
 
 
 def test_output_change_without_link_applies_default_preset(monkeypatch, tmp_path) -> None:
@@ -302,7 +459,7 @@ def test_output_change_without_link_applies_default_preset(monkeypatch, tmp_path
     assert controller.bands[0].gain_db == -1.5
     assert test_window.output_preset_auto_applied is False
     assert test_window.output_preset_curve_auto_loaded is True
-    assert test_window.statuses[-1] == "Applied Default Preset"
+    assert test_window.statuses[-1] == "No Auto Preset: Applied Default Preset"
 
 
 def test_default_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path) -> None:
@@ -317,7 +474,7 @@ def test_default_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path)
 
     assert test_window.current_preset_name == "Neutral"
     assert controller.bands[0].gain_db == -1.5
-    assert test_window.statuses[-1] == "Applied Default Preset"
+    assert test_window.statuses[-1] == "No Auto Preset: Applied Default Preset"
 
 
 def test_output_change_without_link_keeps_manual_preset(monkeypatch, tmp_path) -> None:
@@ -336,7 +493,7 @@ def test_output_change_without_link_keeps_manual_preset(monkeypatch, tmp_path) -
     assert test_window.current_preset_name == "Manual"
     assert controller.bands[0].gain_db == 2.5
     assert test_window.sync_count == 0
-    assert test_window.statuses[-1] == "Kept Current Curve"
+    assert test_window.statuses[-1] == "No Auto Preset: Curve Unchanged"
 
 
 def test_output_change_without_link_keeps_unsaved_auto_preset_edits(monkeypatch, tmp_path) -> None:
@@ -360,7 +517,7 @@ def test_output_change_without_link_keeps_unsaved_auto_preset_edits(monkeypatch,
     assert test_window.current_preset_name == "Headphones"
     assert controller.bands[0].gain_db == 3.5
     assert test_window.sync_count == 0
-    assert test_window.statuses[-1] == "Kept Unsaved Changes"
+    assert test_window.statuses[-1] == "No Auto Preset: Kept Unsaved Changes"
 
 
 def test_deleted_output_preset_link_is_left_clearable(monkeypatch, tmp_path) -> None:
@@ -373,11 +530,11 @@ def test_deleted_output_preset_link_is_left_clearable(monkeypatch, tmp_path) -> 
     assert test_window.apply_output_preset_for_current_output() is True
 
     assert core.get_output_preset_link("alsa_output.headphones") == "Missing"
-    assert test_window.output_preset_state_label.text == "Linked"
+    assert test_window.output_preset_state_label.text == "Linked to EQ output"
     assert test_window.output_preset_state_label.visible is True
     assert test_window.output_preset_switch.active is True
     assert test_window.output_preset_switch.sensitive is True
-    assert test_window.statuses[-1] == "Output Preset Unavailable: Missing"
+    assert test_window.statuses[-1] == "Auto Preset Unavailable: Missing"
 
 
 def test_output_preset_actions_link_and_clear_current_output(monkeypatch, tmp_path) -> None:
@@ -390,7 +547,8 @@ def test_output_preset_actions_link_and_clear_current_output(monkeypatch, tmp_pa
     test_window.on_use_preset_for_output_clicked(FakeButton())
 
     assert core.get_output_preset_link("alsa_output.headphones") == "Headphones"
-    assert test_window.output_preset_state_label.text == ""
+    assert test_window.output_preset_state_label.text == "Linked to EQ output"
+    assert test_window.output_preset_scope_label.text == "Auto Preset"
     assert test_window.output_preset_switch.active is True
 
     test_window.output_preset_curve_auto_loaded = True
@@ -400,6 +558,76 @@ def test_output_preset_actions_link_and_clear_current_output(monkeypatch, tmp_pa
     assert test_window.output_preset_curve_auto_loaded is False
     assert test_window.output_preset_state_label.text == ""
     assert test_window.output_preset_switch.active is False
+
+
+def test_output_preset_actions_use_route_key_when_available(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Headphones", 2.0)
+    route_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=8"
+    controller = make_controller()
+    route = SimpleNamespace(
+        description="Headphones",
+        name="analog-output-headphones",
+        output_preset_key=route_key,
+    )
+    target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=route,
+        keys=(route_key, controller.output_sink),
+        link_key=route_key,
+        has_route_key=True,
+    )
+    controller.output_preset_target = lambda: target
+    controller.output_preset_keys = lambda: (route_key, controller.output_sink)
+    controller.output_preset_link_key = lambda: route_key
+    test_window = OutputPresetWindow(controller)
+    test_window.load_library_preset("Headphones")
+
+    test_window.on_use_preset_for_output_clicked(FakeButton())
+
+    assert core.get_output_preset_link(route_key) == "Headphones"
+    assert core.get_output_preset_link(controller.output_sink) is None
+    assert test_window.output_scope_state_label.text == "Headphones"
+    assert test_window.output_preset_scope_label.text == "Auto Preset"
+    assert test_window.statuses[-1] == "Linked Auto Preset to Port: Headphones"
+
+    core.set_output_preset_link(controller.output_sink, "Legacy Output")
+    test_window.on_clear_output_preset_link_clicked(FakeButton())
+
+    assert core.get_output_preset_link(route_key) is None
+    assert core.get_output_preset_link(controller.output_sink) is None
+    assert test_window.statuses[-1] == "Cleared Auto Preset from Port: Headphones"
+
+
+def test_deleting_only_loaded_preset_keeps_curve_and_allows_neutral_reset(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Headphones", 2.5)
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+    test_window.refresh_preset_list()
+    test_window.load_library_preset("Headphones")
+
+    test_window.on_preset_delete_dialog_done(FakeDeleteDialog(), None, "Headphones")
+
+    assert core.list_preset_names() == []
+    assert test_window.preset_names == []
+    assert test_window.current_preset_name is None
+    assert controller.bands[0].gain_db == 2.5
+    assert test_window.preset_state_label.text == "Modified"
+    assert test_window.preset_revert_button.visible is False
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.preset_revert_button.tooltip == "No preset baseline to revert to"
+    assert test_window.preset_reset_to_neutral_button.visible is True
+    assert test_window.preset_reset_to_neutral_button.sensitive is True
+    assert test_window.statuses[-1] == "Deleted Preset: Headphones; Current Curve Kept"
+
+    test_window.on_preset_reset_to_neutral_clicked(FakeButton())
+
+    assert controller.state_signature() == controller.default_state_signature()
+    assert test_window.current_preset_name is None
+    assert test_window.statuses[-1] == "Reset to Neutral"
 
 
 def test_default_preset_actions_set_and_clear(monkeypatch, tmp_path) -> None:
@@ -442,7 +670,7 @@ def test_output_preset_link_state_shows_different_selected_preset(monkeypatch, t
     assert test_window.output_preset_state_label.text == "Different"
     assert test_window.output_preset_state_label.visible is True
     assert test_window.output_preset_switch.active is True
-    assert test_window.output_preset_switch.tooltip == "Clear Output Preset"
+    assert test_window.output_preset_switch.tooltip == "Clear auto preset for EQ output"
 
 
 def test_output_preset_link_toggle_clears_different_selected_preset(monkeypatch, tmp_path) -> None:
@@ -484,7 +712,7 @@ def test_output_preset_link_toggle_links_and_clears_current_output(monkeypatch, 
     assert test_window.output_preset_switch.state is False
 
 
-def test_manual_output_change_runs_output_preset_auto_apply() -> None:
+def test_manual_output_change_defers_output_preset_handling_to_pipewire_refresh() -> None:
     calls: list[object] = []
     fake_window = SimpleNamespace(
         updating_output_combo=False,
@@ -492,8 +720,8 @@ def test_manual_output_change_runs_output_preset_auto_apply() -> None:
         output_preset_curve_auto_loaded=True,
         output_sink_names=[None, "alsa_output.headphones"],
         controller=SimpleNamespace(change_output_sink=lambda sink: calls.append(("change", sink))),
-        refresh_output_sinks=lambda *, auto_apply_output_preset=True: calls.append(
-            ("refresh", auto_apply_output_preset)
+        refresh_output_sinks=lambda *, handle_observed_output_change=True: calls.append(
+            ("refresh", handle_observed_output_change)
         ),
         apply_output_preset_for_current_output=lambda **kwargs: calls.append(("auto", kwargs)) or True,
         set_status=lambda message: calls.append(("status", message)),
@@ -504,35 +732,33 @@ def test_manual_output_change_runs_output_preset_auto_apply() -> None:
     assert calls == [
         ("change", "alsa_output.headphones"),
         ("refresh", False),
-        ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
     ]
 
 
-def test_manual_output_change_uses_auto_loaded_source_for_reset_decision() -> None:
+def test_manual_output_change_to_follow_default_defers_output_preset_handling() -> None:
     calls: list[object] = []
     fake_window = SimpleNamespace(
         updating_output_combo=False,
         output_preset_auto_applied=True,
         output_preset_curve_auto_loaded=False,
         output_sink_names=[None, "alsa_output.headphones"],
-        controller=SimpleNamespace(change_output_sink=lambda sink: calls.append(("change", sink))),
-        refresh_output_sinks=lambda *, auto_apply_output_preset=True: calls.append(
-            ("refresh", auto_apply_output_preset)
+        controller=SimpleNamespace(follow_system_default_output=lambda: calls.append("follow")),
+        refresh_output_sinks=lambda *, handle_observed_output_change=True: calls.append(
+            ("refresh", handle_observed_output_change)
         ),
         apply_output_preset_for_current_output=lambda **kwargs: calls.append(("auto", kwargs)) or True,
         set_status=lambda message: calls.append(("status", message)),
     )
 
-    window.MiniEqWindow.on_output_changed(fake_window, FakeCombo(selected=1), None)
+    window.MiniEqWindow.on_output_changed(fake_window, FakeCombo(selected=0), None)
 
     assert calls == [
-        ("change", "alsa_output.headphones"),
+        "follow",
         ("refresh", False),
-        ("auto", {"reset_auto_preset_without_link": False, "announce_no_output_preset": True}),
     ]
 
 
-def test_system_default_output_change_runs_output_preset_auto_apply() -> None:
+def test_pipewire_observed_output_change_runs_output_preset_handling() -> None:
     calls: list[object] = []
     fake_window = SimpleNamespace(
         ui_shutting_down=False,
@@ -567,5 +793,53 @@ def test_system_default_output_change_runs_output_preset_auto_apply() -> None:
         "info",
         "summary",
         ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
+    ]
+    assert fake_window.last_output_preset_sink_name == "alsa_output.usb"
+
+
+def test_manual_output_refresh_updates_selector_without_handling_observed_output_change() -> None:
+    calls: list[object] = []
+    fake_window = SimpleNamespace(
+        ui_shutting_down=False,
+        controller=SimpleNamespace(
+            output_sink="alsa_output.usb",
+            follow_default_output=False,
+            get_default_output_sink_name=lambda: "alsa_output.usb",
+            get_sink=lambda _sink_name: None,
+        ),
+        last_output_preset_sink_name="alsa_output.speakers",
+        output_preset_auto_applied=True,
+        output_preset_curve_auto_loaded=False,
+        post_present_ready=True,
+        list_visible_output_sinks=lambda: [],
+        build_output_sink_labels=lambda _sinks: [],
+        follow_default_output_label=lambda: "Follow system output",
+        output_sink_names=[],
+        output_sink_labels=[],
+        output_sink_model=FakeModel(),
+        output_combo=FakeCombo(),
+        updating_output_combo=False,
+        update_preset_state=lambda: calls.append("preset-state"),
+        update_info_label=lambda: calls.append("info"),
+        update_status_summary=lambda: calls.append("summary"),
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("auto", kwargs)),
+    )
+
+    window.MiniEqWindow.refresh_output_sinks(
+        fake_window,
+        handle_observed_output_change=False,
+    )
+
+    assert calls == ["preset-state", "info", "summary"]
+    assert fake_window.last_output_preset_sink_name == "alsa_output.speakers"
+
+    calls.clear()
+    window.MiniEqWindow.refresh_output_sinks(fake_window)
+
+    assert calls == [
+        "preset-state",
+        "info",
+        "summary",
+        ("auto", {"reset_auto_preset_without_link": False, "announce_no_output_preset": True}),
     ]
     assert fake_window.last_output_preset_sink_name == "alsa_output.usb"

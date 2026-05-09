@@ -197,6 +197,7 @@ class MiniEqWindow(
         self.graph_title_label = Gtk.Label(xalign=0.0)
         self.graph_title_label.set_wrap(True)
         self.preset_state_label = Gtk.Label(xalign=1.0)
+        self.output_scope_state_label = Gtk.Label(xalign=0.0)
         self.output_preset_state_label = Gtk.Label(xalign=0.0)
         self.output_preset_switch = Gtk.Switch()
         self.headroom_peak_db: float | None = None
@@ -591,10 +592,30 @@ class MiniEqWindow(
 
         return (
             sink.property_value("device.description")
+            or sink.property_value("device.nick")
+            or sink.property_value("device.name")
             or sink.node_description
             or sink.node_name
             or self.controller.output_sink
         )
+
+    def output_sink_detail_name(self, sink: PipeWireNode | None, base_label: str) -> str:
+        if sink is None:
+            return "Unavailable"
+
+        node_description = str(sink.node_description or "").strip()
+        if node_description and node_description != base_label:
+            detail = node_description
+            if detail.casefold().startswith(base_label.casefold()):
+                detail = detail[len(base_label) :].strip().lstrip("-:").strip()
+                if (detail.startswith("(") and detail.endswith(")")) or (
+                    detail.startswith("[") and detail.endswith("]")
+                ):
+                    detail = detail[1:-1].strip()
+            if detail:
+                return detail
+
+        return self.transport_label_for_sink(sink)
 
     def list_visible_output_sinks(self) -> list[PipeWireNode]:
         return [
@@ -616,7 +637,7 @@ class MiniEqWindow(
                 resolved.append(label)
                 continue
 
-            resolved.append(f"{label} ({self.transport_label_for_sink(sink)} • {self.format_sample_spec(sink)})")
+            resolved.append(f"{label} ({self.output_sink_detail_name(sink, label)} • {self.format_sample_spec(sink)})")
 
         return resolved
 
@@ -724,7 +745,7 @@ class MiniEqWindow(
             self.system_state_label.set_text("Standby")
             self.system_state_label.add_css_class("system-state-idle")
 
-    def refresh_output_sinks(self, *, auto_apply_output_preset: bool = True) -> None:
+    def refresh_output_sinks(self, *, handle_observed_output_change: bool = True) -> None:
         if self.ui_shutting_down:
             return
 
@@ -755,12 +776,15 @@ class MiniEqWindow(
             self.updating_output_combo = False
 
         output_changed = previous_output is not None and previous_output != active
-        self.last_output_preset_sink_name = active
+        # App-originated selector refreshes should not consume the output
+        # transition; the next PipeWire-observed refresh owns preset handling.
+        if handle_observed_output_change or previous_output is None:
+            self.last_output_preset_sink_name = active
         self.update_preset_state()
         self.update_info_label()
         self.update_status_summary()
 
-        if self.post_present_ready and auto_apply_output_preset and output_changed:
+        if self.post_present_ready and handle_observed_output_change and output_changed:
             self.apply_output_preset_for_current_output(
                 reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                 announce_no_output_preset=True,
@@ -824,26 +848,15 @@ class MiniEqWindow(
             return
 
         sink_name = self.output_sink_names[selected]
-        previous_output_preset_auto_loaded = self.output_preset_curve_auto_loaded
 
         try:
             if sink_name is None:
                 self.controller.follow_system_default_output()
-                self.refresh_output_sinks(auto_apply_output_preset=False)
-                if not self.apply_output_preset_for_current_output(
-                    reset_auto_preset_without_link=previous_output_preset_auto_loaded,
-                    announce_no_output_preset=True,
-                ):
-                    self.set_status("EQ Output Follows System Output")
+                self.refresh_output_sinks(handle_observed_output_change=False)
                 return
 
             self.controller.change_output_sink(sink_name)
-            self.refresh_output_sinks(auto_apply_output_preset=False)
-            if not self.apply_output_preset_for_current_output(
-                reset_auto_preset_without_link=previous_output_preset_auto_loaded,
-                announce_no_output_preset=True,
-            ):
-                self.set_status("EQ Output Updated")
+            self.refresh_output_sinks(handle_observed_output_change=False)
         except Exception as exc:
             self.set_status(str(exc))
 

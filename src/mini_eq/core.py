@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -351,6 +352,23 @@ def normalize_default_preset_name(preset_name: object) -> str | None:
     return default_preset or None
 
 
+def normalize_output_preset_key_candidates(output_keys: str | Iterable[str | None] | None) -> list[str]:
+    if output_keys is None or isinstance(output_keys, str):
+        raw_keys: Iterable[str | None] = (output_keys,)
+    else:
+        raw_keys = output_keys
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_key in raw_keys:
+        output_key = str(raw_key or "").strip()
+        if output_key and output_key not in seen:
+            normalized.append(output_key)
+            seen.add(output_key)
+
+    return normalized
+
+
 def load_output_preset_config() -> tuple[dict[str, str], str | None]:
     links_path = output_preset_links_path()
     if not links_path.exists():
@@ -399,13 +417,23 @@ def write_output_preset_links(links: dict[str, str]) -> None:
     write_output_preset_config(links)
 
 
-def get_output_preset_link(sink_name: str | None) -> str | None:
-    output_key = str(sink_name or "").strip()
-    if not output_key:
+def get_output_preset_link_match(output_keys: str | Iterable[str | None] | None) -> tuple[str, str] | None:
+    candidates = normalize_output_preset_key_candidates(output_keys)
+    if not candidates:
         return None
 
     links, _default_preset = load_output_preset_config()
-    return links.get(output_key)
+    for output_key in candidates:
+        preset_name = links.get(output_key)
+        if preset_name:
+            return output_key, preset_name
+
+    return None
+
+
+def get_output_preset_link(output_keys: str | Iterable[str | None] | None) -> str | None:
+    match = get_output_preset_link_match(output_keys)
+    return match[1] if match is not None else None
 
 
 def get_default_preset_name() -> str | None:
@@ -428,13 +456,17 @@ def set_output_preset_link(sink_name: str, preset_name: str) -> str:
     return linked_preset
 
 
-def clear_output_preset_link(sink_name: str | None) -> str | None:
-    output_key = str(sink_name or "").strip()
-    if not output_key:
+def clear_output_preset_link(output_keys: str | Iterable[str | None] | None) -> str | None:
+    candidates = normalize_output_preset_key_candidates(output_keys)
+    if not candidates:
         return None
 
     links, default_preset = load_output_preset_config()
-    removed = links.pop(output_key, None)
+    removed = None
+    for output_key in candidates:
+        candidate = links.pop(output_key, None)
+        if removed is None and candidate:
+            removed = candidate
     write_output_preset_config(links, default_preset)
     return removed
 

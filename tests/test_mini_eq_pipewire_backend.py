@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from tests._mini_eq_imports import pipewire_backend as pw_backend
+from tests._mini_eq_imports import pipewire_routes as pw_routes
 
 
 class FakeCore:
@@ -185,6 +188,26 @@ class FakePwg:
     Param = FakePwgParam
 
 
+class FakeDeviceApi:
+    @staticmethod
+    def enum_params():
+        return None
+
+    @staticmethod
+    def new():
+        return None
+
+    @staticmethod
+    def subscribe_params():
+        return None
+
+
+class FakeRouteInfoApi:
+    @staticmethod
+    def new_from_param(_param):
+        return None
+
+
 def test_parse_metadata_node_name_reads_wireplumber_json_name() -> None:
     assert pw_backend.parse_metadata_node_name('{"name":"alsa_output.test"}') == "alsa_output.test"
 
@@ -270,6 +293,79 @@ def test_node_classification_and_display_name() -> None:
     assert stream.display_name == "spotify"
 
 
+def test_node_from_global_copies_device_route_properties() -> None:
+    backend = pw_backend.PipeWireBackend()
+
+    class FakeGlobal(FakePropertyProxy):
+        def get_id(self) -> int:
+            return 39
+
+    node = backend._node_from_global(
+        FakeGlobal(
+            FakeGlobalProperties(
+                [
+                    FakePropertyItem("object.serial", "67"),
+                    FakePropertyItem("media.class", pw_backend.AUDIO_SINK),
+                    FakePropertyItem("node.name", "alsa_output.test"),
+                    FakePropertyItem("device.id", "72"),
+                    FakePropertyItem("card.profile.device", "8"),
+                ]
+            )
+        )
+    )
+
+    assert node.device_id == 72
+    assert node.card_profile_device == 8
+
+
+def test_node_from_global_enriches_device_label_properties() -> None:
+    backend = pw_backend.PipeWireBackend()
+
+    class FakeNodeGlobal(FakePropertyProxy):
+        def get_id(self) -> int:
+            return 39
+
+    class FakeDeviceGlobal(FakePropertyProxy):
+        def is_device(self) -> bool:
+            return True
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.device = FakeDeviceGlobal(
+                FakeGlobalProperties(
+                    [
+                        FakePropertyItem("device.name", "alsa_card.pci-0000_00_1f.3"),
+                        FakePropertyItem("device.description", "Audio interno"),
+                        FakePropertyItem("device.nick", "HDA Intel PCH"),
+                    ]
+                )
+            )
+
+        def lookup_global(self, bound_id: int) -> FakeDeviceGlobal | None:
+            return self.device if bound_id == 72 else None
+
+    backend._registry = FakeRegistry()
+    node = backend._node_from_global(
+        FakeNodeGlobal(
+            FakeGlobalProperties(
+                [
+                    FakePropertyItem("object.serial", "67"),
+                    FakePropertyItem("media.class", pw_backend.AUDIO_SINK),
+                    FakePropertyItem("node.name", "alsa_output.hdmi"),
+                    FakePropertyItem("node.description", "Audio interno Stereo digitale (HDMI)"),
+                    FakePropertyItem("device.id", "72"),
+                    FakePropertyItem("card.profile.device", "8"),
+                ]
+            )
+        )
+    )
+
+    assert node.node_description == "Audio interno Stereo digitale (HDMI)"
+    assert node.property_value("device.description") == "Audio interno"
+    assert node.property_value("device.nick") == "HDA Intel PCH"
+    assert node.property_value("device.name") == "alsa_card.pci-0000_00_1f.3"
+
+
 def test_new_core_uses_pipewire_gobject_core_constructor() -> None:
     FakeCore.calls = 0
 
@@ -323,6 +419,247 @@ def test_move_stream_to_target_sets_stream_target_without_metadata_readback() ->
     backend.move_stream_to_target(126, "alsa_output.test")
 
     assert calls == [(126, 39, "67")]
+
+
+def test_output_preset_keys_prefer_matching_active_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(Device=FakeDeviceApi, RouteInfo=FakeRouteInfoApi)
+    sink = pw_backend.PipeWireNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=pw_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+        device_id=72,
+        card_profile_device=8,
+    )
+    line_out = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.test",
+        index=0,
+        route_device=7,
+        profile=0,
+        priority=100,
+        direction="Output",
+        name="analog-output-lineout",
+        description="Line Out",
+        availability="yes",
+    )
+    headphones = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.test",
+        index=1,
+        route_device=8,
+        profile=0,
+        priority=200,
+        direction="Output",
+        name="analog-output-headphones",
+        description="Headphones",
+        availability="yes",
+    )
+
+    monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
+    monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: object())
+    monkeypatch.setattr(backend, "_enumerate_device_routes", lambda _device, _bound_id: [line_out, headphones])
+
+    assert backend.output_preset_keys_for_sink_name("alsa_output.test") == (
+        "pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=8",
+        "alsa_output.test",
+    )
+
+
+def test_output_preset_keys_fall_back_to_sink_name_without_route_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace()
+    sink = pw_backend.PipeWireNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=pw_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+        device_id=72,
+        card_profile_device=8,
+    )
+
+    monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
+
+    assert backend.output_preset_keys_for_sink_name("alsa_output.test") == ("alsa_output.test",)
+
+
+def test_enumerate_device_routes_ignores_enum_route_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeParam:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def get_seq(self) -> int:
+            return 12
+
+        def dup_name(self) -> str:
+            return self.name
+
+    class FakeParamInfo:
+        def get_id(self) -> int:
+            return 13
+
+        def dup_name(self) -> str:
+            return "Route"
+
+    class FakeModel:
+        def __init__(self, items: list[object]) -> None:
+            self.items = items
+
+        def get_n_items(self) -> int:
+            return len(self.items)
+
+        def get_item(self, index: int) -> object:
+            return self.items[index]
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.params = FakeModel([FakeParam("EnumRoute"), FakeParam("Route")])
+            self.param_infos = FakeModel([FakeParamInfo()])
+            self.enum_calls: list[tuple[int, int, int]] = []
+
+        def enum_params(self, param_id: int, start: int, num: int) -> int:
+            self.enum_calls.append((param_id, start, num))
+            return 12
+
+        def get_params(self) -> FakeModel:
+            return self.params
+
+        def get_param_infos(self) -> FakeModel:
+            return self.param_infos
+
+    class FakeRouteInfo:
+        def get_index(self) -> int:
+            return 1
+
+        def get_device(self) -> int:
+            return 8
+
+        def get_profile(self) -> int:
+            return 0
+
+        def get_priority(self) -> int:
+            return 200
+
+        def dup_direction(self) -> str:
+            return "output"
+
+        def dup_name(self) -> str:
+            return "analog-output-headphones"
+
+        def dup_description(self) -> str:
+            return "Headphones"
+
+        def dup_availability(self) -> str:
+            return "yes"
+
+        def get_info(self) -> dict[str, str]:
+            return {}
+
+    created_from: list[str] = []
+
+    def new_from_param(param: FakeParam) -> FakeRouteInfo:
+        created_from.append(param.name)
+        return FakeRouteInfo()
+
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(RouteInfo=SimpleNamespace(new_from_param=new_from_param))
+    monkeypatch.setattr(backend, "_device_name_by_bound_id", lambda _bound_id: "alsa_card.test")
+
+    device = FakeDevice()
+    routes = backend._enumerate_device_routes(device, 72)
+
+    assert device.enum_calls == [(13, 0, 0)]
+    assert created_from == ["Route"]
+    assert [route.name for route in routes] == ["analog-output-headphones"]
+    assert backend._device_route_refreshing_bound_ids == set()
+
+
+def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeParam:
+        def __init__(self, param_id: int) -> None:
+            self.param_id = param_id
+
+        def get_id(self) -> int:
+            return self.param_id
+
+    class FakeParamInfo:
+        def get_id(self) -> int:
+            return 13
+
+        def dup_name(self) -> str:
+            return "Route"
+
+    class FakeModel:
+        def __init__(self, items: list[object]) -> None:
+            self.items = items
+
+        def get_n_items(self) -> int:
+            return len(self.items)
+
+        def get_item(self, index: int) -> object:
+            return self.items[index]
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.param_infos = FakeModel([FakeParamInfo()])
+            self.subscriptions: list[FakeVariant] = []
+            self.disconnected: list[int] = []
+            self.param_callback = None
+
+        def get_param_infos(self) -> FakeModel:
+            return self.param_infos
+
+        def subscribe_params(self, ids: FakeVariant) -> None:
+            self.subscriptions.append(ids)
+
+        def disconnect(self, handler_id: int) -> None:
+            self.disconnected.append(handler_id)
+
+        def emit_param(self, param_id: int) -> None:
+            assert self.param_callback is not None
+            self.param_callback(self, FakeParam(param_id))
+
+    class FakeGObjectObject:
+        @staticmethod
+        def connect(device: FakeDevice, signal_name: str, callback) -> int:
+            assert signal_name == "param"
+            device.param_callback = callback
+            return 77
+
+    backend = pw_backend.PipeWireBackend()
+    device = FakeDevice()
+    backend._Pwg = SimpleNamespace(Device=FakeDeviceApi, RouteInfo=FakeRouteInfoApi)
+    backend._GLib = FakeGLib
+    backend._GObject = SimpleNamespace(Object=FakeGObjectObject)
+    backend._ensure_connected = lambda: None
+    monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: device)
+    calls: list[str] = []
+
+    handler_id = backend.connect_device_route_changed(72, lambda: calls.append("route"))
+
+    assert handler_id == 77
+    assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13])]
+
+    device.emit_param(12)
+    assert calls == []
+
+    device.emit_param(13)
+    assert calls == ["route"]
+
+    backend._device_route_refreshing_bound_ids.add(72)
+    device.emit_param(13)
+    assert calls == ["route"]
+
+    backend.disconnect_device_handler(handler_id)
+    assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13]), ("au", [])]
+    assert device.disconnected == [77]
 
 
 def test_move_named_output_stream_to_target_uses_matching_stream() -> None:

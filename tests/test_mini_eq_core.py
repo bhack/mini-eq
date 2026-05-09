@@ -95,6 +95,21 @@ def test_output_preset_links_roundtrip_and_sanitize_values(monkeypatch: pytest.M
     }
 
 
+def test_output_preset_link_uses_first_matching_output_key(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+
+    core.set_output_preset_link("alsa_output.speakers", "Speakers")
+    core.set_output_preset_link("pipewire-route:v1:device=card;route=headphones;route-device=8", "Headphones")
+
+    keys = (
+        "pipewire-route:v1:device=card;route=headphones;route-device=8",
+        "alsa_output.speakers",
+    )
+
+    assert core.get_output_preset_link(keys) == "Headphones"
+    assert core.get_output_preset_link(("missing", "alsa_output.speakers")) == "Speakers"
+
+
 def test_output_preset_links_missing_file_returns_empty(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "missing.json")
 
@@ -132,6 +147,26 @@ def test_clear_output_preset_link_keeps_other_outputs(monkeypatch: pytest.Monkey
     assert core.clear_output_preset_link("alsa_output.speakers") == "Speakers"
     assert core.load_output_preset_links() == {"alsa_output.usb": "USB"}
     assert core.clear_output_preset_link("missing") is None
+
+
+def test_clear_output_preset_link_removes_all_matching_candidates(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    core.write_output_preset_links(
+        {
+            "alsa_output.speakers": "Speakers",
+            "pipewire-route:v1:device=card;route=headphones;route-device=8": "Headphones",
+        }
+    )
+
+    removed = core.clear_output_preset_link(
+        (
+            "pipewire-route:v1:device=card;route=headphones;route-device=8",
+            "alsa_output.speakers",
+        )
+    )
+
+    assert removed == "Headphones"
+    assert core.load_output_preset_links() == {}
 
 
 def test_default_preset_roundtrip_preserves_output_links(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

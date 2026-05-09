@@ -12,11 +12,15 @@ from typing import Literal
 
 Status = Literal["ok", "missing", "warning"]
 
-PWG_REQUIRED_VERSION = "0.3.4"
-PWG_REQUIRED_VERSION_PARTS = (0, 3, 4)
+PWG_REQUIRED_VERSION = "0.3.5"
+PWG_REQUIRED_VERSION_PARTS = (0, 3, 5)
 PWG_REQUIRED_SYMBOLS = (
     "Core.set_pipewire_property",
+    "Device.enum_all_params",
+    "Device.enum_params",
+    "Device.new",
     "Param.new_props_controls",
+    "RouteInfo.new_from_param",
     "Stream.set_pipewire_property",
 )
 PYGOBJECT_HINT = "Ubuntu/Debian: python3-gi; Fedora: python3-gobject; Arch: python-gobject"
