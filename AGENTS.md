@@ -103,8 +103,11 @@ modules from a system-site build venv.
 - Prefer existing patterns and small, targeted patches.
 - Do not move logic between the large modules just to tidy them; split modules
   only when the user asked for that refactor or the change needs it.
-- Keep the pipewire-gobject API boundary small and app-facing. WirePlumber stays
-  the host session manager, not a bundled GI dependency.
+- Keep the pipewire-gobject API boundary small, general-purpose, and
+  app-facing. Mini EQ may validate new pipewire-gobject API in a real GTK app,
+  but do not add Mini EQ-shaped concepts, preset/filter-chain policy, or
+  hardware-selection policy to pipewire-gobject. WirePlumber stays the host
+  session manager, not a bundled GI dependency.
 - Treat the Mini EQ D-Bus control interface as a project-internal app/Shell
   extension contract with version-skew tolerance. Keep `api_version = 1`
   additive only: add state fields, methods, and capabilities when needed, but do
