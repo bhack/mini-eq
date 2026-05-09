@@ -824,14 +824,17 @@ class MiniEqWindow(
 
         try:
             imported_count = self.controller.import_apo_preset(path)
+            curve_label = imported_apo_curve_label(path)
             self.selected_band_index = None
             self.set_visible_band_count(imported_count)
             self.current_preset_name = None
             self.saved_preset_signature = self.controller.state_signature()
-            self.set_curve_revert_baseline(imported_apo_curve_label(path))
+            self.set_curve_revert_baseline(curve_label)
             self.output_preset_curve_auto_loaded = False
             self.refresh_preset_list()
             self.sync_ui_from_state()
+            self.set_status(curve_label)
+            self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
 

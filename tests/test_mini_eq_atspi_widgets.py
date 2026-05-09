@@ -435,6 +435,10 @@ try:
         raise AssertionError("Not Applied status is missing")
     if find_accessible(frame, name="Off", role="status bar", showing=True) is None:
         raise AssertionError("Monitor Off status is missing")
+    if find_accessible(frame, name="EQ output", role="combo box", showing=True) is None:
+        raise AssertionError("EQ output combo box is missing")
+    if find_accessible(frame, name="Preset", role="combo box", showing=True) is None:
+        raise AssertionError("Preset combo box is missing")
 
     verify_dropdown_exposes_options(frame, combo_name="Type", required_options=("Notch", "Bell"))
 

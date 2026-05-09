@@ -104,6 +104,22 @@ class FakeDeleteDialog:
         return self.response
 
 
+class FakeFile:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def get_path(self) -> str:
+        return self.path
+
+
+class FakeOpenDialog:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def open_finish(self, _result: object) -> FakeFile:
+        return FakeFile(self.path)
+
+
 class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
     def __init__(self, controller) -> None:
         self.controller = controller
@@ -123,6 +139,7 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.sync_count = 0
         self.state_count = 0
         self.presets_count = 0
+        self.replace_confirmations: list[SimpleNamespace] = []
         self.preset_state_label = FakeLabel()
         self.current_curve_state_label = FakeLabel()
         self.current_curve_row = FakeButton()
@@ -159,6 +176,20 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
 
     def notify_control_presets_changed(self) -> None:
         self.presets_count += 1
+
+    def confirm_preset_replacement(
+        self,
+        preset_name: str,
+        body: str,
+        replace_callback,
+    ) -> None:
+        self.replace_confirmations.append(
+            SimpleNamespace(
+                preset_name=preset_name,
+                body=body,
+                replace_callback=replace_callback,
+            )
+        )
 
 
 def make_controller(output_sink: str = "alsa_output.headphones"):
@@ -432,6 +463,67 @@ def test_saved_preset_selection_ignores_current_curve_label(monkeypatch, tmp_pat
     assert controller.bands[0].gain_db == 4.0
 
 
+def test_save_as_existing_preset_requires_replace_confirmation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    write_test_preset("Headphones", 4.0)
+    controller = make_controller()
+    controller.bands[0].gain_db = 2.0
+    test_window = OutputPresetWindow(controller)
+
+    test_window.save_current_state_to_preset_as("Headphones")
+
+    assert len(test_window.replace_confirmations) == 1
+    confirmation = test_window.replace_confirmations[0]
+    assert confirmation.preset_name == "Headphones"
+    assert confirmation.body == "Headphones already exists. Replace it with the current curve?"
+    assert core.load_mini_eq_preset_file(core.preset_path_for_name("Headphones"))["bands"][0]["gain_db"] == 4.0
+
+    confirmation.replace_callback()
+
+    assert test_window.current_preset_name == "Headphones"
+    assert core.load_mini_eq_preset_file(core.preset_path_for_name("Headphones"))["bands"][0]["gain_db"] == 2.0
+
+
+def test_save_as_current_preset_overwrites_without_replace_confirmation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    write_test_preset("Headphones", 4.0)
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+    test_window.load_library_preset("Headphones")
+    controller.bands[0].gain_db = 2.0
+
+    test_window.save_current_state_to_preset_as("Headphones")
+
+    assert test_window.replace_confirmations == []
+    assert core.load_mini_eq_preset_file(core.preset_path_for_name("Headphones"))["bands"][0]["gain_db"] == 2.0
+
+
+def test_importing_existing_preset_requires_replace_confirmation(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    write_test_preset("Headphones", 4.0)
+    import_controller = make_controller()
+    import_controller.bands[0].gain_db = 6.0
+    import_path = tmp_path / "headphones.json"
+    core.write_mini_eq_preset_file(import_path, import_controller.build_preset_payload("Headphones"))
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    test_window.on_preset_import_done(FakeOpenDialog(str(import_path)), None)
+
+    assert len(test_window.replace_confirmations) == 1
+    confirmation = test_window.replace_confirmations[0]
+    assert confirmation.preset_name == "Headphones"
+    assert confirmation.body == "Headphones already exists. Replace it with the imported preset?"
+    assert controller.bands[0].gain_db == 0.0
+    assert core.load_mini_eq_preset_file(core.preset_path_for_name("Headphones"))["bands"][0]["gain_db"] == 4.0
+
+    confirmation.replace_callback()
+
+    assert test_window.current_preset_name == "Headphones"
+    assert controller.bands[0].gain_db == 6.0
+    assert core.load_mini_eq_preset_file(core.preset_path_for_name("Headphones"))["bands"][0]["gain_db"] == 6.0
+
+
 def test_initial_output_preset_auto_loads_linked_preset(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
@@ -662,10 +754,13 @@ def test_deleting_only_loaded_preset_keeps_curve_and_allows_neutral_reset(monkey
     assert test_window.preset_names == []
     assert test_window.current_preset_name is None
     assert controller.bands[0].gain_db == 2.5
-    assert test_window.preset_state_label.text == "Modified"
+    assert test_window.preset_state_label.text == "Unsaved"
+    assert test_window.current_curve_row.visible is True
+    assert test_window.current_curve_state_label.text == "Unsaved copy: Headphones"
+    assert test_window.suggested_save_as_name() == "Headphones"
     assert test_window.preset_revert_button.visible is False
     assert test_window.preset_revert_button.sensitive is False
-    assert test_window.preset_revert_button.tooltip == "No preset baseline to revert to"
+    assert test_window.preset_revert_button.tooltip == "No curve changes to revert"
     assert test_window.preset_reset_to_neutral_button.visible is True
     assert test_window.preset_reset_to_neutral_button.sensitive is True
     assert test_window.statuses[-1] == "Deleted Preset: Headphones; Current Curve Kept"
