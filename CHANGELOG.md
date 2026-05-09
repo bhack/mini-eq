@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 - 2026-05-10
+
+- Finish GNOME Shell startup notification after Mini EQ's delayed first-window
+  setup, avoiding a stuck busy cursor when launching from the app icon.
+- Rename the delayed startup setup path in code to make the readiness barrier
+  clearer for future maintenance.
+- Clarify the unmatched-output fallback action so it refers to the loaded saved
+  preset instead of the ambiguous current curve.
+
 ## 0.7.1 - 2026-05-09
 
 - Fix port-aware auto presets when the active port changes on the same

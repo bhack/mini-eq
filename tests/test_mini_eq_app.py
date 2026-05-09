@@ -59,30 +59,40 @@ def test_window_present_idle_skips_window_during_shutdown() -> None:
 
 def test_window_present_idle_presents_active_window() -> None:
     window = FakeWindow(ui_shutting_down=False)
-    application = SimpleNamespace(window=window, window_present_source_id=123)
+    calls: list[str] = []
+    application = SimpleNamespace(
+        window=window,
+        window_present_source_id=123,
+        finish_startup_notification=lambda: calls.append("startup-complete"),
+    )
 
     assert app.MiniEqApplication.on_window_present_idle(application) is False
     assert application.window_present_source_id == 0
     assert window.present_count == 1
+    assert calls == ["startup-complete"]
 
 
-def test_ensure_window_defers_existing_window_present_until_setup(monkeypatch) -> None:
+def test_ensure_window_defers_existing_window_present_until_startup_ready(monkeypatch) -> None:
     monkeypatch.setattr(app, "install_app_icon", lambda: None)
     calls: list[object] = []
     window = SimpleNamespace(
         ui_shutting_down=False,
-        post_present_ready=False,
-        present_after_setup=False,
+        startup_ready=False,
+        present_when_ready=False,
         set_visible=lambda visible: calls.append(("visible", visible)),
         present=lambda: calls.append("present"),
-        schedule_post_present_setup=lambda: calls.append("setup"),
+        schedule_startup_ready=lambda: calls.append("ready-scheduled"),
     )
-    application = SimpleNamespace(window=window, emit_control_state_changed=lambda: calls.append("state"))
+    application = SimpleNamespace(
+        window=window,
+        emit_control_state_changed=lambda: calls.append("state"),
+        finish_startup_notification=lambda: calls.append("startup-complete"),
+    )
 
     app.MiniEqApplication.ensure_window(application, present=True)
 
-    assert window.present_after_setup is True
-    assert calls == ["setup"]
+    assert window.present_when_ready is True
+    assert calls == ["ready-scheduled"]
 
 
 def test_ensure_window_presents_existing_ready_window_immediately(monkeypatch) -> None:
@@ -90,18 +100,45 @@ def test_ensure_window_presents_existing_ready_window_immediately(monkeypatch) -
     calls: list[object] = []
     window = SimpleNamespace(
         ui_shutting_down=False,
-        post_present_ready=True,
-        present_after_setup=False,
+        startup_ready=True,
+        present_when_ready=False,
         set_visible=lambda visible: calls.append(("visible", visible)),
         present=lambda: calls.append("present"),
-        schedule_post_present_setup=lambda: calls.append("setup"),
+        schedule_startup_ready=lambda: calls.append("ready-scheduled"),
     )
-    application = SimpleNamespace(window=window, emit_control_state_changed=lambda: calls.append("state"))
+    application = SimpleNamespace(
+        window=window,
+        emit_control_state_changed=lambda: calls.append("state"),
+        finish_startup_notification=lambda: calls.append("startup-complete"),
+    )
 
     app.MiniEqApplication.ensure_window(application, present=True)
 
-    assert window.present_after_setup is True
-    assert calls == [("visible", True), "present", "state", "setup"]
+    assert window.present_when_ready is True
+    assert calls == [("visible", True), "present", "startup-complete", "state", "ready-scheduled"]
+
+
+def test_finish_startup_notification_completes_current_gdk_startup_id(monkeypatch) -> None:
+    calls: list[object] = []
+    display = SimpleNamespace(
+        get_startup_notification_id=lambda: "mini-eq-startup",
+        notify_startup_complete=lambda startup_id: calls.append(("complete", startup_id)),
+    )
+    monkeypatch.setattr(app.Gdk.Display, "get_default", lambda: display)
+
+    app.MiniEqApplication.finish_startup_notification(SimpleNamespace())
+
+    assert calls == [("complete", "mini-eq-startup")]
+
+
+def test_finish_startup_notification_ignores_missing_gdk_startup_id(monkeypatch) -> None:
+    display = SimpleNamespace(
+        get_startup_notification_id=lambda: None,
+        notify_startup_complete=lambda _startup_id: (_ for _ in ()).throw(AssertionError("unexpected")),
+    )
+    monkeypatch.setattr(app.Gdk.Display, "get_default", lambda: display)
+
+    app.MiniEqApplication.finish_startup_notification(SimpleNamespace())
 
 
 def test_close_action_closes_active_window() -> None:

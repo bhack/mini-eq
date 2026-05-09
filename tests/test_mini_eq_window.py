@@ -257,9 +257,10 @@ def test_begin_close_request_shutdown_hides_when_background_mode_is_enabled() ->
     ]
 
 
-def test_post_present_setup_applies_startup_state_before_presenting() -> None:
+def test_startup_ready_applies_startup_state_before_presenting() -> None:
     calls: list[object] = []
     controller = SimpleNamespace(eq_enabled=True, routed=False)
+    application = SimpleNamespace(finish_startup_notification=lambda: calls.append("startup-complete"))
 
     def route_system_audio(enabled: bool) -> None:
         calls.append(("route", enabled))
@@ -268,13 +269,13 @@ def test_post_present_setup_applies_startup_state_before_presenting() -> None:
     controller.route_system_audio = route_system_audio
 
     fake_window = SimpleNamespace(
-        post_present_source_id=99,
+        startup_ready_source_id=99,
         startup_auto_route_source_id=0,
         ui_shutting_down=False,
-        post_present_ready=False,
+        startup_ready=False,
         auto_route_on_startup=True,
         updating_ui=False,
-        present_after_setup=True,
+        present_when_ready=True,
         route_switch=FakeSwitch(False),
         controller=controller,
         start_preset_monitoring=lambda: calls.append("preset-monitor"),
@@ -288,15 +289,16 @@ def test_post_present_setup_applies_startup_state_before_presenting() -> None:
         set_status=lambda message: calls.append(("status", message)),
         set_visible=lambda visible: calls.append(("visible", visible)),
         present=lambda: calls.append("present"),
+        get_application=lambda: application,
     )
     fake_window.bypass_switch = FakeSwitch(True)
     bind_control_refresh_methods(fake_window)
 
-    keep_source = window.MiniEqWindow.on_post_present_setup_idle(fake_window)
+    keep_source = window.MiniEqWindow.on_startup_ready_idle(fake_window)
 
     assert keep_source is False
-    assert fake_window.post_present_source_id == 0
-    assert fake_window.post_present_ready is True
+    assert fake_window.startup_ready_source_id == 0
+    assert fake_window.startup_ready is True
     assert fake_window.route_switch.get_active() is True
     assert fake_window.route_switch.get_state() is True
     assert calls == [
@@ -311,6 +313,37 @@ def test_post_present_setup_applies_startup_state_before_presenting() -> None:
         "notify",
         ("visible", True),
         "present",
+        "startup-complete",
+        "notify",
+    ]
+
+
+def test_startup_ready_finishes_startup_notification_without_presenting() -> None:
+    calls: list[object] = []
+    application = SimpleNamespace(finish_startup_notification=lambda: calls.append("startup-complete"))
+    fake_window = SimpleNamespace(
+        startup_ready_source_id=99,
+        startup_auto_route_source_id=0,
+        ui_shutting_down=False,
+        startup_ready=False,
+        auto_route_on_startup=False,
+        present_when_ready=False,
+        start_preset_monitoring=lambda: calls.append("preset-monitor"),
+        apply_output_preset_for_current_output=lambda: calls.append("output-preset"),
+        start_analyzer_preview=lambda: calls.append("monitor"),
+        notify_control_state_changed=lambda: calls.append("notify"),
+        get_application=lambda: application,
+    )
+
+    keep_source = window.MiniEqWindow.on_startup_ready_idle(fake_window)
+
+    assert keep_source is False
+    assert fake_window.startup_ready is True
+    assert calls == [
+        "preset-monitor",
+        "output-preset",
+        "monitor",
+        "startup-complete",
         "notify",
     ]
 

@@ -143,10 +143,10 @@ class MiniEqWindow(
         self.add_css_class("mini-eq-window")
         self.controller = controller
         self.auto_route_on_startup = auto_route
-        self.post_present_source_id = 0
+        self.startup_ready_source_id = 0
         self.startup_auto_route_source_id = 0
-        self.post_present_ready = False
-        self.present_after_setup = True
+        self.startup_ready = False
+        self.present_when_ready = True
         self.responsive_layout_source_id = 0
         self.responsive_layout_size = (0, 0)
         self.toast_overlay: Adw.ToastOverlay | None = None
@@ -291,19 +291,19 @@ class MiniEqWindow(
             sync_responsive_layout(*self.responsive_layout_size)
         return False
 
-    def schedule_post_present_setup(self) -> None:
-        if self.post_present_ready or self.post_present_source_id != 0:
+    def schedule_startup_ready(self) -> None:
+        if self.startup_ready or self.startup_ready_source_id != 0:
             return
 
-        self.post_present_source_id = GLib.idle_add(self.on_post_present_setup_idle)
+        self.startup_ready_source_id = GLib.idle_add(self.on_startup_ready_idle)
 
-    def on_post_present_setup_idle(self) -> bool:
-        self.post_present_source_id = 0
+    def on_startup_ready_idle(self) -> bool:
+        self.startup_ready_source_id = 0
 
-        if self.ui_shutting_down or self.post_present_ready:
+        if self.ui_shutting_down or self.startup_ready:
             return False
 
-        self.post_present_ready = True
+        self.startup_ready = True
         self.start_preset_monitoring()
         self.apply_output_preset_for_current_output()
 
@@ -314,9 +314,14 @@ class MiniEqWindow(
         if self.auto_route_on_startup:
             self.apply_startup_auto_route()
 
-        if not self.ui_shutting_down and self.present_after_setup:
-            self.set_visible(True)
-            self.present()
+        if not self.ui_shutting_down:
+            if self.present_when_ready:
+                self.set_visible(True)
+                self.present()
+            application = self.get_application()
+            finish_startup_notification = getattr(application, "finish_startup_notification", None)
+            if callable(finish_startup_notification):
+                finish_startup_notification()
         self.notify_control_state_changed()
         return False
 
@@ -349,9 +354,9 @@ class MiniEqWindow(
 
         self.ui_shutting_down = True
         self.controller.shutting_down = True
-        if self.post_present_source_id > 0:
-            destroy_glib_source(self.post_present_source_id)
-            self.post_present_source_id = 0
+        if self.startup_ready_source_id > 0:
+            destroy_glib_source(self.startup_ready_source_id)
+            self.startup_ready_source_id = 0
         if self.startup_auto_route_source_id > 0:
             destroy_glib_source(self.startup_auto_route_source_id)
             self.startup_auto_route_source_id = 0
@@ -476,7 +481,7 @@ class MiniEqWindow(
         if self.ui_shutting_down:
             return False
 
-        if not self.post_present_ready or message.startswith(TOAST_IGNORED_PREFIXES) or self.toast_overlay is None:
+        if not self.startup_ready or message.startswith(TOAST_IGNORED_PREFIXES) or self.toast_overlay is None:
             return False
 
         toast = Adw.Toast.new(self.status_toast_title(message))
@@ -855,7 +860,7 @@ class MiniEqWindow(
         self.update_info_label()
         self.update_status_summary()
 
-        if self.post_present_ready and handle_observed_output_change and output_changed:
+        if self.startup_ready and handle_observed_output_change and output_changed:
             self.apply_output_preset_for_current_output(
                 reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                 announce_no_output_preset=True,

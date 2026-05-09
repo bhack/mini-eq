@@ -184,7 +184,7 @@ class MiniEqWindowUtilityPaneMixin:
         preset_more_box.append(self.preset_default_heading)
 
         self.default_preset_set_button, self.default_preset_set_button_label = make_preset_action(
-            "Use Current as Fallback",
+            "Use Loaded as Fallback",
             self.on_use_preset_as_fallback_clicked,
         )
 

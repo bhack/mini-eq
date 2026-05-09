@@ -7,9 +7,10 @@ from argparse import Namespace
 import gi
 
 gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
 gi.require_version("GLibUnix", "2.0")
 
-from gi.repository import Adw, Gio, GLib, GLibUnix
+from gi.repository import Adw, Gdk, Gio, GLib, GLibUnix
 
 from .appearance import apply_appearance_preference, load_appearance_preference
 from .background import (
@@ -84,12 +85,13 @@ class MiniEqApplication(Adw.Application):
             if self.window.ui_shutting_down:
                 return
             if present:
-                self.window.present_after_setup = True
-                if self.window.post_present_ready:
+                self.window.present_when_ready = True
+                if self.window.startup_ready:
                     self.window.set_visible(True)
                     self.window.present()
+                    self.finish_startup_notification()
                     self.emit_control_state_changed()
-            self.window.schedule_post_present_setup()
+            self.window.schedule_startup_ready()
             return
 
         controller: SystemWideEqController | None = None
@@ -110,9 +112,9 @@ class MiniEqApplication(Adw.Application):
         self.controller = controller
         self.window = MiniEqWindow(self, self.controller, self.args.auto_route, initial_curve_label=initial_curve_label)
         self.window.set_icon_name(APP_ICON_NAME)
-        self.window.present_after_setup = present
+        self.window.present_when_ready = present
         self.window.set_visible(False)
-        self.window.schedule_post_present_setup()
+        self.window.schedule_startup_ready()
         if not present:
             self.update_background_status()
             self.emit_control_state_changed()
@@ -162,7 +164,19 @@ class MiniEqApplication(Adw.Application):
             return False
 
         self.window.present()
+        self.finish_startup_notification()
         return False
+
+    def finish_startup_notification(self) -> None:
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+
+        startup_id = display.get_startup_notification_id()
+        if not startup_id:
+            return
+
+        display.notify_startup_complete(startup_id)
 
     def emit_control_state_changed(self) -> None:
         if self.window is not None and not self.window.get_visible():

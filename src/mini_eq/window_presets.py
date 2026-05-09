@@ -617,7 +617,9 @@ class MiniEqWindowPresetMixin:
             state.default_set_visible or state.default_clear_visible,
         )
         self.default_preset_set_button.set_sensitive(state.default_set_visible)
-        self.default_preset_set_button.set_tooltip_text("Use the current preset when no auto preset matches")
+        self.default_preset_set_button.set_tooltip_text(
+            "Use the loaded saved preset when an output has no auto preset."
+        )
         self.default_preset_clear_button.set_sensitive(state.default_clear_visible)
         self.default_preset_clear_button.set_tooltip_text(
             "Bypass unmatched outputs instead of loading a fallback preset"
