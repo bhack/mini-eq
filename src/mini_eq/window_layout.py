@@ -58,6 +58,7 @@ DEFAULT_FADER_SCROLLER_MIN_HEIGHT = 200
 COMPACT_FADER_SCROLLER_MIN_HEIGHT = 150
 ROOMY_FADER_SCROLLER_MIN_HEIGHT = 290
 UTILITY_DENSE_HEIGHT = 660
+UTILITY_TIGHT_HEIGHT = 620
 
 
 class MiniEqWindowLayoutMixin:
@@ -625,10 +626,21 @@ class MiniEqWindowLayoutMixin:
                 ROOMY_FADER_SCROLLER_MIN_HEIGHT,
                 layout_height,
             )
-            if layout_height <= UTILITY_DENSE_HEIGHT:
+            dense_utility = layout_height <= UTILITY_DENSE_HEIGHT
+            tight_utility = layout_height <= UTILITY_TIGHT_HEIGHT
+            if dense_utility:
                 right_column.add_css_class("utility-pane-dense")
             else:
                 right_column.remove_css_class("utility-pane-dense")
+            if tight_utility:
+                right_column.add_css_class("utility-pane-tight")
+            else:
+                right_column.remove_css_class("utility-pane-tight")
+
+            fallback_row = getattr(self, "default_preset_row", None)
+            if fallback_row is not None:
+                fallback_row.set_visible(getattr(self, "fallback_preset_row_visible", False))
+
             right_column.set_spacing(responsive_value(6, 12, layout_height))
             right_column.set_margin_top(responsive_value(2, 4, layout_height))
             right_column.set_margin_bottom(responsive_value(0, 2, layout_height))

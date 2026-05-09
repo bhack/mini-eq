@@ -207,6 +207,9 @@ class MiniEqWindow(
         self.analyzer_last_frame_time = time.monotonic()
         self.utility_pane_button: Gtk.ToggleButton | None = None
         self.utility_pane_binding: GObject.Binding | None = None
+        self.fallback_preset_row_visible = False
+        self.default_preset_row: Gtk.Box | None = None
+        self.preset_default_heading: Gtk.Label | None = None
         self.headroom_panel: Gtk.Box | None = None
         self.headroom_fix_button: Gtk.Button | None = None
         self.close_finish_source_id = 0
@@ -225,7 +228,6 @@ class MiniEqWindow(
         self.mode_combo.set_sensitive(False)
         self.route_switch = Gtk.Switch()
         self.bypass_switch = Gtk.Switch()
-        self.bypass_state_label = Gtk.Label(xalign=1.0)
         self.selected_band_gain_spin = Gtk.SpinButton.new_with_range(EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB, 0.1)
         self.analyzer_switch = Gtk.Switch()
         self.analyzer_freeze_switch = Gtk.Switch()

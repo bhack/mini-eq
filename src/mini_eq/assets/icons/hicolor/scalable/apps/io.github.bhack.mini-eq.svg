@@ -10,28 +10,28 @@
       <rect x="660" y="354" width="50" height="276" rx="25"/>
     </g>
 
-    <path d="M234 612 C302 612 336 564 376 496 C418 423 454 383 512 378 C582 372 625 430 668 510 C704 577 738 610 790 610 L790 632 C724 632 681 590 646 524 C606 449 571 396 516 399 C468 402 438 435 394 507 C348 582 304 634 234 634 Z" fill="#ffb13a"/>
-    <circle cx="234" cy="623" r="21" fill="#ffb13a"/>
-    <circle cx="790" cy="621" r="21" fill="#ffb13a"/>
+    <path d="M234 612 C302 612 336 564 376 496 C418 423 454 383 512 378 C582 372 625 430 668 510 C704 577 738 610 790 610 L790 632 C724 632 681 590 646 524 C606 449 571 396 516 399 C468 402 438 435 394 507 C348 582 304 634 234 634 Z" fill="#ffb13a" stroke="#ffbd55" stroke-width="6" stroke-linejoin="round"/>
+    <circle cx="234" cy="623" r="23" fill="#ffbd55"/>
+    <circle cx="790" cy="621" r="23" fill="#ffbd55"/>
 
-    <g stroke="#a5bec6" stroke-width="8">
-      <rect x="284" y="516" width="110" height="108" rx="38" fill="#405965"/>
-      <rect x="452" y="332" width="120" height="118" rx="42" fill="#405965"/>
-      <rect x="630" y="530" width="108" height="104" rx="38" fill="#405965"/>
+    <g stroke="#bdd4dc" stroke-width="10">
+      <rect x="284" y="516" width="110" height="108" rx="38" fill="#45636e"/>
+      <rect x="452" y="332" width="120" height="118" rx="42" fill="#45636e"/>
+      <rect x="630" y="530" width="108" height="104" rx="38" fill="#45636e"/>
     </g>
 
     <g fill="#ffb13a">
-      <rect x="320" y="564" width="38" height="16" rx="8"/>
-      <rect x="493" y="383" width="38" height="16" rx="8"/>
-      <rect x="665" y="577" width="38" height="16" rx="8"/>
+      <rect x="316" y="562" width="46" height="20" rx="10"/>
+      <rect x="489" y="381" width="46" height="20" rx="10"/>
+      <rect x="661" y="575" width="46" height="20" rx="10"/>
     </g>
 
-    <g fill="#5bdfe9">
-      <rect x="400" y="742" width="24" height="40" rx="12" opacity="0.72"/>
-      <rect x="450" y="722" width="24" height="60" rx="12" opacity="0.86"/>
+    <g fill="#69eaf2">
+      <rect x="400" y="742" width="24" height="40" rx="12" opacity="0.88"/>
+      <rect x="450" y="722" width="24" height="60" rx="12" opacity="0.95"/>
       <rect x="500" y="696" width="24" height="86" rx="12"/>
-      <rect x="550" y="722" width="24" height="60" rx="12" opacity="0.86"/>
-      <rect x="600" y="742" width="24" height="40" rx="12" opacity="0.72"/>
+      <rect x="550" y="722" width="24" height="60" rx="12" opacity="0.95"/>
+      <rect x="600" y="742" width="24" height="40" rx="12" opacity="0.88"/>
     </g>
   </g>
 </svg>

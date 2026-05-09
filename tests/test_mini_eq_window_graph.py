@@ -35,12 +35,16 @@ class FakeSwitch:
     def __init__(self, active: bool) -> None:
         self.active = active
         self.sensitive = True
+        self.tooltip = ""
 
     def get_active(self) -> bool:
         return self.active
 
     def set_sensitive(self, sensitive: bool) -> None:
         self.sensitive = sensitive
+
+    def set_tooltip_text(self, text: str) -> None:
+        self.tooltip = text
 
 
 class FakeScale:
@@ -70,7 +74,6 @@ class FocusSummaryWindow(window_graph.MiniEqWindowGraphMixin):
         self.controller = type("Controller", (), controller_state)()
         self.route_switch = FakeSwitch(route_active)
         self.bypass_switch = FakeSwitch(False)
-        self.bypass_state_label = FakeLabel()
         self.focus_label = FakeLabel()
         self.band_count_label = FakeLabel()
         self.inspector_summary_label = FakeLabel()
@@ -100,14 +103,13 @@ def test_focus_summary_uses_controller_route_state_over_stale_switch() -> None:
     assert "System-wide EQ is off." not in window.focus_label.tooltip
 
 
-def test_compare_state_uses_controller_route_state_over_stale_switch() -> None:
+def test_compare_switch_uses_controller_route_state_over_stale_switch() -> None:
     window = FocusSummaryWindow(route_active=False, controller_routed=True, eq_enabled=True)
 
     window.update_eq_power_indicator()
 
     assert window.bypass_switch.sensitive is True
-    assert window.bypass_state_label.text == "Equalized"
-    assert "compare-state-equalized" in window.bypass_state_label.css_classes
+    assert window.bypass_switch.tooltip == "A/B Compare: equalized audio is playing"
 
 
 def test_focus_summary_handles_no_selected_band() -> None:

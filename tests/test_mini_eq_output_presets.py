@@ -129,6 +129,7 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.output_preset_auto_applied = False
         self.output_preset_curve_auto_loaded = False
         self.updating_output_preset_switch = False
+        self.fallback_preset_row_visible = False
         self.selected_band_index = None
         self.visible_band_count = core.DEFAULT_ACTIVE_BANDS
         self.preset_names: list[str] = []
@@ -156,8 +157,10 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.preset_default_separator = FakeButton()
         self.preset_file_separator = FakeButton()
         self.preset_library_separator = FakeButton()
+        self.preset_default_heading = FakeButton()
         self.default_preset_set_button = FakeButton()
         self.default_preset_clear_button = FakeButton()
+        self.default_preset_row = FakeButton()
         self.output_preset_switch = FakeSwitch()
         self.default_preset_state_label = FakeLabel()
         self.set_curve_revert_baseline("Neutral")
@@ -311,8 +314,10 @@ def test_neutral_curve_uses_neutral_state_and_contextual_menu(monkeypatch, tmp_p
     assert test_window.preset_save_as_button.visible is False
     assert test_window.preset_revert_button.visible is False
     assert test_window.preset_reset_to_neutral_button.visible is False
+    assert test_window.default_preset_row.visible is False
     assert test_window.default_preset_set_button.visible is False
     assert test_window.default_preset_clear_button.visible is False
+    assert test_window.preset_default_heading.visible is False
     assert test_window.default_preset_state_label.text == "Bypass"
     assert test_window.default_preset_state_label.tooltip == "Unmatched outputs use no fallback preset."
     assert test_window.preset_default_separator.visible is False
@@ -382,6 +387,7 @@ def test_revert_action_updates_for_named_preset_changes() -> None:
     assert test_window.preset_revert_button.visible is False
     assert test_window.preset_revert_button.sensitive is False
     assert test_window.default_preset_set_button.visible is True
+    assert test_window.preset_default_heading.visible is True
     assert test_window.preset_export_button.label == "Export Preset…"
     assert test_window.preset_delete_button.visible is True
 
@@ -681,6 +687,7 @@ def test_missing_fallback_preset_reports_unavailable(monkeypatch, tmp_path) -> N
 
     assert test_window.apply_output_preset_for_current_output() is False
 
+    assert test_window.default_preset_row.visible is True
     assert test_window.default_preset_state_label.text == "Missing"
     assert test_window.statuses[-1] == "Fallback preset unavailable"
 
@@ -999,6 +1006,7 @@ def test_fallback_preset_actions_set_and_clear(monkeypatch, tmp_path) -> None:
 
     assert core.get_output_preset_fallback_name() == "Headphones"
     assert test_window.output_preset_curve_auto_loaded is False
+    assert test_window.default_preset_row.visible is True
     assert test_window.default_preset_state_label.text == "Headphones"
     assert test_window.default_preset_clear_button.sensitive is True
     assert test_window.statuses[-1] == "Fallback preset set"
@@ -1008,9 +1016,36 @@ def test_fallback_preset_actions_set_and_clear(monkeypatch, tmp_path) -> None:
 
     assert core.get_output_preset_fallback_name() is None
     assert test_window.output_preset_curve_auto_loaded is False
+    assert test_window.default_preset_row.visible is False
     assert test_window.default_preset_state_label.text == "Bypass"
     assert test_window.default_preset_clear_button.sensitive is False
     assert test_window.statuses[-1] == "Unmatched outputs bypassed"
+
+
+def test_preset_pane_hides_empty_fallback_policy(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    test_window.update_preset_state()
+
+    assert test_window.default_preset_row.visible is False
+    assert test_window.default_preset_state_label.text == "Bypass"
+
+
+def test_preset_pane_keeps_configured_fallback_row(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Speakers", -1.5)
+    core.set_output_preset_fallback_name("Speakers")
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+    test_window.refresh_preset_list()
+
+    test_window.update_preset_state()
+
+    assert test_window.default_preset_row.visible is True
+    assert test_window.default_preset_state_label.text == "Speakers"
 
 
 def test_output_preset_link_state_shows_different_selected_preset(monkeypatch, tmp_path) -> None:

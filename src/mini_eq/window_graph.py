@@ -275,27 +275,17 @@ class MiniEqWindowGraphMixin:
         self.selected_band_solo_button.set_active(selected.solo)
 
     def update_eq_power_indicator(self) -> None:
-        self.bypass_state_label.remove_css_class("compare-state-equalized")
-        self.bypass_state_label.remove_css_class("compare-state-original")
-        self.bypass_state_label.remove_css_class("compare-state-ready")
-
         route_enabled = self.is_system_routed()
         self.bypass_switch.set_sensitive(route_enabled)
 
         if not route_enabled:
-            self.bypass_state_label.add_css_class("compare-state-ready")
-            self.bypass_state_label.set_tooltip_text("Turn on System-wide EQ to compare")
-            self.bypass_state_label.set_text("Not Applied")
+            self.bypass_switch.set_tooltip_text("Turn on System-wide EQ to compare")
             return
 
         if self.controller.eq_enabled:
-            self.bypass_state_label.add_css_class("compare-state-equalized")
-            self.bypass_state_label.set_tooltip_text("EQ curve is applied")
-            self.bypass_state_label.set_text("Equalized")
+            self.bypass_switch.set_tooltip_text("A/B Compare: equalized audio is playing")
         else:
-            self.bypass_state_label.add_css_class("compare-state-original")
-            self.bypass_state_label.set_tooltip_text("Original audio is playing")
-            self.bypass_state_label.set_text("Original")
+            self.bypass_switch.set_tooltip_text("A/B Compare: original audio is playing")
 
     def sync_ui_from_state(self) -> None:
         self.updating_ui = True

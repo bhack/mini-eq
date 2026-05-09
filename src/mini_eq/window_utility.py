@@ -111,6 +111,8 @@ class MiniEqWindowUtilityPaneMixin:
 
         default_preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         default_preset_row.add_css_class("utility-row")
+        default_preset_row.set_visible(False)
+        self.default_preset_row = default_preset_row
         default_preset_label = Gtk.Label(label="Fallback", xalign=0.0)
         default_preset_row.append(default_preset_label)
         default_preset_row.append(self.default_preset_state_label)
@@ -177,8 +179,12 @@ class MiniEqWindowUtilityPaneMixin:
 
         self.preset_default_separator = append_preset_separator()
 
+        self.preset_default_heading = Gtk.Label(label="Unmatched Outputs", xalign=0.0)
+        self.preset_default_heading.add_css_class("popover-section-heading")
+        preset_more_box.append(self.preset_default_heading)
+
         self.default_preset_set_button, self.default_preset_set_button_label = make_preset_action(
-            "Use as Fallback",
+            "Use Current as Fallback",
             self.on_use_preset_as_fallback_clicked,
         )
 
@@ -243,23 +249,16 @@ class MiniEqWindowUtilityPaneMixin:
 
         compare_panel = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         compare_panel.add_css_class("compare-row")
-        compare_title = Gtk.Label(label="Compare", xalign=0.0)
+        compare_title = Gtk.Label(label="A/B", xalign=0.0)
         compare_title.add_css_class("metric-title")
         bind_label_to_control(compare_title, self.bypass_switch)
         compare_panel.append(compare_title)
         compare_spacer = Gtk.Box()
         compare_spacer.set_hexpand(True)
         compare_panel.append(compare_spacer)
-        self.bypass_state_label.add_css_class("compare-state-chip")
-        self.bypass_state_label.set_accessible_role(Gtk.AccessibleRole.STATUS)
-        set_accessible_label(self.bypass_state_label, "Compare State")
-        self.bypass_state_label.set_width_chars(9)
-        self.bypass_state_label.set_size_request(92, -1)
-        self.bypass_state_label.set_xalign(0.5)
-        compare_panel.append(self.bypass_state_label)
-        self.bypass_switch.set_tooltip_text("Compare Audio")
+        self.bypass_switch.set_tooltip_text("A/B Compare")
         self.bypass_switch.set_valign(Gtk.Align.CENTER)
-        set_accessible_label(self.bypass_switch, "Equalized Audio")
+        set_accessible_label(self.bypass_switch, "A/B Compare")
         compare_panel.append(self.bypass_switch)
         system_section.append(compare_panel)
 

@@ -415,8 +415,8 @@ try:
         lambda: find_accessible(frame, name="System-wide EQ", role="switch", showing=True),
     )
     compare_switch = wait_for(
-        "Compare switch",
-        lambda: find_accessible(frame, name="Compare", role="switch", showing=True),
+        "A/B compare switch",
+        lambda: find_accessible(frame, name="A/B", role="switch", showing=True),
     )
     monitor_switch = wait_for(
         "Monitor switch",

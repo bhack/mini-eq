@@ -612,8 +612,12 @@ class MiniEqWindowPresetMixin:
 
         self.set_preset_widget_visible("default_preset_set_button", state.default_set_visible)
         self.set_preset_widget_visible("default_preset_clear_button", state.default_clear_visible)
+        self.set_preset_widget_visible(
+            "preset_default_heading",
+            state.default_set_visible or state.default_clear_visible,
+        )
         self.default_preset_set_button.set_sensitive(state.default_set_visible)
-        self.default_preset_set_button.set_tooltip_text("Use this preset when no auto preset matches")
+        self.default_preset_set_button.set_tooltip_text("Use the current preset when no auto preset matches")
         self.default_preset_clear_button.set_sensitive(state.default_clear_visible)
         self.default_preset_clear_button.set_tooltip_text(
             "Bypass unmatched outputs instead of loading a fallback preset"
@@ -708,10 +712,14 @@ class MiniEqWindowPresetMixin:
         label = getattr(self, "default_preset_state_label", None)
         set_button = getattr(self, "default_preset_set_button", None)
         clear_button = getattr(self, "default_preset_clear_button", None)
+        row = getattr(self, "default_preset_row", None)
 
         try:
             default_preset = get_output_preset_fallback_name()
         except Exception as exc:
+            self.fallback_preset_row_visible = True
+            if row is not None:
+                row.set_visible(True)
             if label is not None:
                 label.set_text("Unavailable")
                 label.set_tooltip_text(str(exc))
@@ -720,6 +728,10 @@ class MiniEqWindowPresetMixin:
             if clear_button is not None:
                 clear_button.set_sensitive(False)
             return
+
+        self.fallback_preset_row_visible = default_preset is not None
+        if row is not None:
+            row.set_visible(self.fallback_preset_row_visible)
 
         has_named_preset = self.current_preset_name is not None
         if set_button is not None:
