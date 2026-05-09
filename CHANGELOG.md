@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1 - 2026-05-09
+
+- Fix port-aware auto presets when the active port changes on the same
+  hardware output, such as switching between built-in speakers and headphones.
+- Avoid guessing a port when PipeWire exposes ambiguous route data for one
+  output, and refresh preset handling from the observed PipeWire change.
+- Clarify unmatched-output fallback preset wording and tighten the compact
+  utility-pane layout.
+- Improve the app icon's small-size readability without changing its
+  GNOME/Flathub footprint.
+
 ## 0.7.0 - 2026-05-09
 
 - Replace the direct WirePlumber Python integration with pipewire-gobject for
