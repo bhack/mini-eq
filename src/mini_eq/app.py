@@ -28,6 +28,7 @@ from .glib_utils import destroy_glib_source
 from .instance import MiniEqAlreadyRunningError, MiniEqInstanceGuard
 from .routing import SystemWideEqController
 from .window import MiniEqWindow
+from .window_presets import imported_apo_curve_label
 
 
 class MiniEqApplication(Adw.Application):
@@ -91,6 +92,7 @@ class MiniEqApplication(Adw.Application):
             return
 
         controller: SystemWideEqController | None = None
+        initial_curve_label: str | None = None
 
         try:
             controller = SystemWideEqController(self.args.output_sink)
@@ -98,13 +100,14 @@ class MiniEqApplication(Adw.Application):
 
             if self.args.import_apo:
                 controller.import_apo_preset(self.args.import_apo)
+                initial_curve_label = imported_apo_curve_label(self.args.import_apo)
         except Exception as exc:
             if controller is not None:
                 controller.shutdown()
             raise SystemExit(str(exc)) from exc
 
         self.controller = controller
-        self.window = MiniEqWindow(self, self.controller, self.args.auto_route)
+        self.window = MiniEqWindow(self, self.controller, self.args.auto_route, initial_curve_label=initial_curve_label)
         self.window.set_icon_name(APP_ICON_NAME)
         self.window.present_after_setup = present
         self.window.set_visible(present)
