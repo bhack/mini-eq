@@ -17,6 +17,7 @@ Current scope:
 - Focus or present the Mini EQ app from the panel menu.
 - Control Mini EQ system-wide routing and equalized/original audio state.
 - List and load saved Mini EQ presets over the Mini EQ D-Bus control API.
+- Show the current auto preset link exposed by Mini EQ.
 
 Install for local testing:
 
