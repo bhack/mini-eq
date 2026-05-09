@@ -202,9 +202,16 @@ as the release check when app/runtime routing behavior changed.
 ## Package Channels
 
 Use the `Release` workflow from GitHub Actions after local checks pass. Keep
-`dry_run=true` for packaging workflow changes. For real releases, keep the
-GitHub release as a draft first, review generated notes and assets, and publish
-the draft only after package-index checks pass.
+`dry_run=true` for packaging workflow changes. Every package-index or release
+dispatch must pass a `tag_name` that matches `pyproject.toml`.
+
+For real releases, keep the GitHub release as a draft first, review generated
+notes and assets, and publish the draft only after package-index checks pass.
+After TestPyPI validation, prefer one production workflow dispatch that creates
+the draft GitHub release and publishes to PyPI from the same built artifacts.
+That keeps the GitHub release files and PyPI files byte-for-byte comparable.
+Use a separate PyPI-only dispatch only as a recovery path, and document that it
+creates a second build.
 
 Use Trusted Publishing/OIDC for TestPyPI and PyPI. Do not use long-lived PyPI
 API tokens. Keep the `pypi` environment protected with required review before
@@ -252,10 +259,15 @@ python3 tools/release_post_publish.py "$version"
 
 `tools/release_post_publish.py` verifies that the GitHub release is no longer a
 draft, asset URLs use the stable tag instead of temporary `untagged-*` draft
-URLs, the remote tag exists, PyPI can see the version, and the downloaded source
-archive SHA-256 matches the GitHub release asset digest. Do not use draft
-release asset URLs for Flathub; use the printed source archive SHA-256 after
-the GitHub release is published.
+URLs, the remote tag exists, PyPI can see the exact version, the expected PyPI
+files exist, and downloaded GitHub release assets match their GitHub digest
+metadata. It also compares GitHub release asset hashes with PyPI artifact
+hashes and warns when they differ. Use `--strict-artifact-match` for releases
+that were intentionally published from a single workflow build and should have
+matching artifacts across channels.
+
+Do not use draft release asset URLs for Flathub; use the printed source archive
+SHA-256 after the GitHub release is published.
 
 ## Flathub Handoff
 
