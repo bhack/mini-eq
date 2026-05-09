@@ -284,9 +284,9 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  flatpak:
+  flatpak-build:
     needs: changes
-    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) }}
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) && needs.changes.result == 'success' && needs.changes.outputs.flatpak == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container:
@@ -294,26 +294,15 @@ jobs:
       options: --privileged
 
     steps:
-      - name: Require change detection
-        if: ${{ needs.changes.result != 'success' }}
-        run: exit 1
-
-      - name: Skip unchanged scope
-        if: ${{ needs.changes.outputs.flatpak != 'true' }}
-        run: echo "No Flatpak-relevant changes detected; skipping Flatpak job work."
-
       - name: Check out repository
-        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         uses: actions/checkout@v6
 
       - name: Configure Flathub remote
-        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: |
           flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
       - name: Build Flatpak
-        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb
         with:
           bundle: mini-eq.flatpak
@@ -321,21 +310,17 @@ jobs:
           upload-artifact: false
 
       - name: Install built Flatpak
-        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: flatpak --user install -y ./mini-eq.flatpak
 
       - name: Smoke-test Flatpak CLI
-        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: flatpak run io.github.bhack.mini-eq --help
 
       - name: Check pipewire-gobject GI compatibility
-        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: |
           flatpak run --filesystem="$PWD":ro --command=python3 io.github.bhack.mini-eq \
             "$PWD/tools/check_pipewire_gobject.py" --expect-version 0.3.4
 
       - name: Smoke-test Flatpak runtime modules
-        if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: |
           flatpak run --command=python3 io.github.bhack.mini-eq - <<'PY'
           from pathlib import Path
@@ -380,6 +365,30 @@ jobs:
           if missing:
               raise SystemExit(f"missing Python analyzer module(s): {', '.join(missing)}")
           PY
+
+  flatpak:
+    needs:
+      - changes
+      - flatpak-build
+    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Require change detection
+        if: ${{ needs.changes.result != 'success' }}
+        run: exit 1
+
+      - name: Skip unchanged scope
+        if: ${{ needs.changes.outputs.flatpak != 'true' }}
+        run: echo "No Flatpak-relevant changes detected; skipping Flatpak build."
+
+      - name: Require Flatpak build
+        if: ${{ needs.changes.outputs.flatpak == 'true' && needs['flatpak-build'].result != 'success' }}
+        run: exit 1
+
+      - name: Confirm Flatpak build
+        if: ${{ needs.changes.outputs.flatpak == 'true' && needs['flatpak-build'].result == 'success' }}
+        run: echo "Flatpak build passed."
 
   flatpak-runtime-smoke:
     needs: changes

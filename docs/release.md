@@ -171,7 +171,12 @@ API tokens. Keep the `pypi` environment protected with required review before
 production publishing.
 
 Install-check TestPyPI artifacts with PyPI enabled for dependencies and pin the
-exact version being validated:
+exact version being validated. Run this in an environment that has the
+`pipewire-gobject` sdist build dependencies, distro GI bindings, and a reachable
+PipeWire session. The release preflight container satisfies those requirements;
+a plain host venv without `glib-2.0`, `gio-2.0`, `gobject-2.0`, and
+`libpipewire-0.3` pkg-config modules is expected to fail while building
+`pipewire-gobject`.
 
 ```bash
 python3 -m venv --system-site-packages /tmp/mini-eq-testpypi
@@ -182,6 +187,12 @@ python3 -m venv --system-site-packages /tmp/mini-eq-testpypi
   "mini-eq==$version"
 /tmp/mini-eq-testpypi/bin/mini-eq --check-deps
 ```
+
+PyPI JSON and project pages can become visible before the Simple API used by
+`pip` has fully propagated. If a just-published version is visible through
+`https://pypi.org/pypi/mini-eq/<version>/json` but `pip install` still reports
+only older versions, wait briefly and retry before treating it as a release
+failure.
 
 Do not add PyGObject as a Mini EQ PyPI dependency. Keep it a distro/runtime
 requirement (`python3-gi`, `python3-gobject`, etc.) so it matches the host
@@ -202,8 +213,9 @@ python3 tools/release_post_publish.py "$version"
 `tools/release_post_publish.py` verifies that the GitHub release is no longer a
 draft, asset URLs use the stable tag instead of temporary `untagged-*` draft
 URLs, the remote tag exists, PyPI can see the version, and the downloaded source
-archive SHA-256 matches the GitHub release asset digest. Use the printed source
-archive SHA-256 for the Flathub repository update.
+archive SHA-256 matches the GitHub release asset digest. Do not use draft
+release asset URLs for Flathub; use the printed source archive SHA-256 after
+the GitHub release is published.
 
 ## Flathub Handoff
 
