@@ -36,3 +36,30 @@ def constrain_editor_label(label: Gtk.Label, width_chars: int) -> None:
     label.set_max_width_chars(width_chars)
     label.set_ellipsize(Pango.EllipsizeMode.END)
     label.set_single_line_mode(True)
+
+
+def make_ellipsizing_string_list_factory(max_width_chars: int) -> Gtk.SignalListItemFactory:
+    factory = Gtk.SignalListItemFactory()
+
+    def setup(_factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem) -> None:
+        label = Gtk.Label(xalign=0.0)
+        label.set_hexpand(True)
+        label.set_width_chars(1)
+        label.set_max_width_chars(max_width_chars)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_single_line_mode(True)
+        list_item.set_child(label)
+
+    def bind(_factory: Gtk.SignalListItemFactory, list_item: Gtk.ListItem) -> None:
+        item = list_item.get_item()
+        child = list_item.get_child()
+        if not isinstance(child, Gtk.Label):
+            return
+
+        text = item.get_string() if isinstance(item, Gtk.StringObject) else ""
+        child.set_text(text)
+        child.set_tooltip_text(text)
+
+    factory.connect("setup", setup)
+    factory.connect("bind", bind)
+    return factory

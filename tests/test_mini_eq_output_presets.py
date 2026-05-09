@@ -124,6 +124,8 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.state_count = 0
         self.presets_count = 0
         self.preset_state_label = FakeLabel()
+        self.current_curve_state_label = FakeLabel()
+        self.current_curve_row = FakeButton()
         self.output_scope_state_label = FakeLabel()
         self.output_preset_state_label = FakeLabel()
         self.output_preset_scope_label = FakeLabel()
@@ -270,6 +272,8 @@ def test_neutral_curve_uses_neutral_state_and_contextual_menu() -> None:
     assert test_window.preset_state_label.text == "Neutral"
     assert test_window.preset_state_label.tooltip == "Current curve is neutral"
     assert test_window.preset_state_label.classes == {"preset-state-neutral"}
+    assert test_window.current_curve_row.visible is False
+    assert test_window.current_curve_state_label.text == ""
     assert test_window.preset_save_button.label == "Save As…"
     assert test_window.preset_save_as_button.visible is False
     assert test_window.preset_revert_button.visible is False
@@ -385,7 +389,7 @@ def test_revert_action_tracks_unsaved_import_baseline() -> None:
     assert test_window.statuses[-1] == "Reverted to Imported APO Preset"
 
 
-def test_unsaved_apo_import_is_shown_in_preset_selector(monkeypatch, tmp_path) -> None:
+def test_unsaved_apo_import_is_shown_as_current_curve(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     controller = make_controller()
     controller.bands[0].gain_db = 2.0
@@ -394,8 +398,13 @@ def test_unsaved_apo_import_is_shown_in_preset_selector(monkeypatch, tmp_path) -
 
     test_window.refresh_preset_list()
 
-    assert test_window.preset_model.items == ["Imported APO: HD 650"]
-    assert test_window.preset_combo.selected == 0
+    assert test_window.preset_model.items == []
+    assert test_window.preset_combo.selected == window_presets.Gtk.INVALID_LIST_POSITION
+    assert test_window.current_curve_row.visible is True
+    assert test_window.current_curve_state_label.text == "Imported APO: HD 650"
+    assert test_window.current_curve_state_label.tooltip == (
+        "Imported APO: HD 650\nUse Save As to add it to the preset library."
+    )
     assert test_window.suggested_save_as_name() == "HD 650"
 
     test_window.on_preset_selected(test_window.preset_combo, None)
@@ -403,7 +412,7 @@ def test_unsaved_apo_import_is_shown_in_preset_selector(monkeypatch, tmp_path) -
     assert test_window.current_preset_name is None
 
 
-def test_saved_preset_selection_maps_past_unsaved_apo_selector_item(monkeypatch, tmp_path) -> None:
+def test_saved_preset_selection_ignores_current_curve_label(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     write_test_preset("Headphones", 4.0)
     controller = make_controller()
@@ -413,9 +422,10 @@ def test_saved_preset_selection_maps_past_unsaved_apo_selector_item(monkeypatch,
 
     test_window.refresh_preset_list()
 
-    assert test_window.preset_model.items == ["Imported APO: HD 650", "Headphones"]
+    assert test_window.preset_model.items == ["Headphones"]
+    assert test_window.current_curve_state_label.text == "Imported APO: HD 650"
 
-    test_window.preset_combo.selected = 1
+    test_window.preset_combo.selected = 0
     test_window.on_preset_selected(test_window.preset_combo, None)
 
     assert test_window.current_preset_name == "Headphones"

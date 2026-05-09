@@ -7,7 +7,12 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gtk, Pango
 
-from .window_utils import bind_label_to_control, set_accessible_description, set_accessible_label
+from .window_utils import (
+    bind_label_to_control,
+    make_ellipsizing_string_list_factory,
+    set_accessible_description,
+    set_accessible_label,
+)
 
 
 class MiniEqWindowUtilityPaneMixin:
@@ -31,6 +36,8 @@ class MiniEqWindowUtilityPaneMixin:
 
         self.preset_combo.set_hexpand(True)
         self.preset_combo.add_css_class("toolbar-select")
+        self.preset_combo.set_factory(make_ellipsizing_string_list_factory(28))
+        self.preset_combo.set_list_factory(make_ellipsizing_string_list_factory(28))
         set_accessible_label(self.preset_combo, "Preset")
 
         preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -40,6 +47,22 @@ class MiniEqWindowUtilityPaneMixin:
         preset_row.append(preset_label)
         preset_row.append(self.preset_combo)
         preset_section.append(preset_row)
+
+        self.current_curve_state_label = Gtk.Label(xalign=0.0)
+        self.current_curve_state_label.set_hexpand(True)
+        self.current_curve_state_label.set_width_chars(1)
+        self.current_curve_state_label.set_max_width_chars(28)
+        self.current_curve_state_label.add_css_class("dim-label")
+        self.current_curve_state_label.set_ellipsize(Pango.EllipsizeMode.END)
+        set_accessible_label(self.current_curve_state_label, "Current Curve Source")
+
+        self.current_curve_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.current_curve_row.add_css_class("utility-row")
+        current_curve_label = Gtk.Label(label="Curve", xalign=0.0)
+        self.current_curve_row.append(current_curve_label)
+        self.current_curve_row.append(self.current_curve_state_label)
+        self.current_curve_row.set_visible(False)
+        preset_section.append(self.current_curve_row)
 
         self.output_scope_state_label.set_hexpand(True)
         self.output_scope_state_label.add_css_class("dim-label")
