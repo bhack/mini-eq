@@ -44,7 +44,7 @@ from .window_graph import MiniEqWindowGraphMixin
 from .window_headroom import MiniEqWindowHeadroomMixin, format_headroom_peak_db
 from .window_layout import MiniEqWindowLayoutMixin
 from .window_preferences import MiniEqWindowPreferencesMixin
-from .window_presets import MiniEqWindowPresetMixin
+from .window_presets import MiniEqWindowPresetMixin, imported_apo_curve_label
 from .window_utility import MiniEqWindowUtilityPaneMixin
 from .window_utils import requested_switch_state, set_switch_confirmed_state
 
@@ -81,7 +81,13 @@ class MiniEqWindow(
     MiniEqWindowLayoutMixin,
     Adw.ApplicationWindow,
 ):
-    def __init__(self, app: Adw.Application, controller: SystemWideEqController, auto_route: bool) -> None:
+    def __init__(
+        self,
+        app: Adw.Application,
+        controller: SystemWideEqController,
+        auto_route: bool,
+        initial_curve_label: str | None = None,
+    ) -> None:
         super().__init__(application=app, title=APP_NAME)
         self.add_css_class("mini-eq-window")
         self.controller = controller
@@ -117,7 +123,7 @@ class MiniEqWindow(
         self.curve_revert_baseline_label: str | None = None
         self.curve_revert_baseline_signature: str | None = None
         self.curve_revert_baseline_payload: dict[str, object] | None = None
-        self.set_curve_revert_baseline("Neutral")
+        self.set_curve_revert_baseline(initial_curve_label or "Neutral")
         self.output_preset_auto_applied = False
         self.output_preset_curve_auto_loaded = False
         self.updating_output_preset_switch = False
@@ -822,22 +828,12 @@ class MiniEqWindow(
             self.set_visible_band_count(imported_count)
             self.current_preset_name = None
             self.saved_preset_signature = self.controller.state_signature()
-            self.set_curve_revert_baseline("Imported APO Preset")
+            self.set_curve_revert_baseline(imported_apo_curve_label(path))
             self.output_preset_curve_auto_loaded = False
+            self.refresh_preset_list()
             self.sync_ui_from_state()
         except Exception as exc:
             self.set_status(str(exc))
-
-    def on_clear_clicked(self, button: Gtk.Button) -> None:
-        self.controller.reset_state()
-        self.selected_band_index = None
-        self.set_visible_band_count(DEFAULT_ACTIVE_BANDS)
-        self.current_preset_name = None
-        self.saved_preset_signature = self.controller.state_signature()
-        self.set_curve_revert_baseline("Neutral")
-        self.output_preset_curve_auto_loaded = False
-        self.sync_ui_from_state()
-        self.set_status("Equalizer Reset")
 
     def on_output_changed(self, combo: Gtk.DropDown, _param: object) -> None:
         if self.updating_output_combo:

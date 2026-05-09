@@ -126,7 +126,6 @@ class MiniEqWindowLayoutMixin:
             self.add_action(action)
 
         add_window_action("import-apo", lambda: self.on_import_apo_clicked(tools_button))
-        add_window_action("reset-eq", lambda: self.on_clear_clicked(tools_button))
         add_window_action("preferences", self.show_preferences_dialog)
         add_window_action("about", self.show_about_dialog)
         self.appearance_action = Gio.SimpleAction.new_stateful(
@@ -139,7 +138,6 @@ class MiniEqWindowLayoutMixin:
 
         tools_menu = Gio.Menu()
         tools_menu.append("Import Equalizer APO…", "win.import-apo")
-        tools_menu.append("Reset EQ", "win.reset-eq")
 
         appearance_menu = Gio.Menu()
         appearance_menu.append("Follow System", "win.appearance::system")
