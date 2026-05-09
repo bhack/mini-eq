@@ -184,7 +184,7 @@ class MiniEqWindowPresetMixin:
     def curve_revert_target_is_neutral(self) -> bool:
         return self.current_preset_name is None and self.curve_revert_signature() == self.default_preset_signature
 
-    def current_curve_selector_label(self) -> str | None:
+    def current_curve_source_label(self) -> str | None:
         if self.current_preset_name is not None:
             return None
 
@@ -198,9 +198,11 @@ class MiniEqWindowPresetMixin:
         if self.current_preset_name is not None:
             return self.current_preset_name
 
-        label = self.current_curve_selector_label()
+        label = self.current_curve_source_label()
         if label and label.startswith(APO_IMPORT_LABEL_PREFIX):
             return sanitize_preset_name(label[len(APO_IMPORT_LABEL_PREFIX) :])
+        if label == "Imported APO":
+            return label
         return ""
 
     def output_preset_is_active(self) -> bool:
@@ -471,19 +473,12 @@ class MiniEqWindowPresetMixin:
 
     def refresh_preset_list(self) -> None:
         self.preset_names = list_preset_names()
-        display_names = list(self.preset_names)
-        combo_preset_names: list[str | None] = list(self.preset_names)
 
         selected_index = Gtk.INVALID_LIST_POSITION
         if self.current_preset_name in self.preset_names:
             selected_index = self.preset_names.index(self.current_preset_name)
-        elif current_curve_label := self.current_curve_selector_label():
-            display_names.insert(0, current_curve_label)
-            combo_preset_names.insert(0, None)
-            selected_index = 0
 
-        self.preset_combo_preset_names = combo_preset_names
-        self.preset_model.splice(0, self.preset_model.get_n_items(), display_names)
+        self.preset_model.splice(0, self.preset_model.get_n_items(), self.preset_names)
 
         self.updating_preset_combo = True
         try:
@@ -505,7 +500,27 @@ class MiniEqWindowPresetMixin:
         self.preset_state_label.add_css_class(state.preset_state_class)
         self.preset_state_label.set_tooltip_text(state.preset_state_tooltip)
 
+        self.update_current_curve_state()
         self.refresh_preset_actions(state)
+
+    def update_current_curve_state(self) -> None:
+        label = getattr(self, "current_curve_state_label", None)
+        row = getattr(self, "current_curve_row", None)
+        if label is None:
+            return
+
+        current_curve_label = self.current_curve_source_label()
+        if current_curve_label is None:
+            label.set_text("")
+            label.set_tooltip_text("No provisional curve source")
+            if row is not None:
+                row.set_visible(False)
+            return
+
+        label.set_text(current_curve_label)
+        label.set_tooltip_text(f"{current_curve_label}\nUse Save As to add it to the preset library.")
+        if row is not None:
+            row.set_visible(True)
 
     def save_current_state_to_preset(self, name: str) -> None:
         preset_name = sanitize_preset_name(name)
@@ -721,16 +736,11 @@ class MiniEqWindowPresetMixin:
             return
 
         selected = combo.get_selected()
-        combo_preset_names = getattr(self, "preset_combo_preset_names", self.preset_names)
-        if selected == Gtk.INVALID_LIST_POSITION or selected >= len(combo_preset_names):
-            return
-
-        preset_name = combo_preset_names[selected]
-        if preset_name is None:
+        if selected == Gtk.INVALID_LIST_POSITION or selected >= len(self.preset_names):
             return
 
         try:
-            self.load_library_preset(preset_name)
+            self.load_library_preset(self.preset_names[selected])
         except Exception as exc:
             self.set_status(str(exc))
 
