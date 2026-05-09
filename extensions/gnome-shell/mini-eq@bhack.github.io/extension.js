@@ -90,7 +90,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._statusItem.setSensitive(false);
         this.menu.addMenuItem(this._statusItem);
 
-        this._outputPresetItem = new PopupMenu.PopupMenuItem(_('Output preset: None'));
+        this._outputPresetItem = new PopupMenu.PopupMenuItem(_('Auto preset: None'));
         this._outputPresetItem.setSensitive(false);
         this.menu.addMenuItem(this._outputPresetItem);
 
@@ -387,7 +387,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsItem.setSensitive(false);
         this._presetsItem.label.text = _('Presets');
         this._statusItem.label.text = _('Mini EQ is not running');
-        this._outputPresetItem.label.text = _('Output preset: None');
+        this._outputPresetItem.label.text = _('Auto preset: None');
         this._quitItem.visible = false;
         this._setAnalyzerLevels([]);
         this._setPresets([]);
@@ -405,8 +405,8 @@ class MiniEqIndicator extends PanelMenu.Button {
 
     _outputPresetText(running, presetName) {
         if (!running || !presetName)
-            return _('Output preset: None');
-        return _('Output preset: %s').format(presetName);
+            return _('Auto preset: None');
+        return _('Auto preset: %s').format(presetName);
     }
 
     _applyAnalyzerLevels(levels) {
