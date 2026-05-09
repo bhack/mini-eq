@@ -47,7 +47,7 @@ class DemoController:
         self.analyzer_levels_callback = None
         self.analyzer_loudness_callback = None
         self.analyzer_enabled = False
-        self.route_enabled = False
+        self.routed = False
         self.demo_sink = PipeWireNode(
             bound_id=101,
             object_serial="101",
@@ -151,7 +151,7 @@ class DemoController:
         return True
 
     def route_system_audio(self, enabled: bool) -> None:
-        self.route_enabled = enabled
+        self.routed = enabled
 
     def follow_system_default_output(self) -> None:
         self.follow_default_output = True
