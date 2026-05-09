@@ -470,6 +470,93 @@ def test_output_preset_keys_prefer_matching_active_route(monkeypatch: pytest.Mon
     )
 
 
+def test_output_preset_keys_use_single_route_even_when_profile_device_is_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(Device=FakeDeviceApi, RouteInfo=FakeRouteInfoApi)
+    sink = pw_backend.PipeWireNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=pw_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+        device_id=72,
+        card_profile_device=8,
+    )
+    speakers = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.test",
+        index=0,
+        route_device=6,
+        profile=0,
+        priority=100,
+        direction="Output",
+        name="analog-output-speaker",
+        description="Speakers",
+        availability="unknown",
+    )
+
+    monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
+    monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: object())
+    monkeypatch.setattr(backend, "_enumerate_device_routes", lambda _device, _bound_id: [speakers])
+
+    assert backend.output_preset_keys_for_sink_name("alsa_output.test") == (
+        "pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=6",
+        "alsa_output.test",
+    )
+
+
+def test_output_preset_keys_do_not_guess_between_routes_sharing_profile_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(Device=FakeDeviceApi, RouteInfo=FakeRouteInfoApi)
+    sink = pw_backend.PipeWireNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=pw_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+        device_id=72,
+        card_profile_device=6,
+    )
+    speakers = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.test",
+        index=0,
+        route_device=6,
+        profile=0,
+        priority=100,
+        direction="Output",
+        name="analog-output-speaker",
+        description="Speakers",
+        availability="unknown",
+    )
+    headphones = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.test",
+        index=1,
+        route_device=6,
+        profile=0,
+        priority=200,
+        direction="Output",
+        name="analog-output-headphones",
+        description="Headphones",
+        availability="yes",
+    )
+
+    monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
+    monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: object())
+    monkeypatch.setattr(backend, "_enumerate_device_routes", lambda _device, _bound_id: [speakers, headphones])
+
+    assert backend.output_preset_keys_for_sink_name("alsa_output.test") == ("alsa_output.test",)
+
+
 def test_output_preset_keys_fall_back_to_sink_name_without_route_api(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = pw_backend.PipeWireBackend()
     backend._Pwg = SimpleNamespace()

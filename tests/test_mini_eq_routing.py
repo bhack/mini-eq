@@ -292,6 +292,69 @@ def test_output_route_param_change_schedules_output_refresh(monkeypatch: pytest.
     assert len(scheduled_callbacks) == 1
 
 
+def test_output_route_param_change_refreshes_same_sink_route_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    sink = make_node(1, "alsa_output.internal", device_id=72)
+    route_callback = None
+    calls: list[object] = []
+
+    class FakeBackend(FakeOutputBackend):
+        route_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=6"
+
+        def output_preset_target_for_sink_name(
+            self,
+            sink_name: str | None,
+        ) -> pw_routes.PipeWireOutputPresetTarget:
+            return pw_routes.PipeWireOutputPresetTarget(
+                sink_name,
+                None,
+                (self.route_key, sink_name) if sink_name else (),
+            )
+
+        def connect_device_route_changed(self, device_id: int, callback) -> int:
+            nonlocal route_callback
+            assert device_id == 72
+            route_callback = callback
+            return 77
+
+        def disconnect_device_handler(self, handler_id: int) -> None:
+            calls.append(("disconnect-route", handler_id))
+
+    backend = FakeBackend([sink])
+    controller.output_backend = backend
+    controller.output_sink = "alsa_output.internal"
+    controller.accept_output_events = True
+    controller.output_event_source_id = 0
+    controller.output_route_param_handler_id = 0
+    controller.output_route_param_device_id = 0
+    controller.follow_default_output = False
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.outputs_changed_callback = lambda: calls.append("outputs")
+
+    monkeypatch.setattr(routing.GLib, "idle_add", lambda callback: calls.append(("idle", callback)) or 321)
+
+    assert routing.SystemWideEqController.output_preset_link_key(controller) == backend.route_key
+    routing.SystemWideEqController.refresh_output_route_param_monitor(controller)
+
+    backend.route_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=6"
+    assert route_callback is not None
+    route_callback()
+
+    assert controller.output_event_source_id == 321
+    assert routing.SystemWideEqController.output_preset_link_key(controller).endswith(
+        "route=analog-output-headphones;route-device=6"
+    )
+
+    assert routing.SystemWideEqController.on_output_event_idle(controller) is False
+
+    assert routing.SystemWideEqController.output_preset_link_key(controller).endswith(
+        "route=analog-output-speaker;route-device=6"
+    )
+    assert calls == [("idle", controller.on_output_event_idle), "refresh", "outputs"]
+
+
 def test_output_route_param_monitor_moves_with_active_output() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     calls: list[object] = []

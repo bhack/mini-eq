@@ -19,6 +19,7 @@ PWG_REQUIRED_SYMBOLS = (
     "Device.enum_all_params",
     "Device.enum_params",
     "Device.new",
+    "Device.subscribe_params",
     "Param.new_props_controls",
     "RouteInfo.new_from_param",
     "Stream.set_pipewire_property",

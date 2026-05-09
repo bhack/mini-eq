@@ -95,7 +95,12 @@ def test_pipewire_gobject_check_requires_current_library_version(monkeypatch) ->
     fake_pwg = SimpleNamespace(
         get_library_version=lambda: "0.3.4",
         Core=SimpleNamespace(set_pipewire_property=object()),
-        Device=SimpleNamespace(enum_all_params=object(), enum_params=object(), new=object()),
+        Device=SimpleNamespace(
+            enum_all_params=object(),
+            enum_params=object(),
+            new=object(),
+            subscribe_params=object(),
+        ),
         Param=SimpleNamespace(new_props_controls=object()),
         RouteInfo=SimpleNamespace(new_from_param=object()),
         Stream=SimpleNamespace(set_pipewire_property=object()),
@@ -123,7 +128,12 @@ def test_pipewire_gobject_check_requires_property_override_symbols(monkeypatch) 
     fake_pwg = SimpleNamespace(
         get_library_version=lambda: "0.3.5",
         Core=SimpleNamespace(),
-        Device=SimpleNamespace(enum_all_params=object(), enum_params=object(), new=object()),
+        Device=SimpleNamespace(
+            enum_all_params=object(),
+            enum_params=object(),
+            new=object(),
+            subscribe_params=object(),
+        ),
         Param=SimpleNamespace(new_props_controls=object()),
         RouteInfo=SimpleNamespace(new_from_param=object()),
         Stream=SimpleNamespace(set_pipewire_property=object()),

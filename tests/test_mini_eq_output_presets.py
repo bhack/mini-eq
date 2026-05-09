@@ -806,6 +806,39 @@ def test_output_preset_actions_use_route_key_when_available(monkeypatch, tmp_pat
     assert test_window.statuses[-1] == "Auto preset cleared"
 
 
+def test_output_scope_state_follows_same_sink_route_change(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    controller = make_controller("alsa_output.internal")
+    route = SimpleNamespace(
+        description="Headphones",
+        name="analog-output-headphones",
+        output_preset_key="pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=6",
+    )
+
+    def output_preset_target():
+        return SimpleNamespace(
+            output_key=controller.output_sink,
+            route=route,
+            keys=(route.output_preset_key, controller.output_sink),
+            link_key=route.output_preset_key,
+            has_route_key=True,
+        )
+
+    controller.output_preset_target = output_preset_target
+    test_window = OutputPresetWindow(controller)
+
+    test_window.update_output_preset_state()
+    assert test_window.output_scope_state_label.text == "Headphones"
+
+    route.description = "Speakers"
+    route.name = "analog-output-speaker"
+    route.output_preset_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=6"
+
+    test_window.update_output_preset_state()
+    assert test_window.output_scope_state_label.text == "Speakers"
+
+
 def test_deleting_only_loaded_preset_keeps_curve_and_allows_neutral_reset(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
@@ -1132,6 +1165,54 @@ def test_pipewire_observed_output_change_runs_output_preset_handling() -> None:
         ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
     ]
     assert fake_window.last_output_preset_sink_name == "alsa_output.usb"
+
+
+def test_pipewire_observed_port_scope_change_runs_output_preset_handling() -> None:
+    calls: list[object] = []
+    old_route_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=6"
+    new_route_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=6"
+    target = SimpleNamespace(
+        link_key=new_route_key,
+        keys=(new_route_key, "alsa_output.internal"),
+    )
+    fake_window = SimpleNamespace(
+        ui_shutting_down=False,
+        controller=SimpleNamespace(
+            output_sink="alsa_output.internal",
+            follow_default_output=True,
+            get_default_output_sink_name=lambda: "alsa_output.internal",
+            get_sink=lambda _sink_name: None,
+        ),
+        last_output_preset_sink_name="alsa_output.internal",
+        last_output_preset_target_identity=old_route_key,
+        output_preset_auto_applied=True,
+        output_preset_curve_auto_loaded=True,
+        post_present_ready=True,
+        list_visible_output_sinks=lambda: [],
+        build_output_sink_labels=lambda _sinks: [],
+        follow_default_output_label=lambda: "Follow system output",
+        output_sink_names=[],
+        output_sink_labels=[],
+        output_sink_model=FakeModel(),
+        output_combo=FakeCombo(),
+        updating_output_combo=False,
+        output_preset_target=lambda: target,
+        update_preset_state=lambda: calls.append("preset-state"),
+        update_info_label=lambda: calls.append("info"),
+        update_status_summary=lambda: calls.append("summary"),
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("auto", kwargs)),
+    )
+
+    window.MiniEqWindow.refresh_output_sinks(fake_window)
+
+    assert calls == [
+        "preset-state",
+        "info",
+        "summary",
+        ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
+    ]
+    assert fake_window.last_output_preset_sink_name == "alsa_output.internal"
+    assert fake_window.last_output_preset_target_identity == new_route_key
 
 
 def test_manual_output_refresh_updates_selector_without_handling_observed_output_change() -> None:

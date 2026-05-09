@@ -94,9 +94,13 @@ class PipeWireRouteMixin:
             return None
 
         if sink.card_profile_device > 0:
-            for route in output_routes:
-                if route.route_device == sink.card_profile_device:
-                    return route
+            matching_device_routes = [
+                route for route in output_routes if route.route_device == sink.card_profile_device
+            ]
+            if len(matching_device_routes) == 1:
+                return matching_device_routes[0]
+            if len(matching_device_routes) > 1:
+                return None
 
         if len(output_routes) == 1:
             return output_routes[0]
