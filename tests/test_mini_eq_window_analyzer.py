@@ -157,6 +157,7 @@ class FakeSwitch:
     def __init__(self, active: bool) -> None:
         self.active = active
         self.state = active
+        self.sensitive = True
 
     def get_active(self) -> bool:
         return self.active
@@ -169,6 +170,9 @@ class FakeSwitch:
 
     def set_state(self, state: bool) -> None:
         self.state = state
+
+    def set_sensitive(self, sensitive: bool) -> None:
+        self.sensitive = sensitive
 
 
 class FakeSummaryLabel:
@@ -452,6 +456,23 @@ def test_analyzer_toggle_off_emits_zero_level_signal(monkeypatch) -> None:
     assert saved_values == [False]
 
 
+def test_analyzer_toggle_off_clears_and_disables_freeze(monkeypatch) -> None:
+    saved_values: list[bool] = []
+    monkeypatch.setattr(window_analyzer, "save_monitor_enabled", saved_values.append)
+    window = AnalyzerToggleWindow()
+    window.analyzer_frozen = True
+    window.analyzer_freeze_switch.set_state(True)
+    monitor_switch = FakeSwitch(False)
+
+    handled = window.on_analyzer_changed(monitor_switch, None)
+
+    assert handled is True
+    assert window.analyzer_enabled is False
+    assert window.analyzer_frozen is False
+    assert window.analyzer_freeze_switch.get_state() is False
+    assert window.analyzer_freeze_switch.sensitive is False
+
+
 def test_analyzer_freeze_refreshes_monitor_controls() -> None:
     window = AnalyzerToggleWindow()
     freeze_switch = FakeSwitch(True)
@@ -467,6 +488,19 @@ def test_analyzer_freeze_refreshes_monitor_controls() -> None:
     assert window.graph_background_invalidations == 0
     assert window.graph_draws == 0
     assert window.analyzer_draws == 1
+
+
+def test_analyzer_preview_failure_clears_and_disables_freeze() -> None:
+    window = AnalyzerPreviewWindow(start_result=False)
+    window.analyzer_frozen = True
+    window.analyzer_freeze_switch.set_state(True)
+
+    window.start_analyzer_preview()
+
+    assert window.analyzer_enabled is False
+    assert window.analyzer_frozen is False
+    assert window.analyzer_freeze_switch.get_state() is False
+    assert window.analyzer_freeze_switch.sensitive is False
 
 
 def test_analyzer_summary_prefers_live_shortterm_loudness() -> None:

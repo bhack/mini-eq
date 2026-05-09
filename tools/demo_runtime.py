@@ -93,8 +93,7 @@ class DemoController:
     def state_signature(self) -> str:
         return json.dumps(
             {
-                "eq_enabled": self.eq_enabled,
-                "eq_mode": self.eq_mode,
+                "version": PRESET_VERSION,
                 "preamp_db": self.preamp_db,
                 "bands": [eq_band_to_dict(band) for band in self.bands],
             },

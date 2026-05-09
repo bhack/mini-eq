@@ -20,6 +20,8 @@ Run the narrowest gate that covers the release risk:
 - **When background mode, Start at Login, hidden-window lifecycle, or Shell
   control changed:** one clean-permission Flatpak portal smoke in a real GNOME
   session.
+- **When preset, output, startup, routing, monitor, or inspector UI behavior
+  changed:** run the workflow usability gate below before release.
 - **When the GNOME Shell extension source changed:** run the extension checker,
   build the review zip, test the supported Shell versions, and upload after the
   app release is ready.
@@ -30,6 +32,44 @@ Run the narrowest gate that covers the release risk:
 TestPyPI is package-index validation. It is not a user beta channel. Flathub PR
 test builds are the normal stable handoff validation. Flathub beta is a
 temporary user-installable Flatpak beta, not a permanent second release line.
+
+## Workflow Usability Gate
+
+Before releasing UI or state-machine changes, review the workflows as state
+transitions, not as isolated controls. Every changed workflow should have a
+single obvious current state, a reversible path, and no first-frame state
+change after the window is shown.
+
+For preset and output changes, cover these cases with unit tests when possible
+and with AT-SPI or live smoke when they require real GTK behavior:
+
+- Load, edit, reset to neutral, then reload the same saved preset from the
+  preset loader. Keep revert-style actions for unsaved sources that are not in
+  the preset library.
+- Verify the preset loader does not pretend to be the running state: the visible
+  running-curve label must distinguish neutral, exact saved preset, modified
+  preset, and unsaved/imported curves.
+- Import or create an unsaved curve, save it, reset it, and recover a neutral
+  curve without deleting the only route back.
+- Delete the loaded preset, delete or modify it outside the app, and keep the
+  current curve understandable as an unsaved copy.
+- Link, unlink, miss, and modify auto presets for both port-scoped and
+  output-scoped targets.
+- Set, miss, and clear the default preset.
+- Change output while a curve is clean, modified, auto-applied, missing, or
+  unavailable.
+- Turn Monitor on/off and freeze/unfreeze it without leaving hidden frozen
+  state behind.
+- Start the app with auto/default preset and auto-route inputs and verify the
+  visible window appears only after startup state is applied.
+- Check Shell extension/D-Bus state after preset, output, background, and
+  window-visibility changes.
+
+AT-SPI tests should assert externally visible behavior: accessible names, roles,
+checked state, sensitivity, and critical status labels. They should not depend
+on widget internals when a unit test can cover the state transition directly.
+When in doubt, add a small state-level unit test first, then one AT-SPI smoke
+assertion for the visible contract.
 
 ## Prepare Version
 

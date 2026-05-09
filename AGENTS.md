@@ -115,6 +115,16 @@ modules from a system-site build venv.
   behavior on `capabilities`. Bump the API version only for semantic breaks, and
   support the old version for a short, documented release window before removing
   it.
+- Keep app-owned JSON documents explicitly versioned with a top-level
+  `version` field plus migration, unsupported-version, and corrupted-schema
+  normalization tests. Presets and output preset links are JSON documents; do
+  not move them to GSettings. Valid legacy documents should load without being
+  rewritten on startup, then be written in the current schema only when the
+  user changes related state. Future-version or corrupted documents should not
+  be overwritten just because the app started. If GSettings is introduced
+  later, keep it to small typed preferences such as appearance, monitor, and
+  background/startup choices, and update the schema install, Flatpak, and test
+  paths in the same change.
 - Keep the `mini-eq` CLI user-oriented. Maintainer automation belongs in
   `tools/`, `docs/`, or this file.
 - Keep the GNOME Shell extension source in `extensions/gnome-shell/`; do not

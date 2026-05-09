@@ -437,8 +437,16 @@ try:
         raise AssertionError("Monitor Off status is missing")
     if find_accessible(frame, name="EQ output", role="combo box", showing=True) is None:
         raise AssertionError("EQ output combo box is missing")
-    if find_accessible(frame, name="Preset", role="combo box", showing=True) is None:
-        raise AssertionError("Preset combo box is missing")
+    if (
+        find_accessible_with_roles(
+            frame,
+            name="Load Preset",
+            roles={"push button", "toggle button"},
+            showing=True,
+        )
+        is None
+    ):
+        raise AssertionError("Load Preset menu button is missing")
 
     verify_dropdown_exposes_options(frame, combo_name="Type", required_options=("Notch", "Bell"))
 
@@ -508,6 +516,14 @@ try:
             else None
         ),
     )
+    freeze_switch = wait_for(
+        "Freeze Monitor switch after Monitor turns off",
+        lambda: find_accessible(desktop, name="Freeze Monitor", role="switch", showing=True),
+    )
+    if sensitive(freeze_switch):
+        raise AssertionError("Freeze Monitor switch should be insensitive while Monitor is off")
+    if checked(freeze_switch):
+        raise AssertionError("Freeze Monitor switch should clear when Monitor turns off")
 finally:
     if atspi_event_thread is not None:
         stop_accessible_event_loop(atspi_event_thread)

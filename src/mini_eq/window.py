@@ -257,12 +257,13 @@ class MiniEqWindow(
             return False
 
         self.start_analyzer_preview()
-        self.notify_control_state_changed()
         if self.auto_route_on_startup:
-            self.schedule_startup_auto_route()
+            self.apply_startup_auto_route()
 
         if not self.ui_shutting_down and self.present_after_setup:
+            self.set_visible(True)
             self.present()
+        self.notify_control_state_changed()
         return False
 
     def schedule_startup_auto_route(self) -> None:
@@ -271,18 +272,21 @@ class MiniEqWindow(
 
         self.startup_auto_route_source_id = GLib.idle_add(self.on_startup_auto_route_idle)
 
-    def on_startup_auto_route_idle(self) -> bool:
-        self.startup_auto_route_source_id = 0
-
-        if self.ui_shutting_down or not self.auto_route_on_startup:
-            return False
-
+    def apply_startup_auto_route(self) -> None:
         eq_was_enabled = self.controller.eq_enabled
         try:
             self.controller.route_system_audio(True)
         except Exception as exc:
             self.set_status(str(exc))
         self.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled)
+
+    def on_startup_auto_route_idle(self) -> bool:
+        self.startup_auto_route_source_id = 0
+
+        if self.ui_shutting_down or not self.auto_route_on_startup:
+            return False
+
+        self.apply_startup_auto_route()
         return False
 
     def prepare_for_shutdown(self) -> None:
@@ -546,6 +550,8 @@ class MiniEqWindow(
             return False
 
         self.refresh_preset_list()
+        self.notify_control_presets_changed()
+        self.notify_control_state_changed()
         return False
 
     def on_close_request(self, window: Gtk.Window) -> bool:
@@ -668,7 +674,7 @@ class MiniEqWindow(
             if profile == "a2dp-sink":
                 return "Bluetooth A2DP", f"{sample_text} music profile", False, warnings
 
-            if "headset" in profile:
+            if profile and "headset" in profile:
                 warnings.append(
                     "Bluetooth output is in headset mode. Switch back to A2DP for full-band music playback."
                 )
@@ -758,20 +764,22 @@ class MiniEqWindow(
         active = self.controller.output_sink
         previous_output = self.last_output_preset_sink_name
         previous_output_preset_auto_loaded = self.output_preset_curve_auto_loaded
-        default_sink_name = self.controller.get_default_output_sink_name()
         visible_sinks = self.list_visible_output_sinks()
         visible_sink_names = [sink.node_name for sink in visible_sinks if sink.node_name is not None]
         visible_sink_labels = self.build_output_sink_labels(visible_sinks)
         self.output_sink_names = [None, *visible_sink_names]
         self.output_sink_labels = [self.follow_default_output_label(), *visible_sink_labels]
-        self.output_sink_model.splice(0, self.output_sink_model.get_n_items(), self.output_sink_labels)
         selected_index = 0
 
         if not self.controller.follow_default_output:
             if active in visible_sink_names:
                 selected_index = visible_sink_names.index(active) + 1
-            elif default_sink_name in visible_sink_names:
-                selected_index = visible_sink_names.index(default_sink_name) + 1
+            elif active:
+                self.output_sink_names.append(active)
+                self.output_sink_labels.append("Unavailable output")
+                selected_index = len(self.output_sink_names) - 1
+
+        self.output_sink_model.splice(0, self.output_sink_model.get_n_items(), self.output_sink_labels)
 
         self.output_combo.set_sensitive(len(self.output_sink_names) > 1)
 
@@ -819,7 +827,7 @@ class MiniEqWindow(
         path = file.get_path()
 
         if path is None:
-            self.set_status("Could Not Resolve APO Preset Path")
+            self.set_status("Could not open APO preset")
             return
 
         try:
@@ -833,7 +841,7 @@ class MiniEqWindow(
             self.output_preset_curve_auto_loaded = False
             self.refresh_preset_list()
             self.sync_ui_from_state()
-            self.set_status(curve_label)
+            self.set_status("Imported APO curve")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))

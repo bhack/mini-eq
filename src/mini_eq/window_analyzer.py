@@ -172,12 +172,13 @@ class MiniEqWindowAnalyzerMixin:
 
         try:
             started = self.controller.set_analyzer_enabled(True)
-        except Exception as exc:
-            self.set_status(f"Monitor Unavailable: {exc}")
+        except Exception:
+            self.set_status("Monitor unavailable")
             started = False
 
         if not started:
             self.analyzer_enabled = False
+            self.analyzer_frozen = False
             self.refresh_after_monitor_state_changed(monitor_visibility_changed=True)
             return
 
@@ -398,6 +399,7 @@ class MiniEqWindowAnalyzerMixin:
     def _sync_monitor_controls_unlocked(self) -> None:
         set_switch_confirmed_state(self.analyzer_switch, self.analyzer_enabled)
         set_switch_confirmed_state(self.analyzer_freeze_switch, self.analyzer_frozen)
+        self.analyzer_freeze_switch.set_sensitive(self.analyzer_enabled)
         self.analyzer_state_label.set_text(
             "Frozen" if self.analyzer_frozen and self.analyzer_enabled else ("Live" if self.analyzer_enabled else "Off")
         )
@@ -440,10 +442,11 @@ class MiniEqWindowAnalyzerMixin:
         else:
             try:
                 self.stop_analyzer_preview()
-            except Exception as exc:
+            except Exception:
                 self.analyzer_enabled = previous_enabled
-                self.set_status(f"Monitor Unavailable: {exc}")
+                self.set_status("Monitor unavailable")
             else:
+                self.analyzer_frozen = False
                 self.analyzer_levels = [0.0] * len(self.analyzer_levels)
                 self.analyzer_loudness_snapshot = None
                 self.analyzer_session_max_shortterm_lufs = None

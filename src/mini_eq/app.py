@@ -85,9 +85,10 @@ class MiniEqApplication(Adw.Application):
                 return
             if present:
                 self.window.present_after_setup = True
-                self.window.set_visible(True)
-                self.window.present()
-                self.emit_control_state_changed()
+                if self.window.post_present_ready:
+                    self.window.set_visible(True)
+                    self.window.present()
+                    self.emit_control_state_changed()
             self.window.schedule_post_present_setup()
             return
 
@@ -110,13 +111,9 @@ class MiniEqApplication(Adw.Application):
         self.window = MiniEqWindow(self, self.controller, self.args.auto_route, initial_curve_label=initial_curve_label)
         self.window.set_icon_name(APP_ICON_NAME)
         self.window.present_after_setup = present
-        self.window.set_visible(present)
-        if present:
-            self.window.present()
+        self.window.set_visible(False)
         self.window.schedule_post_present_setup()
-        if present:
-            self.window_present_source_id = GLib.idle_add(self.on_window_present_idle)
-        else:
+        if not present:
             self.update_background_status()
             self.emit_control_state_changed()
 

@@ -73,6 +73,10 @@ def bind_control_refresh_methods(fake_window: SimpleNamespace) -> None:
         window.MiniEqWindow.refresh_after_eq_state_changed,
         fake_window,
     )
+    fake_window.apply_startup_auto_route = MethodType(
+        window.MiniEqWindow.apply_startup_auto_route,
+        fake_window,
+    )
 
 
 def test_on_close_request_starts_custom_shutdown_sequence() -> None:
@@ -95,6 +99,35 @@ def test_compact_warning_title_keeps_bluetooth_warning_glanceable() -> None:
         )
         == "Headset"
     )
+
+
+def test_bluetooth_profile_summary_handles_missing_profile() -> None:
+    fake_window = SimpleNamespace(format_sample_spec=lambda _sink: "48 kHz stereo")
+    sink = SimpleNamespace(property_value=lambda key: {"device.api": "bluez5"}.get(key))
+
+    assert window.MiniEqWindow.profile_summary(fake_window, sink) == (
+        "Bluetooth",
+        "48 kHz stereo | profile unknown",
+        False,
+        [],
+    )
+
+
+def test_preset_directory_refresh_notifies_control_clients() -> None:
+    calls: list[str] = []
+    fake_window = SimpleNamespace(
+        ui_shutting_down=False,
+        preset_refresh_source_id=42,
+        refresh_preset_list=lambda: calls.append("refresh"),
+        notify_control_presets_changed=lambda: calls.append("presets"),
+        notify_control_state_changed=lambda: calls.append("state"),
+    )
+
+    keep_source = window.MiniEqWindow.on_preset_dir_changed_idle(fake_window)
+
+    assert keep_source is False
+    assert fake_window.preset_refresh_source_id == 0
+    assert calls == ["refresh", "presets", "state"]
 
 
 def test_begin_close_request_shutdown_restores_routing_before_delayed_quit(monkeypatch) -> None:
@@ -224,7 +257,7 @@ def test_begin_close_request_shutdown_hides_when_background_mode_is_enabled() ->
     ]
 
 
-def test_post_present_setup_schedules_auto_route_after_startup_work() -> None:
+def test_post_present_setup_applies_startup_state_before_presenting() -> None:
     calls: list[object] = []
     controller = SimpleNamespace(eq_enabled=True, routed=False)
 
@@ -241,7 +274,7 @@ def test_post_present_setup_schedules_auto_route_after_startup_work() -> None:
         post_present_ready=False,
         auto_route_on_startup=True,
         updating_ui=False,
-        present_after_setup=False,
+        present_after_setup=True,
         route_switch=FakeSwitch(False),
         controller=controller,
         start_preset_monitoring=lambda: calls.append("preset-monitor"),
@@ -253,7 +286,7 @@ def test_post_present_setup_schedules_auto_route_after_startup_work() -> None:
         start_analyzer_preview=lambda: calls.append("monitor"),
         notify_control_state_changed=lambda: calls.append("notify"),
         set_status=lambda message: calls.append(("status", message)),
-        schedule_startup_auto_route=lambda: calls.append("schedule-route"),
+        set_visible=lambda visible: calls.append(("visible", visible)),
         present=lambda: calls.append("present"),
     )
     fake_window.bypass_switch = FakeSwitch(True)
@@ -264,14 +297,21 @@ def test_post_present_setup_schedules_auto_route_after_startup_work() -> None:
     assert keep_source is False
     assert fake_window.post_present_source_id == 0
     assert fake_window.post_present_ready is True
-    assert fake_window.route_switch.get_active() is False
-    assert fake_window.route_switch.get_state() is False
+    assert fake_window.route_switch.get_active() is True
+    assert fake_window.route_switch.get_state() is True
     assert calls == [
         "preset-monitor",
         "output-preset",
         "monitor",
+        ("route", True),
+        ("power", True),
+        ("info", True),
+        ("summary", True),
+        "focus",
         "notify",
-        "schedule-route",
+        ("visible", True),
+        "present",
+        "notify",
     ]
 
 
@@ -453,7 +493,7 @@ def test_import_apo_updates_provisional_curve_status_and_control_state(tmp_path)
     assert fake_window.current_preset_name is None
     assert fake_window.saved_preset_signature == "imported-signature"
     assert fake_window.output_preset_curve_auto_loaded is False
-    assert statuses == ["Imported APO: HD 650"]
+    assert statuses == ["Imported APO curve"]
     assert calls == [
         ("import", str(apo_path)),
         ("visible-bands", 7),

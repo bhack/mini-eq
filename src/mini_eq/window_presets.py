@@ -9,7 +9,7 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from .core import (
     DEFAULT_ACTIVE_BANDS,
@@ -25,12 +25,13 @@ from .core import (
     list_preset_names,
     load_mini_eq_preset_file,
     preset_path_for_name,
+    preset_payload_state_signature,
     sanitize_preset_name,
     set_default_preset_name,
     set_output_preset_link,
     write_mini_eq_preset_file,
 )
-from .window_utils import requested_switch_state, set_switch_confirmed_state
+from .window_utils import requested_switch_state, set_accessible_label, set_switch_confirmed_state
 
 APO_IMPORT_LABEL_PREFIX = "Imported APO: "
 DELETED_PRESET_LABEL_PREFIX = "Unsaved copy: "
@@ -48,7 +49,11 @@ class PresetPanelUiState:
     preset_state_text: str
     preset_state_class: str
     preset_state_tooltip: str
+    current_curve_text: str
+    current_curve_tooltip: str
     save_label: str
+    save_tooltip: str
+    primary_action: str
     save_as_visible: bool
     revert_visible: bool
     revert_label: str
@@ -161,6 +166,20 @@ class MiniEqWindowPresetMixin:
         self.curve_revert_baseline_signature = self.controller.state_signature()
         self.curve_revert_baseline_payload = self.controller.build_preset_payload(label)
 
+    def relabel_curve_revert_baseline(self, label: str) -> None:
+        self.curve_revert_baseline_label = label
+
+    def set_curve_revert_baseline_payload(
+        self,
+        label: str,
+        payload: dict[str, object],
+        signature: str,
+    ) -> None:
+        self.curve_revert_baseline_label = label
+        self.curve_revert_baseline_signature = signature
+        self.curve_revert_baseline_payload = dict(payload)
+        self.curve_revert_baseline_payload["name"] = label
+
     def clear_curve_revert_baseline(self) -> None:
         self.curve_revert_baseline_label = None
         self.curve_revert_baseline_signature = None
@@ -185,6 +204,26 @@ class MiniEqWindowPresetMixin:
     def curve_revert_target_is_neutral(self) -> bool:
         return self.current_preset_name is None and self.curve_revert_signature() == self.default_preset_signature
 
+    def curve_revert_target_is_library_preset(self) -> bool:
+        label = self.curve_revert_label()
+        return bool(label and self.preset_name_exists(label))
+
+    def compact_curve_source_label(self, label: str) -> str:
+        if label.startswith(APO_IMPORT_LABEL_PREFIX):
+            return "Imported curve"
+        if label.startswith(DELETED_PRESET_LABEL_PREFIX):
+            return "Deleted preset copy"
+        return label
+
+    def curve_source_tooltip(self, label: str) -> str:
+        if label.startswith(APO_IMPORT_LABEL_PREFIX):
+            source_name = label[len(APO_IMPORT_LABEL_PREFIX) :]
+            return f"Imported from {source_name}."
+        if label.startswith(DELETED_PRESET_LABEL_PREFIX):
+            source_name = label[len(DELETED_PRESET_LABEL_PREFIX) :]
+            return f"Deleted preset: {source_name}. Curve is kept."
+        return label
+
     def current_curve_source_label(self) -> str | None:
         if self.current_preset_name is not None:
             return None
@@ -195,9 +234,56 @@ class MiniEqWindowPresetMixin:
             return None
         return label
 
+    def current_curve_running_text(
+        self,
+        *,
+        current_signature: str | None = None,
+        revert_signature: str | None = None,
+    ) -> tuple[str, str]:
+        current_signature = current_signature or self.controller.state_signature()
+        if revert_signature is None:
+            revert_signature = self.curve_revert_signature()
+
+        if self.current_preset_name is not None:
+            if current_signature == self.saved_preset_signature:
+                return (self.current_preset_name, f"Saved preset: {self.current_preset_name}.")
+            return (self.current_preset_name, f"Unsaved edits from {self.current_preset_name}.")
+
+        label = self.curve_revert_label()
+        if current_signature == self.default_preset_signature:
+            if (
+                self.has_neutral_reapply_target(
+                    current_signature=current_signature,
+                    revert_signature=revert_signature,
+                )
+                and label
+            ):
+                compact_label = self.compact_curve_source_label(label)
+                if self.preset_name_exists(label):
+                    return (
+                        "Neutral",
+                        f"Neutral. Load {compact_label} to restore.",
+                    )
+                return (
+                    "Neutral",
+                    f"Neutral. Reapply restores {compact_label}.",
+                )
+            return ("Neutral", "Neutral curve.")
+
+        if label and revert_signature is not None and revert_signature != self.default_preset_signature:
+            compact_label = self.compact_curve_source_label(label)
+            if current_signature == revert_signature:
+                return (compact_label, self.curve_source_tooltip(label))
+            return (compact_label, f"Unsaved edits from {compact_label}.")
+
+        return ("Unsaved curve", "Not saved as a preset.")
+
     def suggested_save_as_name(self) -> str:
         if self.current_preset_name is not None:
             return self.current_preset_name
+
+        if self.controller.state_signature() == self.default_preset_signature:
+            return ""
 
         label = self.current_curve_source_label()
         if label and label.startswith(APO_IMPORT_LABEL_PREFIX):
@@ -267,30 +353,59 @@ class MiniEqWindowPresetMixin:
     def has_neutral_curve_changes(self) -> bool:
         return self.controller.state_signature() != self.default_preset_signature
 
+    def has_neutral_reapply_target(
+        self,
+        *,
+        current_signature: str | None = None,
+        revert_signature: str | None = None,
+    ) -> bool:
+        current_signature = current_signature or self.controller.state_signature()
+        if revert_signature is None:
+            revert_signature = self.curve_revert_signature()
+        return bool(
+            self.current_preset_name is None
+            and current_signature == self.default_preset_signature
+            and revert_signature is not None
+            and revert_signature != self.default_preset_signature
+        )
+
     def preset_panel_ui_state(self) -> PresetPanelUiState:
         current_signature = self.controller.state_signature()
         has_named_preset = self.current_preset_name is not None
+        clean_named_preset = has_named_preset and current_signature == self.saved_preset_signature
         neutral = current_signature == self.default_preset_signature
         revert_signature = self.curve_revert_signature()
         revert_label = self.curve_revert_label() or "curve baseline"
+        revert_display_label = self.compact_curve_source_label(revert_label)
         has_revert_target = revert_signature is not None and not self.curve_revert_target_is_neutral()
-        revert_visible = has_revert_target and current_signature != revert_signature
+        revert_target_is_library_preset = self.curve_revert_target_is_library_preset()
+        revert_visible = (
+            has_revert_target and current_signature != revert_signature and not revert_target_is_library_preset
+        )
+        neutral_reapply_target = self.has_neutral_reapply_target(
+            current_signature=current_signature,
+            revert_signature=revert_signature,
+        )
         reset_visible = not neutral
         default_preset = self.default_preset_name()
-        default_set_visible = has_named_preset
+        default_set_visible = clean_named_preset
         default_clear_visible = default_preset is not None
         curve_group_visible = has_named_preset or revert_visible or reset_visible
         default_group_visible = default_set_visible or default_clear_visible
         export_label = "Export Preset…" if has_named_preset else "Export Current Curve…"
+        current_curve_text, current_curve_tooltip = self.current_curve_running_text(
+            current_signature=current_signature,
+            revert_signature=revert_signature,
+        )
 
         if has_named_preset and current_signature == self.saved_preset_signature:
-            preset_state_text = "Saved"
+            preset_state_text = "Preset"
             preset_state_class = "preset-state-saved"
-            preset_state_tooltip = f"{self.current_preset_name} matches the saved preset"
+            preset_state_tooltip = f"Running curve matches saved preset {self.current_preset_name}"
         elif has_named_preset:
             preset_state_text = "Modified"
             preset_state_class = "preset-state-modified"
-            preset_state_tooltip = f"{self.current_preset_name} has unsaved curve changes"
+            preset_state_tooltip = f"Running curve is modified from {self.current_preset_name}"
         elif neutral:
             preset_state_text = "Neutral"
             preset_state_class = "preset-state-neutral"
@@ -304,21 +419,39 @@ class MiniEqWindowPresetMixin:
             preset_state_class = "preset-state-modified"
             preset_state_tooltip = "Current curve has unsaved changes"
 
-        if revert_visible:
-            revert_tooltip = f"Revert to {revert_label}"
+        if revert_visible and neutral_reapply_target:
+            revert_action_label = f"Reapply {revert_display_label}"
+            revert_tooltip = f"Apply {revert_display_label} again"
+        elif revert_visible:
+            revert_action_label = f"Revert to {revert_display_label}"
+            revert_tooltip = f"Revert to {revert_display_label}"
         elif has_revert_target:
+            revert_action_label = f"Revert to {revert_display_label}"
             revert_tooltip = "No curve changes to revert"
         else:
+            revert_action_label = f"Revert to {revert_display_label}"
             revert_tooltip = "No preset baseline to revert to"
+
+        primary_action = "reapply" if neutral_reapply_target and revert_visible else "save"
+        save_label = "Reapply" if primary_action == "reapply" else ("Save" if has_named_preset else "Save As…")
+        save_tooltip = (
+            f"Apply {revert_display_label} again"
+            if primary_action == "reapply"
+            else ("Save changes to the current preset" if has_named_preset else "Save the running curve as a preset")
+        )
 
         return PresetPanelUiState(
             preset_state_text=preset_state_text,
             preset_state_class=preset_state_class,
             preset_state_tooltip=preset_state_tooltip,
-            save_label="Save" if has_named_preset else "Save As…",
-            save_as_visible=has_named_preset,
+            current_curve_text=current_curve_text,
+            current_curve_tooltip=current_curve_tooltip,
+            save_label=save_label,
+            save_tooltip=save_tooltip,
+            primary_action=primary_action,
+            save_as_visible=has_named_preset or primary_action == "reapply",
             revert_visible=revert_visible,
-            revert_label=f"Revert to {revert_label}",
+            revert_label=revert_action_label,
             revert_tooltip=revert_tooltip,
             reset_visible=reset_visible,
             reset_tooltip="Reset all bands and preamp to neutral" if reset_visible else "Curve is already neutral",
@@ -340,8 +473,7 @@ class MiniEqWindowPresetMixin:
         self.output_preset_auto_applied = False
         target = self.output_preset_target()
         self.update_output_scope_state(target)
-        scope_text, scope_kind, _status_scope = self.output_preset_scope_text(target)
-        linked_status_text = "Linked to port" if scope_kind == "port" else "Linked to EQ output"
+        scope_text, _scope_kind, _status_scope = self.output_preset_scope_text(target)
         clear_tooltip = f"Clear auto preset for {scope_text}"
 
         def sync_output_preset_switch(
@@ -379,18 +511,22 @@ class MiniEqWindowPresetMixin:
             return
 
         has_output = bool(self.controller.output_sink)
+        current_signature = self.controller.state_signature()
         has_named_preset = self.current_preset_name is not None
+        has_linkable_preset = has_named_preset and current_signature == self.saved_preset_signature
 
         if not linked_preset:
             if not has_output:
                 tooltip = "Select an EQ Output"
             elif not has_named_preset:
                 tooltip = "Save a Preset First"
+            elif not has_linkable_preset:
+                tooltip = "Save or load the preset before linking it"
             else:
                 tooltip = f"Use selected preset automatically for {scope_text}"
             sync_output_preset_switch(
                 active=False,
-                sensitive=has_output and has_named_preset,
+                sensitive=has_output and has_linkable_preset,
                 tooltip=tooltip,
             )
             return
@@ -400,22 +536,33 @@ class MiniEqWindowPresetMixin:
             and self.current_preset_name == linked_preset
             and self.controller.state_signature() == self.saved_preset_signature
         )
+        if not self.preset_name_exists(linked_preset):
+            sync_output_preset_switch(
+                active=True,
+                sensitive=has_output,
+                tooltip=clear_tooltip,
+                status_text="Missing",
+                status_tooltip=f"Auto preset for {scope_text} uses missing preset {linked_preset}",
+            )
+            return
+
         if self.output_preset_auto_applied:
             sync_output_preset_switch(
                 active=True,
                 sensitive=has_output,
                 tooltip=clear_tooltip,
-                status_text=linked_status_text,
+                status_text="Applied",
                 status_tooltip=f"Auto preset for {scope_text} uses {linked_preset}",
             )
             return
 
         if has_named_preset:
+            status_text = "Modified" if self.current_preset_name == linked_preset else "Different"
             sync_output_preset_switch(
                 active=True,
                 sensitive=has_output,
                 tooltip=clear_tooltip,
-                status_text="Different",
+                status_text=status_text,
                 status_tooltip=f"Auto preset for {scope_text} uses {linked_preset}",
             )
             return
@@ -424,8 +571,8 @@ class MiniEqWindowPresetMixin:
             active=True,
             sensitive=has_output,
             tooltip=clear_tooltip,
-            status_text=linked_status_text,
-            status_tooltip=f"Auto preset for {scope_text} uses {linked_preset}",
+            status_text="Linked",
+            status_tooltip=f"Auto preset for {scope_text} uses {linked_preset}; current curve is not that preset.",
         )
 
     def set_preset_widget_visible(self, name: str, visible: bool) -> None:
@@ -446,8 +593,10 @@ class MiniEqWindowPresetMixin:
     def refresh_preset_actions(self, state: PresetPanelUiState | None = None) -> None:
         state = state or self.preset_panel_ui_state()
 
+        self.preset_primary_action = state.primary_action
         self.set_preset_widget_label("preset_save_button", state.save_label)
         self.preset_save_button.set_sensitive(True)
+        self.preset_save_button.set_tooltip_text(state.save_tooltip)
 
         self.set_preset_widget_visible("preset_save_as_button", state.save_as_visible)
         self.preset_save_as_button.set_sensitive(True)
@@ -476,6 +625,78 @@ class MiniEqWindowPresetMixin:
         self.preset_delete_button.set_sensitive(state.delete_visible)
         self.update_output_preset_state()
         self.update_default_preset_state()
+
+    def refresh_preset_library_popover(self) -> None:
+        load_button = getattr(self, "preset_load_button", None)
+        if load_button is not None:
+            load_button.set_label("Choose…")
+            load_button.set_sensitive(bool(self.preset_names))
+            load_button.set_tooltip_text("Load a saved preset" if self.preset_names else "No saved presets")
+
+        box = getattr(self, "preset_library_box", None)
+        if box is None:
+            return
+
+        while child := box.get_first_child():
+            box.remove(child)
+
+        if not self.preset_names:
+            empty_label = Gtk.Label(label="No saved presets", xalign=0.0)
+            empty_label.add_css_class("dim-label")
+            empty_label.set_margin_top(8)
+            empty_label.set_margin_bottom(8)
+            empty_label.set_margin_start(10)
+            empty_label.set_margin_end(10)
+            box.append(empty_label)
+            return
+
+        for preset_name in self.preset_names:
+            button = Gtk.Button()
+            button.set_can_shrink(True)
+            button.set_hexpand(True)
+            button.add_css_class("popover-action")
+            button.add_css_class("preset-library-action")
+            button.add_css_class("flat")
+            button.set_tooltip_text(preset_name)
+
+            label = Gtk.Label(label=preset_name, xalign=0.0)
+            label.set_hexpand(True)
+            label.set_wrap(True)
+            label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            label.set_max_width_chars(42)
+            button.set_child(label)
+            button.connect("clicked", self.on_preset_library_button_clicked, preset_name)
+            box.append(button)
+
+    def on_preset_library_button_clicked(self, _button: Gtk.Button, preset_name: str) -> None:
+        popover = getattr(self, "preset_library_popover", None)
+        if popover is not None:
+            popover.popdown()
+
+        try:
+            self.load_library_preset(preset_name)
+        except Exception as exc:
+            self.set_status(str(exc))
+
+    def selected_preset_combo_index(self) -> int:
+        if (
+            self.current_preset_name is not None
+            and self.current_preset_name in self.preset_names
+            and self.controller.state_signature() == self.saved_preset_signature
+        ):
+            return self.preset_names.index(self.current_preset_name)
+        return Gtk.INVALID_LIST_POSITION
+
+    def sync_preset_combo_selection(self) -> None:
+        combo = getattr(self, "preset_combo", None)
+        if combo is None:
+            return
+
+        self.updating_preset_combo = True
+        try:
+            combo.set_selected(self.selected_preset_combo_index())
+        finally:
+            self.updating_preset_combo = False
 
     def update_default_preset_state(self) -> None:
         label = getattr(self, "default_preset_state_label", None)
@@ -516,20 +737,44 @@ class MiniEqWindowPresetMixin:
         label.set_text("Missing")
         label.set_tooltip_text(f"Default preset {default_preset} is unavailable")
 
+    def keep_current_curve_as_unsaved_copy(self, preset_name: str) -> None:
+        preserve_revert_baseline = (
+            self.curve_revert_baseline_label == preset_name and self.curve_revert_baseline_payload is not None
+        )
+        self.current_preset_name = None
+        self.saved_preset_signature = self.controller.state_signature()
+        if preserve_revert_baseline:
+            self.relabel_curve_revert_baseline(f"{DELETED_PRESET_LABEL_PREFIX}{preset_name}")
+            return
+
+        self.set_curve_revert_baseline(f"{DELETED_PRESET_LABEL_PREFIX}{preset_name}")
+
+    def sync_current_preset_signature_from_library(self) -> None:
+        if self.current_preset_name is None:
+            return
+
+        preset_name = self.current_preset_name
+        try:
+            payload = load_mini_eq_preset_file(preset_path_for_name(preset_name))
+            signature = preset_payload_state_signature(payload)
+        except Exception:
+            self.keep_current_curve_as_unsaved_copy(preset_name)
+            self.set_status("Preset unavailable")
+            return
+
+        self.saved_preset_signature = signature
+        self.set_curve_revert_baseline_payload(preset_name, payload, signature)
+
     def refresh_preset_list(self) -> None:
         self.preset_names = list_preset_names()
-
-        selected_index = Gtk.INVALID_LIST_POSITION
-        if self.current_preset_name in self.preset_names:
-            selected_index = self.preset_names.index(self.current_preset_name)
+        if self.current_preset_name is not None and self.current_preset_name not in self.preset_names:
+            self.keep_current_curve_as_unsaved_copy(self.current_preset_name)
+        else:
+            self.sync_current_preset_signature_from_library()
 
         self.preset_model.splice(0, self.preset_model.get_n_items(), self.preset_names)
-
-        self.updating_preset_combo = True
-        try:
-            self.preset_combo.set_selected(selected_index)
-        finally:
-            self.updating_preset_combo = False
+        self.sync_preset_combo_selection()
+        self.refresh_preset_library_popover()
 
         self.update_preset_state()
 
@@ -546,6 +791,7 @@ class MiniEqWindowPresetMixin:
         self.preset_state_label.set_tooltip_text(state.preset_state_tooltip)
 
         self.update_current_curve_state()
+        self.sync_preset_combo_selection()
         self.refresh_preset_actions(state)
 
     def update_current_curve_state(self) -> None:
@@ -554,16 +800,9 @@ class MiniEqWindowPresetMixin:
         if label is None:
             return
 
-        current_curve_label = self.current_curve_source_label()
-        if current_curve_label is None:
-            label.set_text("")
-            label.set_tooltip_text("No provisional curve source")
-            if row is not None:
-                row.set_visible(False)
-            return
-
-        label.set_text(current_curve_label)
-        label.set_tooltip_text(f"{current_curve_label}\nUse Save As to add it to the preset library.")
+        current_curve_text, current_curve_tooltip = self.current_curve_running_text()
+        label.set_text(current_curve_text)
+        label.set_tooltip_text(current_curve_tooltip)
         if row is not None:
             row.set_visible(True)
 
@@ -580,7 +819,7 @@ class MiniEqWindowPresetMixin:
         self.output_preset_curve_auto_loaded = False
         self.refresh_preset_list()
         self.sync_ui_from_state()
-        self.set_status(f"Saved Preset: {preset_name}")
+        self.set_status("Preset saved")
         self.notify_control_presets_changed()
         self.notify_control_state_changed()
 
@@ -622,20 +861,33 @@ class MiniEqWindowPresetMixin:
         if status_message is not None:
             self.set_status(status_message)
         elif auto:
-            self.set_status(f"Applied Auto Preset: {preset_name}")
+            self.set_status("Auto preset applied")
         else:
-            self.set_status(f"Loaded Preset: {preset_name}")
+            self.set_status("Preset loaded")
         self.notify_control_state_changed()
 
-    def reset_curve_to_neutral(self, status_message: str = "Reset to Neutral") -> None:
+    def reset_curve_to_neutral(self, status_message: str = "Reset to neutral") -> None:
+        reapply_label = self.curve_revert_label()
+        reapply_signature = self.curve_revert_signature()
+        reapply_payload = getattr(self, "curve_revert_baseline_payload", None)
+
         self.controller.reset_state()
         self.current_preset_name = None
         self.saved_preset_signature = self.controller.state_signature()
-        self.set_curve_revert_baseline("Neutral")
+        if (
+            reapply_label
+            and reapply_signature is not None
+            and reapply_signature != self.default_preset_signature
+            and reapply_payload is not None
+        ):
+            self.set_curve_revert_baseline_payload(reapply_label, reapply_payload, reapply_signature)
+        else:
+            self.set_curve_revert_baseline("Neutral")
         self.selected_band_index = None
         self.set_visible_band_count(DEFAULT_ACTIVE_BANDS)
         self.output_preset_curve_auto_loaded = False
         self.output_preset_auto_applied = False
+        self.refresh_preset_list()
         self.sync_ui_from_state()
         self.set_status(status_message)
         self.notify_control_state_changed()
@@ -661,7 +913,7 @@ class MiniEqWindowPresetMixin:
                 self.output_preset_curve_auto_loaded = False
                 self.update_preset_state()
                 if announce_no_output_preset:
-                    self.set_status("No Auto Preset: Kept Unsaved Changes")
+                    self.set_status("Current curve kept")
                 self.notify_control_state_changed()
                 return announce_no_output_preset
 
@@ -675,33 +927,32 @@ class MiniEqWindowPresetMixin:
                         default_preset,
                         auto=True,
                         output_preset_auto=False,
-                        status_message="No Auto Preset: Applied Default Preset",
+                        status_message="Default preset applied",
                     )
                 except Exception:
                     self.output_preset_auto_applied = False
                     self.output_preset_curve_auto_loaded = False
                     self.update_preset_state()
+                    self.set_status("Default preset unavailable")
                     self.notify_control_state_changed()
                 else:
                     return True
 
             if reset_auto_preset_without_link:
-                self.reset_curve_to_neutral("No Auto Preset: Reset to Neutral")
+                self.reset_curve_to_neutral("Reset to neutral")
                 return True
 
             self.output_preset_auto_applied = False
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
-            if announce_no_output_preset:
-                self.set_status("No Auto Preset: Curve Unchanged")
             self.notify_control_state_changed()
-            return announce_no_output_preset
+            return False
 
         if self.has_unsaved_curve_changes():
             self.output_preset_auto_applied = False
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
-            self.set_status("Kept Unsaved Changes")
+            self.set_status("Current curve kept")
             self.notify_control_state_changed()
             return True
 
@@ -711,7 +962,7 @@ class MiniEqWindowPresetMixin:
             self.output_preset_auto_applied = False
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
-            self.set_status(f"Auto Preset Unavailable: {linked_preset}")
+            self.set_status("Auto preset unavailable")
             self.notify_control_state_changed()
             return True
 
@@ -745,6 +996,7 @@ class MiniEqWindowPresetMixin:
         entry = Gtk.Entry()
         entry.set_hexpand(True)
         entry.set_text(initial_text)
+        set_accessible_label(entry, "Preset name")
         content.append(entry)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -778,7 +1030,7 @@ class MiniEqWindowPresetMixin:
     ) -> None:
         preset_name = sanitize_preset_name(entry.get_text())
         if not preset_name:
-            self.set_status("Preset Name Is Empty")
+            self.set_status("Preset name is empty")
             entry.grab_focus()
             return
 
@@ -805,6 +1057,10 @@ class MiniEqWindowPresetMixin:
             self.set_status(str(exc))
 
     def on_preset_save_clicked(self, button: Gtk.Button) -> None:
+        if getattr(self, "preset_primary_action", "save") == "reapply":
+            self.on_preset_revert_clicked(button)
+            return
+
         if self.current_preset_name is not None:
             try:
                 self.save_current_state_to_preset(self.current_preset_name)
@@ -823,17 +1079,29 @@ class MiniEqWindowPresetMixin:
             preset_name = self.current_preset_name
             try:
                 self.load_library_preset(preset_name)
-                self.set_status(f"Reverted to Preset: {preset_name}")
+                self.set_status("Preset restored")
             except Exception as exc:
                 self.set_status(str(exc))
             return
 
         payload = getattr(self, "curve_revert_baseline_payload", None)
         if payload is None:
-            self.set_status("No Curve Baseline")
+            self.set_status("Nothing to restore")
             return
 
         baseline_label = self.curve_revert_label() or "Curve Baseline"
+        reapply_from_neutral = self.has_neutral_reapply_target()
+        if reapply_from_neutral:
+            try:
+                if self.preset_name_exists(baseline_label):
+                    self.load_library_preset(
+                        baseline_label,
+                        status_message="Preset restored",
+                    )
+                    return
+            except Exception:
+                pass
+
         try:
             self.controller.apply_preset_payload(payload)
             self.current_preset_name = None
@@ -843,7 +1111,7 @@ class MiniEqWindowPresetMixin:
             self.selected_band_index = None
             self.set_visible_band_count(fader_band_count_for_profile(self.controller.bands))
             self.sync_ui_from_state()
-            self.set_status(f"Reverted to {baseline_label}")
+            self.set_status("Curve restored")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
@@ -856,31 +1124,36 @@ class MiniEqWindowPresetMixin:
 
     def on_use_preset_for_output_clicked(self, _button: Gtk.Widget) -> None:
         if self.current_preset_name is None:
-            self.set_status("No Preset Selected")
+            self.set_status("Choose a preset first")
+            return
+        if self.controller.state_signature() != self.saved_preset_signature:
+            self.set_status("Save or load preset first")
             return
 
         target = self.output_preset_target()
-        _scope_text, _scope_kind, status_scope = self.output_preset_scope_text(target)
         try:
-            preset_name = set_output_preset_link(self.output_preset_link_key(target), self.current_preset_name)
+            set_output_preset_link(self.output_preset_link_key(target), self.current_preset_name)
             self.output_preset_auto_applied = self.output_preset_is_active()
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
-            self.set_status(f"Linked Auto Preset to {status_scope}: {preset_name}")
+            self.set_status("Auto preset linked")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
 
     def on_use_preset_as_default_clicked(self, _button: Gtk.Widget) -> None:
         if self.current_preset_name is None:
-            self.set_status("No Preset Selected")
+            self.set_status("Choose a preset first")
+            return
+        if self.controller.state_signature() != self.saved_preset_signature:
+            self.set_status("Save or load preset first")
             return
 
         try:
-            preset_name = set_default_preset_name(self.current_preset_name)
+            set_default_preset_name(self.current_preset_name)
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
-            self.set_status(f"Default Preset Set: {preset_name}")
+            self.set_status("Default preset set")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
@@ -892,9 +1165,9 @@ class MiniEqWindowPresetMixin:
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
             if removed:
-                self.set_status(f"Cleared Default Preset: {removed}")
+                self.set_status("Default preset cleared")
             else:
-                self.set_status("No Default Preset")
+                self.set_status("No default preset")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
@@ -902,16 +1175,15 @@ class MiniEqWindowPresetMixin:
 
     def on_clear_output_preset_link_clicked(self, _button: Gtk.Widget) -> None:
         target = self.output_preset_target()
-        _scope_text, _scope_kind, status_scope = self.output_preset_scope_text(target)
         try:
             removed = clear_output_preset_link(self.output_preset_keys(target))
             self.output_preset_auto_applied = False
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
             if removed:
-                self.set_status(f"Cleared Auto Preset from {status_scope}: {removed}")
+                self.set_status("Auto preset cleared")
             else:
-                self.set_status(f"No Auto Preset for {status_scope}")
+                self.set_status("No auto preset")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
@@ -935,7 +1207,7 @@ class MiniEqWindowPresetMixin:
 
     def on_preset_delete_clicked(self, button: Gtk.Button) -> None:
         if self.current_preset_name is None:
-            self.set_status("No Preset Selected")
+            self.set_status("Choose a preset first")
             return
 
         preset_name = self.current_preset_name
@@ -965,12 +1237,10 @@ class MiniEqWindowPresetMixin:
 
         try:
             delete_preset_file(preset_name)
-            self.current_preset_name = None
-            self.saved_preset_signature = self.controller.state_signature()
-            self.set_curve_revert_baseline(f"{DELETED_PRESET_LABEL_PREFIX}{preset_name}")
+            self.keep_current_curve_as_unsaved_copy(preset_name)
             self.refresh_preset_list()
             self.sync_ui_from_state()
-            self.set_status(f"Deleted Preset: {preset_name}; Current Curve Kept")
+            self.set_status("Preset deleted; curve kept")
             self.notify_control_presets_changed()
             self.notify_control_state_changed()
         except Exception as exc:
@@ -997,7 +1267,7 @@ class MiniEqWindowPresetMixin:
         self.set_curve_revert_baseline(preset_name)
         self.refresh_preset_list()
         self.sync_ui_from_state()
-        self.set_status(f"Imported Preset: {preset_name}")
+        self.set_status("Preset imported")
         self.notify_control_presets_changed()
         self.notify_control_state_changed()
 
@@ -1009,7 +1279,7 @@ class MiniEqWindowPresetMixin:
 
         path = file.get_path()
         if path is None:
-            self.set_status("Could Not Resolve Preset Path")
+            self.set_status("Could not open preset")
             return
 
         try:
@@ -1042,7 +1312,8 @@ class MiniEqWindowPresetMixin:
         filters.append(file_filter)
         dialog.set_filters(filters)
         dialog.set_default_filter(file_filter)
-        dialog.set_initial_name(f"{sanitize_preset_name(self.current_preset_name or 'mini-eq')}{PRESET_FILE_SUFFIX}")
+        export_name = self.current_preset_name or self.suggested_save_as_name() or "mini-eq"
+        dialog.set_initial_name(f"{sanitize_preset_name(export_name)}{PRESET_FILE_SUFFIX}")
         dialog.save(self, None, self.on_preset_export_done)
 
     def on_preset_export_done(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
@@ -1053,13 +1324,13 @@ class MiniEqWindowPresetMixin:
 
         path = file.get_path()
         if path is None:
-            self.set_status("Could Not Resolve Export Path")
+            self.set_status("Could not export preset")
             return
 
         try:
             export_path = ensure_json_suffix(Path(path))
             payload = self.controller.build_preset_payload(self.current_preset_name or export_path.stem)
             write_mini_eq_preset_file(export_path, payload)
-            self.set_status("Exported Preset")
+            self.set_status("Preset exported")
         except Exception as exc:
             self.set_status(str(exc))

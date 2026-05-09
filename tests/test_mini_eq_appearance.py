@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from tests._mini_eq_imports import core, import_mini_eq_module
 
 appearance = import_mini_eq_module("appearance")
+settings = import_mini_eq_module("settings")
 
 
 def test_appearance_preference_round_trips_through_app_config(tmp_path, monkeypatch) -> None:
@@ -16,6 +17,7 @@ def test_appearance_preference_round_trips_through_app_config(tmp_path, monkeypa
 
     assert appearance.load_appearance_preference() == appearance.APPEARANCE_DARK
     assert json.loads(appearance.settings_path().read_text(encoding="utf-8")) == {
+        settings.SETTINGS_VERSION_KEY: settings.SETTINGS_VERSION,
         appearance.APPEARANCE_KEY: appearance.APPEARANCE_DARK,
     }
 

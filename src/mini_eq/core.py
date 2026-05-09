@@ -332,6 +332,42 @@ def list_preset_names() -> list[str]:
     return sorted(dict.fromkeys(names), key=str.casefold)
 
 
+def json_document_version(payload: dict[str, object], document_name: str, supported_version: int) -> int:
+    if "version" not in payload:
+        return 0
+
+    version = payload["version"]
+    if isinstance(version, bool) or not isinstance(version, int) or version < 0:
+        raise ValueError(f"{document_name} version must be a non-negative integer")
+
+    if version > supported_version:
+        raise ValueError(f"{document_name} version {version} is newer than this Mini EQ build")
+
+    return version
+
+
+def preset_payload_state_signature(payload: dict[str, object]) -> str:
+    json_document_version(payload, "preset", PRESET_VERSION)
+
+    bands_data = payload.get("bands")
+    if not isinstance(bands_data, list):
+        raise ValueError("preset file does not contain a valid bands list")
+
+    bands = inactive_eq_bands()
+    for index, band_data in enumerate(bands_data[:MAX_BANDS]):
+        if not isinstance(band_data, dict):
+            raise ValueError("preset bands must be JSON objects")
+
+        bands[index] = eq_band_from_dict(band_data, bands[index])
+
+    signature_payload = {
+        "version": PRESET_VERSION,
+        "preamp_db": clamp(float(payload.get("preamp_db", 0.0)), EQ_PREAMP_MIN_DB, EQ_PREAMP_MAX_DB),
+        "bands": [eq_band_to_dict(band) for band in bands],
+    }
+    return json.dumps(signature_payload, sort_keys=True, separators=(",", ":"))
+
+
 def normalize_output_preset_links(links: dict[object, object]) -> dict[str, str]:
     normalized: dict[str, str] = {}
 
@@ -382,9 +418,7 @@ def load_output_preset_config() -> tuple[dict[str, str], str | None]:
     if not isinstance(payload, dict):
         raise ValueError("output preset links file must contain a JSON object")
 
-    version = int(payload.get("version", 0))
-    if version > OUTPUT_PRESET_LINKS_VERSION:
-        raise ValueError(f"output preset links version {version} is newer than this Mini EQ build")
+    json_document_version(payload, "output preset links", OUTPUT_PRESET_LINKS_VERSION)
 
     links = payload.get("links", {})
     if not isinstance(links, dict):
@@ -500,9 +534,7 @@ def load_mini_eq_preset_file(path: str | Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise ValueError("preset file must contain a JSON object")
 
-    version = int(payload.get("version", 0))
-    if version > PRESET_VERSION:
-        raise ValueError(f"preset version {version} is newer than this Mini EQ build")
+    json_document_version(payload, "preset", PRESET_VERSION)
 
     bands = payload.get("bands")
     if not isinstance(bands, list):
