@@ -161,7 +161,7 @@ class MiniEqWindowHeadroomMixin:
 
         target_preamp = self.controller.preamp_db - peak - 1.0
         self.preamp_scale.set_value(target_preamp)
-        self.set_status("Preamp Lowered for Safe Headroom")
+        self.set_status("Preamp lowered")
 
     def on_headroom_meter_draw(self, _area: Gtk.DrawingArea, cr, width: int, height: int) -> None:
         width_f = float(max(width, 1))

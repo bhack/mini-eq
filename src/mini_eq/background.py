@@ -11,11 +11,14 @@ from typing import Final
 from gi.repository import Gio, GLib
 
 from .desktop_integration import APP_DISPLAY_NAME, APP_ICON_NAME, APP_ID, quote_desktop_exec_arg
-from .settings import load_settings, update_setting
+from .settings import (
+    BACKGROUND_MODE_KEY,
+    START_ACTIVE_AT_LOGIN_KEY,
+    START_AT_LOGIN_KEY,
+    load_settings,
+    update_setting,
+)
 
-BACKGROUND_MODE_KEY: Final = "background_mode"
-START_AT_LOGIN_KEY: Final = "start_at_login"
-START_ACTIVE_AT_LOGIN_KEY: Final = "start_active_at_login"
 BACKGROUND_PORTAL_REASON: Final = "Keep equalizer settings active for desktop audio."
 BACKGROUND_PORTAL_BUS_NAME: Final = "org.freedesktop.portal.Desktop"
 BACKGROUND_PORTAL_OBJECT_PATH: Final = "/org/freedesktop/portal/desktop"

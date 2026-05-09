@@ -66,6 +66,44 @@ def test_window_present_idle_presents_active_window() -> None:
     assert window.present_count == 1
 
 
+def test_ensure_window_defers_existing_window_present_until_setup(monkeypatch) -> None:
+    monkeypatch.setattr(app, "install_app_icon", lambda: None)
+    calls: list[object] = []
+    window = SimpleNamespace(
+        ui_shutting_down=False,
+        post_present_ready=False,
+        present_after_setup=False,
+        set_visible=lambda visible: calls.append(("visible", visible)),
+        present=lambda: calls.append("present"),
+        schedule_post_present_setup=lambda: calls.append("setup"),
+    )
+    application = SimpleNamespace(window=window, emit_control_state_changed=lambda: calls.append("state"))
+
+    app.MiniEqApplication.ensure_window(application, present=True)
+
+    assert window.present_after_setup is True
+    assert calls == ["setup"]
+
+
+def test_ensure_window_presents_existing_ready_window_immediately(monkeypatch) -> None:
+    monkeypatch.setattr(app, "install_app_icon", lambda: None)
+    calls: list[object] = []
+    window = SimpleNamespace(
+        ui_shutting_down=False,
+        post_present_ready=True,
+        present_after_setup=False,
+        set_visible=lambda visible: calls.append(("visible", visible)),
+        present=lambda: calls.append("present"),
+        schedule_post_present_setup=lambda: calls.append("setup"),
+    )
+    application = SimpleNamespace(window=window, emit_control_state_changed=lambda: calls.append("state"))
+
+    app.MiniEqApplication.ensure_window(application, present=True)
+
+    assert window.present_after_setup is True
+    assert calls == [("visible", True), "present", "state", "setup"]
+
+
 def test_close_action_closes_active_window() -> None:
     window = FakeWindow(ui_shutting_down=False)
     application = FakeApplication(window=window)

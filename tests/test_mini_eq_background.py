@@ -29,6 +29,7 @@ def test_background_preferences_round_trip_in_settings_file(tmp_path, monkeypatc
     assert background.load_start_at_login() is True
     assert background.load_start_active_at_login() is True
     assert json.loads(settings.settings_path().read_text(encoding="utf-8")) == {
+        settings.SETTINGS_VERSION_KEY: settings.SETTINGS_VERSION,
         background.BACKGROUND_MODE_KEY: True,
         background.START_AT_LOGIN_KEY: True,
         background.START_ACTIVE_AT_LOGIN_KEY: True,

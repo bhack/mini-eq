@@ -9,7 +9,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw
 
-from .settings import load_settings, update_setting
+from .settings import APPEARANCE_KEY, load_settings, update_setting
 from .settings import settings_path as _settings_path
 
 APPEARANCE_SYSTEM: Final = "system"
@@ -18,7 +18,6 @@ APPEARANCE_DARK: Final = "dark"
 APPEARANCE_MODES: Final = (APPEARANCE_SYSTEM, APPEARANCE_LIGHT, APPEARANCE_DARK)
 DEFAULT_APPEARANCE: Final = APPEARANCE_SYSTEM
 SETTINGS_FILE_NAME: Final = "settings.json"
-APPEARANCE_KEY: Final = "appearance"
 
 
 def normalize_appearance(value: object) -> str:

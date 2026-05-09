@@ -167,6 +167,11 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     color: alpha(var(--window-fg-color), 0.86);
 }
 
+.current-curve-label {
+    color: alpha(var(--window-fg-color), 0.92);
+    font-weight: 700;
+}
+
 .compare-row {
     padding: 4px 0;
     border-radius: 0;
@@ -204,6 +209,19 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
 
 .preset-more-menu {
     min-width: 190px;
+}
+
+.preset-library-popover {
+    min-width: 260px;
+}
+
+.preset-library-list {
+    min-width: 248px;
+}
+
+.preset-library-action {
+    padding-top: 5px;
+    padding-bottom: 5px;
 }
 
 .preset-menu-separator {

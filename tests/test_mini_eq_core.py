@@ -117,6 +117,38 @@ def test_output_preset_links_missing_file_returns_empty(monkeypatch: pytest.Monk
     assert core.get_output_preset_link("alsa_output.speakers") is None
 
 
+def test_legacy_output_preset_links_load_without_rewriting(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    links_path = tmp_path / "output-presets.json"
+    legacy_payload = (
+        json.dumps(
+            {
+                "links": {
+                    "alsa_output.speakers": "Speakers",
+                },
+                "default": "Neutral",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    links_path.write_text(legacy_payload, encoding="utf-8")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", links_path)
+
+    assert core.load_output_preset_config() == ({"alsa_output.speakers": "Speakers"}, "Neutral")
+    assert links_path.read_text(encoding="utf-8") == legacy_payload
+
+    core.set_output_preset_link("alsa_output.usb", "USB")
+
+    assert json.loads(links_path.read_text(encoding="utf-8")) == {
+        "version": core.OUTPUT_PRESET_LINKS_VERSION,
+        "links": {
+            "alsa_output.speakers": "Speakers",
+            "alsa_output.usb": "USB",
+        },
+        "default": "Neutral",
+    }
+
+
 def test_output_preset_links_reject_invalid_json(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     links_path = tmp_path / "output-presets.json"
     links_path.write_text("{broken", encoding="utf-8")
@@ -132,6 +164,43 @@ def test_output_preset_links_reject_invalid_links_shape(monkeypatch: pytest.Monk
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", links_path)
 
     with pytest.raises(ValueError, match="valid links object"):
+        core.load_output_preset_links()
+
+
+def test_output_preset_links_reject_newer_version(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    links_path = tmp_path / "output-presets.json"
+    links_path.write_text(
+        json.dumps(
+            {
+                "version": core.OUTPUT_PRESET_LINKS_VERSION + 1,
+                "links": {},
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", links_path)
+
+    with pytest.raises(ValueError, match="newer than this Mini EQ build"):
+        core.load_output_preset_links()
+
+
+@pytest.mark.parametrize("version_value", [True, "1", -1, 1.0, None])
+def test_output_preset_links_reject_corrupt_version(version_value, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    links_path = tmp_path / "output-presets.json"
+    links_path.write_text(
+        json.dumps(
+            {
+                "version": version_value,
+                "links": {},
+            },
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", links_path)
+
+    with pytest.raises(ValueError, match="version must be a non-negative integer"):
         core.load_output_preset_links()
 
 
