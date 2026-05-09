@@ -475,6 +475,12 @@ def get_default_preset_name() -> str | None:
     return default_preset
 
 
+# The JSON key remains "default" for compatibility; the UI presents the same
+# value as the unmatched-output fallback preset.
+def get_output_preset_fallback_name() -> str | None:
+    return get_default_preset_name()
+
+
 def set_output_preset_link(sink_name: str, preset_name: str) -> str:
     output_key = str(sink_name).strip()
     if not output_key:
@@ -515,10 +521,18 @@ def set_default_preset_name(preset_name: str) -> str:
     return default_preset
 
 
+def set_output_preset_fallback_name(preset_name: str) -> str:
+    return set_default_preset_name(preset_name)
+
+
 def clear_default_preset_name() -> str | None:
     links, previous_default = load_output_preset_config()
     write_output_preset_config(links)
     return previous_default
+
+
+def clear_output_preset_fallback_name() -> str | None:
+    return clear_default_preset_name()
 
 
 def load_mini_eq_preset_file(path: str | Path) -> dict[str, object]:

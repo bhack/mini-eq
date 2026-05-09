@@ -107,11 +107,11 @@ class MiniEqWindowUtilityPaneMixin:
         self.default_preset_state_label.set_hexpand(True)
         self.default_preset_state_label.add_css_class("dim-label")
         self.default_preset_state_label.set_ellipsize(Pango.EllipsizeMode.END)
-        set_accessible_label(self.default_preset_state_label, "Default Preset Status")
+        set_accessible_label(self.default_preset_state_label, "Unmatched Output Fallback Status")
 
         default_preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         default_preset_row.add_css_class("utility-row")
-        default_preset_label = Gtk.Label(label="Default Preset", xalign=0.0)
+        default_preset_label = Gtk.Label(label="Fallback", xalign=0.0)
         default_preset_row.append(default_preset_label)
         default_preset_row.append(self.default_preset_state_label)
         preset_section.append(default_preset_row)
@@ -178,13 +178,13 @@ class MiniEqWindowUtilityPaneMixin:
         self.preset_default_separator = append_preset_separator()
 
         self.default_preset_set_button, self.default_preset_set_button_label = make_preset_action(
-            "Set as Default",
-            self.on_use_preset_as_default_clicked,
+            "Use as Fallback",
+            self.on_use_preset_as_fallback_clicked,
         )
 
         self.default_preset_clear_button, self.default_preset_clear_button_label = make_preset_action(
-            "Clear Default",
-            self.on_clear_default_preset_clicked,
+            "Bypass Unmatched Outputs",
+            self.on_bypass_unmatched_outputs_clicked,
         )
 
         self.preset_file_separator = append_preset_separator()

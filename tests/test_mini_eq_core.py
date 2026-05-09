@@ -242,12 +242,14 @@ def test_default_preset_roundtrip_preserves_output_links(monkeypatch: pytest.Mon
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
     core.set_output_preset_link("alsa_output.speakers", "Speakers")
 
-    assert core.set_default_preset_name("../Neutral...") == "Neutral"
+    assert core.set_output_preset_fallback_name("../Neutral...") == "Neutral"
     assert core.get_default_preset_name() == "Neutral"
+    assert core.get_output_preset_fallback_name() == "Neutral"
     assert core.load_output_preset_links() == {"alsa_output.speakers": "Speakers"}
 
-    assert core.clear_default_preset_name() == "Neutral"
+    assert core.clear_output_preset_fallback_name() == "Neutral"
     assert core.get_default_preset_name() is None
+    assert core.get_output_preset_fallback_name() is None
     assert core.load_output_preset_links() == {"alsa_output.speakers": "Speakers"}
 
 

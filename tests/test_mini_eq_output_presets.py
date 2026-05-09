@@ -294,7 +294,8 @@ def test_revert_action_explains_missing_loaded_preset() -> None:
     assert test_window.preset_save_as_button.visible is False
 
 
-def test_neutral_curve_uses_neutral_state_and_contextual_menu() -> None:
+def test_neutral_curve_uses_neutral_state_and_contextual_menu(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
     controller = make_controller()
     test_window = OutputPresetWindow(controller)
 
@@ -312,6 +313,8 @@ def test_neutral_curve_uses_neutral_state_and_contextual_menu() -> None:
     assert test_window.preset_reset_to_neutral_button.visible is False
     assert test_window.default_preset_set_button.visible is False
     assert test_window.default_preset_clear_button.visible is False
+    assert test_window.default_preset_state_label.text == "Bypass"
+    assert test_window.default_preset_state_label.tooltip == "Unmatched outputs use no fallback preset."
     assert test_window.preset_default_separator.visible is False
     assert test_window.preset_file_separator.visible is False
     assert test_window.preset_delete_button.visible is False
@@ -631,14 +634,14 @@ def test_output_change_without_link_resets_previous_auto_preset(monkeypatch, tmp
     assert test_window.output_preset_auto_applied is False
     assert test_window.output_preset_curve_auto_loaded is False
     assert test_window.sync_count == 1
-    assert test_window.statuses[-1] == "Reset to neutral"
+    assert test_window.statuses[-1] == "Unmatched output bypassed"
 
 
-def test_output_change_without_link_applies_default_preset(monkeypatch, tmp_path) -> None:
+def test_output_change_without_link_applies_fallback_preset(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
     write_test_preset("Neutral", -1.5)
-    core.set_default_preset_name("Neutral")
+    core.set_output_preset_fallback_name("Neutral")
     controller = make_controller("alsa_output.speakers")
     controller.bands[0].gain_db = 2.5
     test_window = OutputPresetWindow(controller)
@@ -651,14 +654,14 @@ def test_output_change_without_link_applies_default_preset(monkeypatch, tmp_path
     assert controller.bands[0].gain_db == -1.5
     assert test_window.output_preset_auto_applied is False
     assert test_window.output_preset_curve_auto_loaded is True
-    assert test_window.statuses[-1] == "Default preset applied"
+    assert test_window.statuses[-1] == "Fallback preset applied"
 
 
-def test_default_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path) -> None:
+def test_fallback_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
     write_test_preset("Neutral", -1.5)
-    core.set_default_preset_name("Neutral")
+    core.set_output_preset_fallback_name("Neutral")
     controller = make_controller("alsa_output.speakers")
     test_window = OutputPresetWindow(controller)
 
@@ -666,27 +669,27 @@ def test_default_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path)
 
     assert test_window.current_preset_name == "Neutral"
     assert controller.bands[0].gain_db == -1.5
-    assert test_window.statuses[-1] == "Default preset applied"
+    assert test_window.statuses[-1] == "Fallback preset applied"
 
 
-def test_missing_default_preset_reports_unavailable(monkeypatch, tmp_path) -> None:
+def test_missing_fallback_preset_reports_unavailable(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
-    core.set_default_preset_name("Missing")
+    core.set_output_preset_fallback_name("Missing")
     controller = make_controller("alsa_output.speakers")
     test_window = OutputPresetWindow(controller)
 
     assert test_window.apply_output_preset_for_current_output() is False
 
     assert test_window.default_preset_state_label.text == "Missing"
-    assert test_window.statuses[-1] == "Default preset unavailable"
+    assert test_window.statuses[-1] == "Fallback preset unavailable"
 
 
 def test_output_change_without_link_keeps_manual_preset(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
     write_test_preset("Neutral", -1.5)
-    core.set_default_preset_name("Neutral")
+    core.set_output_preset_fallback_name("Neutral")
     controller = make_controller("alsa_output.speakers")
     controller.bands[0].gain_db = 2.5
     test_window = OutputPresetWindow(controller)
@@ -983,7 +986,7 @@ def test_external_current_preset_corruption_keeps_curve_as_unsaved_copy(monkeypa
     assert test_window.statuses[-1] == "Preset unavailable"
 
 
-def test_default_preset_actions_set_and_clear(monkeypatch, tmp_path) -> None:
+def test_fallback_preset_actions_set_and_clear(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
     write_test_preset("Headphones", 2.5)
@@ -992,22 +995,22 @@ def test_default_preset_actions_set_and_clear(monkeypatch, tmp_path) -> None:
     test_window.refresh_preset_list()
     test_window.load_library_preset("Headphones")
 
-    test_window.on_use_preset_as_default_clicked(FakeButton())
+    test_window.on_use_preset_as_fallback_clicked(FakeButton())
 
-    assert core.get_default_preset_name() == "Headphones"
+    assert core.get_output_preset_fallback_name() == "Headphones"
     assert test_window.output_preset_curve_auto_loaded is False
     assert test_window.default_preset_state_label.text == "Headphones"
     assert test_window.default_preset_clear_button.sensitive is True
-    assert test_window.statuses[-1] == "Default preset set"
+    assert test_window.statuses[-1] == "Fallback preset set"
 
     test_window.output_preset_curve_auto_loaded = True
-    test_window.on_clear_default_preset_clicked(FakeButton())
+    test_window.on_bypass_unmatched_outputs_clicked(FakeButton())
 
-    assert core.get_default_preset_name() is None
+    assert core.get_output_preset_fallback_name() is None
     assert test_window.output_preset_curve_auto_loaded is False
-    assert test_window.default_preset_state_label.text == "None"
+    assert test_window.default_preset_state_label.text == "Bypass"
     assert test_window.default_preset_clear_button.sensitive is False
-    assert test_window.statuses[-1] == "Default preset cleared"
+    assert test_window.statuses[-1] == "Unmatched outputs bypassed"
 
 
 def test_output_preset_link_state_shows_different_selected_preset(monkeypatch, tmp_path) -> None:

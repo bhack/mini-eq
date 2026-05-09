@@ -55,12 +55,12 @@ and with AT-SPI or live smoke when they require real GTK behavior:
   current curve understandable as an unsaved copy.
 - Link, unlink, miss, and modify auto presets for both port-scoped and
   output-scoped targets.
-- Set, miss, and clear the default preset.
+- Set, miss, and clear the unmatched-output fallback preset.
 - Change output while a curve is clean, modified, auto-applied, missing, or
   unavailable.
 - Turn Monitor on/off and freeze/unfreeze it without leaving hidden frozen
   state behind.
-- Start the app with auto/default preset and auto-route inputs and verify the
+- Start the app with auto/fallback preset and auto-route inputs and verify the
   visible window appears only after startup state is applied.
 - Check Shell extension/D-Bus state after preset, output, background, and
   window-visibility changes.

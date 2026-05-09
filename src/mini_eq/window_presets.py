@@ -15,19 +15,19 @@ from .core import (
     DEFAULT_ACTIVE_BANDS,
     PRESET_FILE_SUFFIX,
     PRESET_VERSION,
-    clear_default_preset_name,
+    clear_output_preset_fallback_name,
     clear_output_preset_link,
     delete_preset_file,
     ensure_json_suffix,
     fader_band_count_for_profile,
-    get_default_preset_name,
+    get_output_preset_fallback_name,
     get_output_preset_link,
     list_preset_names,
     load_mini_eq_preset_file,
     preset_path_for_name,
     preset_payload_state_signature,
     sanitize_preset_name,
-    set_default_preset_name,
+    set_output_preset_fallback_name,
     set_output_preset_link,
     write_mini_eq_preset_file,
 )
@@ -155,9 +155,9 @@ class MiniEqWindowPresetMixin:
         except Exception:
             return None
 
-    def default_preset_name(self) -> str | None:
+    def fallback_preset_name(self) -> str | None:
         try:
-            return get_default_preset_name()
+            return get_output_preset_fallback_name()
         except Exception:
             return None
 
@@ -387,7 +387,7 @@ class MiniEqWindowPresetMixin:
             revert_signature=revert_signature,
         )
         reset_visible = not neutral
-        default_preset = self.default_preset_name()
+        default_preset = self.fallback_preset_name()
         default_set_visible = clean_named_preset
         default_clear_visible = default_preset is not None
         curve_group_visible = has_named_preset or revert_visible or reset_visible
@@ -612,6 +612,12 @@ class MiniEqWindowPresetMixin:
 
         self.set_preset_widget_visible("default_preset_set_button", state.default_set_visible)
         self.set_preset_widget_visible("default_preset_clear_button", state.default_clear_visible)
+        self.default_preset_set_button.set_sensitive(state.default_set_visible)
+        self.default_preset_set_button.set_tooltip_text("Use this preset when no auto preset matches")
+        self.default_preset_clear_button.set_sensitive(state.default_clear_visible)
+        self.default_preset_clear_button.set_tooltip_text(
+            "Bypass unmatched outputs instead of loading a fallback preset"
+        )
 
         self.set_preset_widget_visible("preset_default_separator", state.default_separator_visible)
         self.set_preset_widget_visible("preset_file_separator", state.file_separator_visible)
@@ -624,7 +630,7 @@ class MiniEqWindowPresetMixin:
         self.set_preset_widget_visible("preset_delete_button", state.delete_visible)
         self.preset_delete_button.set_sensitive(state.delete_visible)
         self.update_output_preset_state()
-        self.update_default_preset_state()
+        self.update_fallback_preset_state()
 
     def refresh_preset_library_popover(self) -> None:
         load_button = getattr(self, "preset_load_button", None)
@@ -698,13 +704,13 @@ class MiniEqWindowPresetMixin:
         finally:
             self.updating_preset_combo = False
 
-    def update_default_preset_state(self) -> None:
+    def update_fallback_preset_state(self) -> None:
         label = getattr(self, "default_preset_state_label", None)
         set_button = getattr(self, "default_preset_set_button", None)
         clear_button = getattr(self, "default_preset_clear_button", None)
 
         try:
-            default_preset = get_default_preset_name()
+            default_preset = get_output_preset_fallback_name()
         except Exception as exc:
             if label is not None:
                 label.set_text("Unavailable")
@@ -725,17 +731,17 @@ class MiniEqWindowPresetMixin:
             return
 
         if default_preset is None:
-            label.set_text("None")
-            label.set_tooltip_text("No default preset")
+            label.set_text("Bypass")
+            label.set_tooltip_text("Unmatched outputs use no fallback preset.")
             return
 
         if default_preset in self.preset_names:
             label.set_text(default_preset)
-            label.set_tooltip_text("Used when the selected output has no auto preset")
+            label.set_tooltip_text("Used when the active output has no auto preset.")
             return
 
         label.set_text("Missing")
-        label.set_tooltip_text(f"Default preset {default_preset} is unavailable")
+        label.set_tooltip_text(f"Fallback preset {default_preset} is unavailable")
 
     def keep_current_curve_as_unsaved_copy(self, preset_name: str) -> None:
         preserve_revert_baseline = (
@@ -917,7 +923,7 @@ class MiniEqWindowPresetMixin:
                 self.notify_control_state_changed()
                 return announce_no_output_preset
 
-            default_preset = get_default_preset_name()
+            default_preset = get_output_preset_fallback_name()
             should_apply_default_preset = default_preset is not None and (
                 reset_auto_preset_without_link or self.current_preset_name is None
             )
@@ -927,19 +933,19 @@ class MiniEqWindowPresetMixin:
                         default_preset,
                         auto=True,
                         output_preset_auto=False,
-                        status_message="Default preset applied",
+                        status_message="Fallback preset applied",
                     )
                 except Exception:
                     self.output_preset_auto_applied = False
                     self.output_preset_curve_auto_loaded = False
                     self.update_preset_state()
-                    self.set_status("Default preset unavailable")
+                    self.set_status("Fallback preset unavailable")
                     self.notify_control_state_changed()
                 else:
                     return True
 
             if reset_auto_preset_without_link:
-                self.reset_curve_to_neutral("Reset to neutral")
+                self.reset_curve_to_neutral("Unmatched output bypassed")
                 return True
 
             self.output_preset_auto_applied = False
@@ -1141,7 +1147,7 @@ class MiniEqWindowPresetMixin:
         except Exception as exc:
             self.set_status(str(exc))
 
-    def on_use_preset_as_default_clicked(self, _button: Gtk.Widget) -> None:
+    def on_use_preset_as_fallback_clicked(self, _button: Gtk.Widget) -> None:
         if self.current_preset_name is None:
             self.set_status("Choose a preset first")
             return
@@ -1150,24 +1156,24 @@ class MiniEqWindowPresetMixin:
             return
 
         try:
-            set_default_preset_name(self.current_preset_name)
+            set_output_preset_fallback_name(self.current_preset_name)
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
-            self.set_status("Default preset set")
+            self.set_status("Fallback preset set")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))
             self.notify_control_state_changed()
 
-    def on_clear_default_preset_clicked(self, _button: Gtk.Widget) -> None:
+    def on_bypass_unmatched_outputs_clicked(self, _button: Gtk.Widget) -> None:
         try:
-            removed = clear_default_preset_name()
+            removed = clear_output_preset_fallback_name()
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
             if removed:
-                self.set_status("Default preset cleared")
+                self.set_status("Unmatched outputs bypassed")
             else:
-                self.set_status("No default preset")
+                self.set_status("Unmatched outputs already bypassed")
             self.notify_control_state_changed()
         except Exception as exc:
             self.set_status(str(exc))

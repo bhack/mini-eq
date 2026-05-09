@@ -67,7 +67,7 @@
     <release version="0.5.0" date="2026-05-06">
       <description>
         <ul>
-          <li>Add a Default Preset fallback for outputs without a linked preset.</li>
+          <li>Add a fallback preset for outputs without a linked preset.</li>
           <li>Keep manual preset choices and unsaved curve edits when outputs change.</li>
           <li>Add Start Active at Login and improve analyzer band resolution.</li>
         </ul>
