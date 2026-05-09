@@ -51,8 +51,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-inputs:
+    name: Validate release inputs
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target }}
+
+      - name: Validate dispatch inputs
+        env:
+          CREATE_GITHUB_RELEASE: ${{ inputs.create_github_release }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          PUBLISH_PYPI: ${{ inputs.publish_pypi }}
+          PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          project_version="$(
+            python3 -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])'
+          )"
+          expected_tag="v${project_version}"
+
+          needs_tag=false
+          if [ "$CREATE_GITHUB_RELEASE" = "true" ] || [ "$PUBLISH_TESTPYPI" = "true" ] || [ "$PUBLISH_PYPI" = "true" ]; then
+            needs_tag=true
+          fi
+
+          if [ "$needs_tag" = "true" ] && [ -z "$TAG_NAME" ]; then
+            echo "::error::tag_name is required when creating a release or publishing to a package index"
+            exit 1
+          fi
+
+          if [ -n "$TAG_NAME" ] && [ "$TAG_NAME" != "$expected_tag" ]; then
+            echo "::error::tag_name must be ${expected_tag} for pyproject version ${project_version}"
+            exit 1
+          fi
+
+          if [ "$DRY_RUN" = "true" ] && { [ "$CREATE_GITHUB_RELEASE" = "true" ] || [ "$PUBLISH_TESTPYPI" = "true" ] || [ "$PUBLISH_PYPI" = "true" ]; }; then
+            echo "::warning::dry_run=true prevents release creation and package publishing jobs from running"
+          fi
+
+          if [ "$PUBLISH_PYPI" = "true" ] && [ "$CREATE_GITHUB_RELEASE" != "true" ]; then
+            echo "::warning::publishing PyPI without creating the GitHub release uses a separate build from release assets"
+          fi
+
   build:
     name: Build release artifacts
+    needs: validate-inputs
     runs-on: ubuntu-24.04
 
     steps:
@@ -100,27 +149,6 @@ jobs:
         with:
           name: mini-eq-dist
           path: dist
-
-      - name: Validate release inputs
-        env:
-          TAG_NAME: ${{ inputs.tag_name }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "$TAG_NAME" ]; then
-            echo "::error::tag_name is required when create_github_release is true"
-            exit 1
-          fi
-
-          project_version="$(
-            python3 -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])'
-          )"
-          expected_tag="v${project_version}"
-
-          if [ "$TAG_NAME" != "$expected_tag" ]; then
-            echo "::error::tag_name must be ${expected_tag} for pyproject version ${project_version}"
-            exit 1
-          fi
 
       - name: Create GitHub release
         env:
