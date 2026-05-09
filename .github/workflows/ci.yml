@@ -240,11 +240,11 @@ jobs:
         run: |
           python3 -m venv /tmp/mini-eq-pwg-build
           /tmp/mini-eq-pwg-build/bin/python -m pip install --upgrade pip
-          /tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.4,<0.4' -w /tmp/mini-eq-wheelhouse
+          /tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.5,<0.4' -w /tmp/mini-eq-wheelhouse
 
           python3 -m venv --system-site-packages .venv
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.4,<0.4'
+          .venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.5,<0.4'
           .venv/bin/python -m pip install -e '.[dev]'
 
       - name: Lint
@@ -272,7 +272,7 @@ jobs:
         run: |
           python3 -m venv --system-site-packages /tmp/mini-eq-wheel-test
           /tmp/mini-eq-wheel-test/bin/python -m pip install --upgrade pip
-          /tmp/mini-eq-wheel-test/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.4,<0.4'
+          /tmp/mini-eq-wheel-test/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.5,<0.4'
           /tmp/mini-eq-wheel-test/bin/python -m pip install dist/mini_eq-*.whl
           /tmp/mini-eq-wheel-test/bin/mini-eq --help
 
@@ -318,7 +318,7 @@ jobs:
       - name: Check pipewire-gobject GI compatibility
         run: |
           flatpak run --filesystem="$PWD":ro --command=python3 io.github.bhack.mini-eq \
-            "$PWD/tools/check_pipewire_gobject.py" --expect-version 0.3.4
+            "$PWD/tools/check_pipewire_gobject.py" --expect-version 0.3.5
 
       - name: Smoke-test Flatpak runtime modules
         run: |
