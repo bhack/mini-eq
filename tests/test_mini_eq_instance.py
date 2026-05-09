@@ -10,6 +10,7 @@ from tests._mini_eq_imports import instance
 def test_detects_mini_eq_python_cmdline() -> None:
     assert instance.is_mini_eq_python_cmdline(("python3", "-m", "mini_eq", "--auto-route"))
     assert instance.is_mini_eq_python_cmdline(("/usr/bin/python3", "/tmp/repo/.venv/bin/mini-eq"))
+    assert not instance.is_mini_eq_python_cmdline(("python3", "/tmp/tool.py", "--repo-root", "/home/user/mini-eq"))
     assert not instance.is_mini_eq_python_cmdline(("pytest", "tests/test_mini_eq_instance.py"))
     assert not instance.is_mini_eq_python_cmdline(("pipewire", "-c", "/tmp/mini-eq-a/filter-chain.conf"))
 

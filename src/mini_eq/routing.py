@@ -42,22 +42,22 @@ from .filter_chain import (
     builtin_biquad_preamp_control_values,
 )
 from .glib_utils import destroy_glib_source
-from .wireplumber_backend import (
+from .pipewire_backend import (
     DEFAULT_AUDIO_SINK_KEY,
     DEFAULT_CONFIGURED_AUDIO_SINK_KEY,
-    WirePlumberBackend,
-    WirePlumberNode,
+    PipeWireBackend,
+    PipeWireNode,
     node_sample_rate,
 )
-from .wireplumber_stream_router import WirePlumberStreamRouter
+from .pipewire_stream_router import PipeWireStreamRouter
 
 
 class SystemWideEqController:
     def __init__(self, output_sink: str | None) -> None:
-        self.output_backend = WirePlumberBackend()
+        self.output_backend = PipeWireBackend()
         self.output_backend.connect()
         self.virtual_sink_name = self.pick_virtual_sink_name()
-        self.original_default_sink = self.get_default_output_sink_name()
+        self.original_default_sink = self.resolve_default_output_sink_name()
         self.follow_default_output = output_sink is None
         self.output_sink = output_sink or self.original_default_sink
         self.filter_output_name = f"{self.virtual_sink_name}{FILTER_OUTPUT_SUFFIX}"
@@ -80,7 +80,7 @@ class SystemWideEqController:
         self.preamp_db = 0.0
         self.default_bands: list[EqBand] = self.build_default_bands()
         self.bands: list[EqBand] = [replace(band) for band in self.default_bands]
-        self.stream_router: WirePlumberStreamRouter | None = None
+        self.stream_router: PipeWireStreamRouter | None = None
         self.output_analyzer: OutputSpectrumAnalyzer | None = None
         self.analyzer_response_speed = ANALYZER_RESPONSE_DEFAULT
 
@@ -120,7 +120,7 @@ class SystemWideEqController:
         if self.output_analyzer is not None:
             self.output_analyzer.set_loudness_callback(callback)
 
-    def list_sinks(self) -> list[WirePlumberNode]:
+    def list_sinks(self) -> list[PipeWireNode]:
         return self.output_backend.list_audio_sinks()
 
     def list_output_sink_names(self) -> list[str]:
@@ -130,22 +130,43 @@ class SystemWideEqController:
             if sink.node_name is not None and not sink.node_name.startswith(VIRTUAL_SINK_BASE)
         ]
 
-    def get_sink(self, sink_name: str) -> WirePlumberNode | None:
+    def first_available_output_sink_name(self) -> str:
+        return next(iter(self.list_output_sink_names()), "")
+
+    def get_sink(self, sink_name: str) -> PipeWireNode | None:
         if not sink_name:
             return None
 
         return self.output_backend.audio_sink_by_name(sink_name)
 
-    def get_default_output_sink_name(self) -> str:
-        defaults = self.output_backend.defaults()
-        return defaults.default_audio_sink or defaults.configured_audio_sink or ""
+    def default_output_sink_candidates(self, *, refresh: bool = False) -> tuple[str, ...]:
+        defaults = self.output_backend.refresh_defaults() if refresh else self.output_backend.defaults()
+        return tuple(
+            sink_name for sink_name in (defaults.configured_audio_sink, defaults.default_audio_sink) if sink_name
+        )
+
+    def get_default_output_sink_name(self, *, refresh: bool = False) -> str:
+        candidates = self.default_output_sink_candidates(refresh=refresh)
+
+        for sink_name in candidates:
+            if self.is_valid_output_sink(sink_name) and self.get_sink(sink_name) is not None:
+                return sink_name
+
+        return next(iter(candidates), "")
+
+    def resolve_default_output_sink_name(self) -> str:
+        default_sink = self.get_default_output_sink_name(refresh=True)
+        if self.is_valid_output_sink(default_sink) and self.get_sink(default_sink) is not None:
+            return default_sink
+
+        return self.first_available_output_sink_name()
 
     def is_valid_output_sink(self, sink_name: str) -> bool:
         return bool(sink_name) and not sink_name.startswith(VIRTUAL_SINK_BASE)
 
-    def ensure_stream_router(self) -> WirePlumberStreamRouter:
+    def ensure_stream_router(self) -> PipeWireStreamRouter:
         if self.stream_router is None:
-            self.stream_router = WirePlumberStreamRouter(
+            self.stream_router = PipeWireStreamRouter(
                 self.virtual_sink_name,
                 self.filter_output_name,
                 self.emit_status,
@@ -244,13 +265,14 @@ class SystemWideEqController:
         if not self.follow_default_output:
             return False
 
-        default_sink = self.get_default_output_sink_name()
-
-        if self.is_valid_output_sink(default_sink) and self.get_sink(default_sink) is not None:
+        for default_sink in self.default_output_sink_candidates(refresh=True):
+            if not self.is_valid_output_sink(default_sink) or self.get_sink(default_sink) is None:
+                continue
             try:
                 self.switch_output_sink(default_sink, explicit=False)
             except Exception as exc:
                 self.emit_status(f"default output follow warning: {exc}")
+            break
 
         return True
 
@@ -494,13 +516,19 @@ class SystemWideEqController:
             self.stream_router.route_output_streams()
 
     def stop_engine(self, announce: bool = True) -> None:
-        if self.engine_module is None:
+        module = self.engine_module
+        if module is None:
             self.filter_node_id = None
             self.running = False
             return
 
         self.engine_module = None
         self.filter_node_id = None
+
+        try:
+            self.output_backend.unload_filter_chain_module(module)
+        except Exception as exc:
+            self.emit_status(f"filter-chain PipeWire EQ unload warning: {exc}")
 
         try:
             self.output_backend.sync()
@@ -598,9 +626,14 @@ class SystemWideEqController:
                 if self.output_analyzer is not None:
                     self.output_analyzer.close()
             finally:
-                # Avoid explicit wp_core_disconnect() on shutdown. With WirePlumber 0.5
-                # this can intermittently double-destroy PipeWire proxies after
-                # restoring routed streams; process exit still tears the graph down.
+                try:
+                    self.stop_engine(announce=False)
+                except Exception:
+                    pass
+                try:
+                    self.output_backend.close()
+                except Exception:
+                    pass
                 self.engine_module = None
                 self.filter_node_id = None
                 self.running = False

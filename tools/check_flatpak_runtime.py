@@ -31,6 +31,7 @@ FLATPAK_APP_REFS = (
     FULL_X86_64_STABLE_REF,
 )
 SMOKE_APPLICATION_NAME = "mini-eq-flatpak-smoke"
+SMOKE_MEDIA_ROLE = "MiniEQSmoke"
 SMOKE_NODE_NAME = "mini-eq-flatpak-smoke"
 VIRTUAL_SINK_NAME = "mini_eq_sink"
 PIPEWIRE_MANAGER_ACCESS = "flatpak-manager"
@@ -206,10 +207,17 @@ def start_smoke_stream(target: str | None, audio_file: Path) -> subprocess.Popen
     command = [
         "pw-cat",
         "--playback",
-        "--volume",
-        "0",
+        "--media-role",
+        SMOKE_MEDIA_ROLE,
         "--properties",
-        f"application.name={SMOKE_APPLICATION_NAME}",
+        ",".join(
+            [
+                f"application.name={SMOKE_APPLICATION_NAME}",
+                f"node.name={SMOKE_NODE_NAME}",
+                "state.restore-props=false",
+                "state.restore-target=false",
+            ]
+        ),
     ]
     if target is not None:
         command.extend(["--target", target])

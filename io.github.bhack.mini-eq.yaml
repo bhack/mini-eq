@@ -117,27 +117,15 @@ modules:
         tag: 1.6.1
         commit: b7341d068947225fcdf62d39277606e8516d7f52
 
-  - name: wireplumber
+  - name: pipewire-gobject
     buildsystem: meson
     config-opts:
-      - -Dintrospection=enabled
-      - -Ddoc=disabled
-      - -Dmodules=false
-      - -Ddaemon=false
-      - -Dtools=false
-      - -Dtests=false
-      - -Ddbus-tests=false
-      - -Dsystemd=disabled
-      - -Dsystemd-system-service=false
-      - -Dsystemd-user-service=false
-      - -Delogind=disabled
+      - -Dwheel=true
     sources:
       - type: git
-        url: https://gitlab.freedesktop.org/pipewire/wireplumber.git
-        tag: 0.5.14
-        commit: 07e730b279ac7a520699ae9f6b0797848a731b30
-      - type: patch
-        path: flatpak/patches/wireplumber-0.5.14-tools-disabled-po.patch
+        url: https://github.com/bhack/pipewire-gobject.git
+        tag: 0.3.4
+        commit: 82658f10338c2e9530ae575db30f15e709626cdc
 
   - python3-dependencies.yaml
 

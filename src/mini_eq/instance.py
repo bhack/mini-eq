@@ -121,7 +121,7 @@ def is_mini_eq_python_cmdline(cmdline: Iterable[str]) -> bool:
     has_module_invocation = any(
         args[index] == "-m" and index + 1 < len(args) and args[index + 1] == "mini_eq" for index in range(len(args) - 1)
     )
-    has_standalone_script = any(Path(arg).name in {"mini_eq.py", "mini-eq"} for arg in args)
+    has_standalone_script = len(args) > 1 and Path(args[1]).name in {"mini_eq.py", "mini-eq"}
     return has_module_invocation or has_standalone_script
 
 

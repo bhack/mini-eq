@@ -5,9 +5,9 @@ These notes apply to the whole repository.
 ## Project Context
 
 Mini EQ is a small system-wide parametric equalizer for PipeWire desktops. It
-uses GTK/Libadwaita for the UI, WirePlumber for routing and default-output
-monitoring, PipeWire filter-chain with builtin biquad filters for DSP, and the
-PipeWire JACK compatibility layer plus NumPy for spectrum analysis.
+uses GTK/Libadwaita for the UI, pipewire-gobject for app-facing PipeWire
+routing, metadata, and monitor capture, PipeWire filter-chain with builtin
+biquad filters for DSP, and NumPy for spectrum analysis.
 
 This is a public-facing repository. Treat every committed file, screenshot,
 artifact, and log snippet as public. Keep user-facing documentation focused on
@@ -19,11 +19,12 @@ paths in ignored repo-local skills under `.agents/skills/`.
 
 - `src/mini_eq/core.py`: EQ data models, preset JSON, biquad math, APO import.
 - `src/mini_eq/filter_chain.py`: PipeWire filter-chain config generation.
-- `src/mini_eq/wireplumber_backend.py`: WirePlumber GI compatibility layer.
-- `src/mini_eq/wireplumber_stream_router.py`: stream routing helpers.
+- `src/mini_eq/pipewire_backend.py`: pipewire-gobject-backed PipeWire registry,
+  metadata, and node-control layer.
+- `src/mini_eq/pipewire_stream_router.py`: stream routing helpers.
 - `src/mini_eq/routing.py`: system-wide EQ lifecycle and routing controller.
 - `src/mini_eq/app.py` and `src/mini_eq/window*.py`: GTK/Libadwaita app and UI.
-- `src/mini_eq/analyzer.py`: JACK/NumPy analyzer runtime.
+- `src/mini_eq/analyzer.py`: pipewire-gobject monitor stream and NumPy analyzer runtime.
 - `src/mini_eq/screenshot.py` and `tools/render_demo_screenshot.py`: maintainer
   screenshot tooling, not user-facing CLI.
 - `data/`: desktop and AppStream metadata.
@@ -70,18 +71,40 @@ desktop-file-validate data/io.github.bhack.mini-eq.desktop
 .venv/bin/python -m twine check dist/*
 ```
 
-The app depends on system GI/audio packages that Python packaging cannot
-install: GTK4, Libadwaita, WirePlumber introspection, PipeWire, and PipeWire
-JACK compatibility. Some tests skip automatically when optional runtime tools
-are unavailable.
+The app depends on system GI/audio packages that Python packaging cannot fully
+install: GTK4, Libadwaita, PipeWire, a WirePlumber-managed session, and the
+native libraries used by pipewire-gobject. PyGObject is a distro/runtime
+dependency, not a Mini EQ PyPI dependency. Some tests skip automatically when
+optional runtime tools are unavailable.
+
+For real GTK widget behavior, run the opt-in AT-SPI smoke test inside its
+nested headless GNOME Shell session:
+
+```bash
+MINI_EQ_RUN_ATSPI=1 .venv/bin/python -m pytest tests/test_mini_eq_atspi_widgets.py -q
+```
+
+For a deeper live runtime smoke, run the real GTK app in a private
+PipeWire/WirePlumber graph with synthetic playback and AT-SPI UI driving:
+
+```bash
+.venv/bin/python tools/check_live_ui_runtime.py --timeout 35 --cycles 1
+MINI_EQ_RUN_LIVE_UI=1 .venv/bin/python -m pytest tests/test_mini_eq_live_ui_runtime.py -q
+```
+
+When creating a fresh venv for pip/package validation, build pipewire-gobject in
+a plain wheel-build venv first, then install that wheel into a
+`--system-site-packages` Mini EQ venv. This keeps distro GI bindings visible at
+runtime without making Ubuntu/Debian `g-ir-scanner` import partial `distutils`
+modules from a system-site build venv.
 
 ## Change Guidelines
 
 - Prefer existing patterns and small, targeted patches.
 - Do not move logic between the large modules just to tidy them; split modules
   only when the user asked for that refactor or the change needs it.
-- Keep WirePlumber 0.4 and 0.5 compatibility in mind. Do not use a newer GI API
-  without checking the compatibility layer and tests.
+- Keep the pipewire-gobject API boundary small and app-facing. WirePlumber stays
+  the host session manager, not a bundled GI dependency.
 - Treat the Mini EQ D-Bus control interface as a project-internal app/Shell
   extension contract with version-skew tolerance. Keep `api_version = 1`
   additive only: add state fields, methods, and capabilities when needed, but do
@@ -102,11 +125,15 @@ are unavailable.
 ## Flatpak And Flathub
 
 - Keep the upstream Flatpak manifest as a local development and CI manifest
-  using the checked-out source tree. The sibling Flathub repository uses a
+  using the checked-out source tree. The Flathub packaging repository uses a
   release archive URL and SHA-256 for publishing.
-- Before opening a Flathub PR, compare the upstream and sibling Flathub
-  manifests. The only expected manifest difference is the Mini EQ source block:
-  local `type: dir` upstream, release archive URL and SHA-256 in Flathub.
+- Before opening a Flathub PR, compare the upstream and Flathub manifests and
+  synced dependency files. The only expected manifest difference is the Mini EQ
+  source block: local `type: dir` upstream, release archive URL and SHA-256 in
+  Flathub.
+- Treat Flathub publishing PRs as maintainer-owned. Agents may prepare local
+  diffs, validation output, and handoff notes, but should not open, submit, or
+  merge Flathub PRs.
 - Put user-facing Flatpak install information in `README.md`; keep Flathub
   release workflow and repository split notes in `docs/flathub.md`.
 - Do not hand-edit bundled Mini EQ source files in the Flathub repository. Fix
@@ -169,35 +196,19 @@ During release preparation, verify that version-bearing files agree:
 URL. The package `__version__` is derived from release metadata and should not
 be hardcoded separately.
 
-Before publishing artifacts, run `tools/release_preflight.py`; its focused leak
-scan covers `HEAD`, tracked worktree changes, and untracked non-ignored text
-files. If reproducing the scan manually, check all three surfaces instead of
-only committed history:
+Before publishing artifacts, run the release preflight. Prefer the
+containerized wrapper when the host does not already have the `pipewire-gobject`
+sdist build dependencies installed:
 
 ```bash
-git rev-list --count HEAD
-git ls-remote --heads origin
-git ls-remote --tags origin
-leak_pattern='(/home/|/Users/|secret|token|api[_-]?key|github_pat|gh[pousr]_[A-Za-z0-9_]{20,}|pypi-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|BEGIN [A-Z0-9 ]*PRIVATE KEY)'
-git grep -n -I -E "$leak_pattern" HEAD -- . \
-  ':(exclude)*.png' \
-  ':(exclude)AGENTS.md' \
-  ':(exclude)docs/release.md' \
-  ':(exclude)tools/release_preflight.py'
-git grep -n -I -E "$leak_pattern" -- . \
-  ':(exclude)*.png' \
-  ':(exclude)AGENTS.md' \
-  ':(exclude)docs/release.md' \
-  ':(exclude)tools/release_preflight.py'
-git ls-files --others --exclude-standard -z -- . \
-  | grep -z -v -E '(^|/)(AGENTS\.md|docs/release\.md|tools/release_preflight\.py)$|\.png$' \
-  | xargs -0 -r grep -n -I -E "$leak_pattern" --
+tools/run_release_preflight_container.sh
 ```
 
-This grep is a focused privacy and credential smoke check, not a full secret
-scanner. Keep GitHub secret scanning and push protection enabled; use an
-external scanner such as Gitleaks for deeper local investigation when release
-history or generated artifacts look suspicious:
+Set `MINI_EQ_FLATHUB_MANIFEST` to a Flathub publishing manifest path when the
+containerized preflight should include the manifest drift check.
+The preflight owns the focused leak scan for `HEAD`, tracked worktree changes,
+and untracked non-ignored text files. Use Gitleaks as an extra check when
+release history or generated artifacts look suspicious:
 
 ```bash
 gitleaks git --no-banner --redact .

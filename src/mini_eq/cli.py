@@ -5,7 +5,7 @@ import argparse
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="System-wide parametric EQ using GTK, WirePlumber routing and PipeWire filter-chain.",
+        description="System-wide parametric EQ using GTK, pipewire-gobject and PipeWire filter-chain.",
     )
     parser.add_argument(
         "--install-desktop",

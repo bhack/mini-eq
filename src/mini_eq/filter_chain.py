@@ -224,6 +224,8 @@ def build_builtin_biquad_filter_chain_module_args(
     node.name = {pipewire_quote(virtual_sink_name)}
     node.description = {pipewire_quote(VIRTUAL_SINK_DESCRIPTION)}
     media.class = Audio/Sink
+    state.restore-props = false
+    state.restore-target = false
     audio.channels = 2
     audio.position = [ FL FR ]
   }}
@@ -232,6 +234,8 @@ def build_builtin_biquad_filter_chain_module_args(
     node.description = {pipewire_quote(OUTPUT_CLIENT_NAME)}
     node.passive = true
     target.object = {pipewire_quote(output_sink)}
+    state.restore-props = false
+    state.restore-target = false
     audio.channels = 2
     audio.position = [ FL FR ]
   }}

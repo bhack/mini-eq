@@ -30,8 +30,8 @@ from mini_eq.core import (
 )
 from mini_eq.desktop_integration import APP_ID
 from mini_eq.filter_chain import builtin_biquad_band_control_values
+from mini_eq.pipewire_backend import build_props_controls_param
 from mini_eq.window import MiniEqWindow
-from mini_eq.wireplumber_backend import build_spa_params_pod
 
 
 @dataclass(frozen=True)
@@ -52,20 +52,21 @@ class BenchmarkController(DemoController):
         self.engine_apply_count = 0
         self.engine_control_count = 0
         self.engine_pod_count = 0
-        self._Wp = self.load_wireplumber_namespace() if engine_profile == "pod" else None
+        self._GLib = None
+        self._Pwg = self.load_pipewire_gobject_namespace() if engine_profile == "pod" else None
 
-    def load_wireplumber_namespace(self):
-        for version in ("0.5", "0.4"):
-            try:
-                gi.require_version("Wp", version)
-                from gi.repository import Wp
+    def load_pipewire_gobject_namespace(self):
+        try:
+            import pipewire_gobject  # noqa: F401
 
-                Wp.init(Wp.InitFlags.PIPEWIRE | Wp.InitFlags.SPA_TYPES)
-                return Wp
-            except (ImportError, ValueError):
-                continue
+            gi.require_version("Pwg", "0.1")
+            from gi.repository import GLib, Pwg
 
-        raise RuntimeError("WirePlumber GI namespace is required for --engine-profile=pod")
+            Pwg.init()
+            self._GLib = GLib
+            return Pwg
+        except (ImportError, ValueError) as exc:
+            raise RuntimeError("pipewire-gobject is required for --engine-profile=pod") from exc
 
     def set_band_gain(self, index: int, gain_db: float, *, apply: bool = True) -> bool:
         gain_db = core.clamp(gain_db, EQ_GAIN_MIN_DB, EQ_GAIN_MAX_DB)
@@ -118,7 +119,7 @@ class BenchmarkController(DemoController):
         self.engine_control_count += len(controls)
 
         if self.engine_profile == "pod":
-            build_spa_params_pod(self._Wp, controls)
+            build_props_controls_param(self._Pwg, self._GLib, controls)
             self.engine_pod_count += 1
 
 
@@ -357,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
         "--engine-profile",
         choices=("none", "controls", "pod"),
         default="none",
-        help="include an immediate engine-apply drag path; pod also builds a WirePlumber SPA pod",
+        help="include an immediate engine-apply drag path; pod also builds a Pwg Props controls param",
     )
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     parser.add_argument(

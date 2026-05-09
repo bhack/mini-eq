@@ -12,23 +12,27 @@ from typing import Literal
 
 Status = Literal["ok", "missing", "warning"]
 
+PWG_REQUIRED_VERSION = "0.3.4"
+PWG_REQUIRED_VERSION_PARTS = (0, 3, 4)
+PWG_REQUIRED_SYMBOLS = (
+    "Core.set_pipewire_property",
+    "Param.new_props_controls",
+    "Stream.set_pipewire_property",
+)
 PYGOBJECT_HINT = "Ubuntu/Debian: python3-gi; Fedora: python3-gobject; Arch: python-gobject"
 PYCAIRO_HINT = "Ubuntu/Debian: python3-cairo; Fedora: python3-cairo; Arch: python-cairo"
 GTK_HINT = "Ubuntu/Debian: gir1.2-gtk-4.0; Fedora: gtk4; Arch: gtk4. Requires GTK 4.12+."
 ADW_HINT = "Ubuntu/Debian: gir1.2-adw-1; Fedora: libadwaita; Arch: libadwaita. Requires Libadwaita 1.7+."
-WIREPLUMBER_GI_VERSIONS = ("0.5", "0.4")
-
-WP_HINT = "Ubuntu 24.04: gir1.2-wp-0.4 wireplumber; newer Debian/Ubuntu: gir1.2-wp-0.5 wireplumber; Fedora: wireplumber wireplumber-libs; Arch: wireplumber libwireplumber"
+PWG_HINT = (
+    "Install pipewire-gobject from PyPI or your distribution. "
+    "It also needs system libpipewire-0.3, GLib, GObject, GIO, and PyGObject."
+)
 PIPEWIRE_HINT = (
     "Ubuntu/Debian: pipewire pipewire-bin wireplumber; Fedora: pipewire wireplumber; Arch: pipewire wireplumber"
 )
 PIPEWIRE_FILTER_CHAIN_HINT = (
     "Ubuntu/Debian: pipewire; Fedora: pipewire; Arch: pipewire. "
     "Flatpak builds bundle only the filter-chain module and SPA builtin filter support."
-)
-JACK_HINT = (
-    "Install the Python JACK client and PipeWire JACK support. "
-    "For pip environments: python -m pip install JACK-Client; system packages must provide libjack."
 )
 NUMPY_HINT = (
     "Install the package with Python dependencies: python -m pip install mini-eq, or python -m pip install numpy."
@@ -155,6 +159,78 @@ def check_first_available_gi_repository(
     return DependencyCheck(label, "missing", required, "; ".join(failures), hint)
 
 
+def parse_dotted_version(value: str) -> tuple[int, int, int]:
+    parts: list[int] = []
+    for raw_part in value.split("."):
+        digits = ""
+        for char in raw_part:
+            if not char.isdigit():
+                break
+            digits += char
+        if not digits:
+            break
+        parts.append(int(digits))
+
+    while len(parts) < 3:
+        parts.append(0)
+
+    return tuple(parts[:3])
+
+
+def check_pipewire_gobject() -> DependencyCheck:
+    shim_check = check_python_import("pipewire_gobject", "pipewire-gobject Python shim", True, PWG_HINT)
+    namespace_check = check_gi_repository("Pwg", "0.1", "pipewire-gobject Pwg GI namespace", True, PWG_HINT)
+
+    if not shim_check.ok or not namespace_check.ok:
+        detail = f"Python shim: {shim_check.detail}; Pwg GI: {namespace_check.detail}"
+        return DependencyCheck("pipewire-gobject", "missing", True, detail, PWG_HINT)
+
+    module = importlib.import_module("gi.repository.Pwg")
+    missing_symbols: list[str] = []
+    for symbol in PWG_REQUIRED_SYMBOLS:
+        current = module
+        checked_path = "Pwg"
+        for path_part in symbol.split("."):
+            checked_path = f"{checked_path}.{path_part}"
+            if not hasattr(current, path_part):
+                missing_symbols.append(checked_path)
+                break
+            current = getattr(current, path_part)
+
+    try:
+        actual_version = str(module.get_library_version())
+    except Exception as exc:
+        return DependencyCheck(
+            "pipewire-gobject", "missing", True, f"could not read Pwg library version: {exc}", PWG_HINT
+        )
+
+    if parse_dotted_version(actual_version) < PWG_REQUIRED_VERSION_PARTS:
+        return DependencyCheck(
+            "pipewire-gobject",
+            "missing",
+            True,
+            f"Pwg library {actual_version} is older than required {PWG_REQUIRED_VERSION}",
+            PWG_HINT,
+        )
+
+    if missing_symbols:
+        return DependencyCheck(
+            "pipewire-gobject",
+            "missing",
+            True,
+            f"Pwg library {actual_version} lacks required symbol(s): {', '.join(missing_symbols)}",
+            PWG_HINT,
+        )
+
+    return DependencyCheck(
+        "pipewire-gobject",
+        "ok",
+        True,
+        f"{shim_check.detail}; {namespace_check.detail}; Pwg library {actual_version}",
+        PWG_HINT,
+    )
+
+
 def split_env_paths(value: str | None) -> list[Path]:
     if not value:
         return []
@@ -226,25 +302,25 @@ def check_spa_plugin(relative_path: str, label: str, required: bool, hint: str) 
     return DependencyCheck(label, "missing", required, detail, hint)
 
 
-def check_wireplumber_session() -> DependencyCheck:
-    command_check = check_command("wpctl", ["status"], "WirePlumber session", True, PIPEWIRE_HINT)
+def check_pipewire_session() -> DependencyCheck:
+    command_check = check_command("wpctl", ["status"], "PipeWire session", True, PIPEWIRE_HINT)
     if command_check.ok:
         return command_check
 
     try:
-        from .wireplumber_backend import WirePlumberBackend
+        from .pipewire_backend import PipeWireBackend
 
-        with WirePlumberBackend(timeout_ms=1000):
+        with PipeWireBackend(timeout_ms=1000):
             pass
     except Exception as exc:
-        detail = f"{command_check.detail}; WirePlumber GI connection failed: {exc}"
-        return DependencyCheck("WirePlumber session", "missing", True, detail, PIPEWIRE_HINT)
+        detail = f"{command_check.detail}; Pwg PipeWire connection failed: {exc}"
+        return DependencyCheck("PipeWire session", "missing", True, detail, PIPEWIRE_HINT)
 
     return DependencyCheck(
-        "WirePlumber session",
+        "PipeWire session",
         "ok",
         True,
-        "connected to PipeWire through WirePlumber GI",
+        "connected to PipeWire through Pwg",
         PIPEWIRE_HINT,
     )
 
@@ -293,8 +369,8 @@ def collect_dependency_checks() -> list[DependencyCheck]:
         check_gi_repository("Gsk", "4.0", "GSK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Graphene", "1.0", "Graphene GI namespace", True, GTK_HINT),
         check_gi_repository_attribute("Adw", "1", "WrapBox", "Libadwaita 1.7+ GI namespace", True, ADW_HINT),
-        check_first_available_gi_repository("Wp", WIREPLUMBER_GI_VERSIONS, "WirePlumber GI namespace", True, WP_HINT),
-        check_wireplumber_session(),
+        check_pipewire_gobject(),
+        check_pipewire_session(),
         check_pipewire_module(
             "libpipewire-module-filter-chain.so",
             "PipeWire filter-chain module",
@@ -308,7 +384,6 @@ def collect_dependency_checks() -> list[DependencyCheck]:
             PIPEWIRE_FILTER_CHAIN_HINT,
         ),
         check_python_import("numpy", "NumPy FFT analyzer", False, NUMPY_HINT),
-        check_python_import("jack", "Python JACK analyzer client", False, JACK_HINT),
         check_native_ebur128(),
     ]
 

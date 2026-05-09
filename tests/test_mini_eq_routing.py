@@ -3,16 +3,16 @@ from __future__ import annotations
 import pytest
 
 from tests._mini_eq_imports import core, routing
-from tests._mini_eq_imports import wireplumber_backend as wp_backend
+from tests._mini_eq_imports import pipewire_backend as pw_backend
 
 
 def make_node(
     bound_id: int,
     name: str | None,
-    media_class: str = wp_backend.AUDIO_SINK,
+    media_class: str = pw_backend.AUDIO_SINK,
     properties: dict[str, str] | None = None,
-) -> wp_backend.WirePlumberNode:
-    return wp_backend.WirePlumberNode(
+) -> pw_backend.PipeWireNode:
+    return pw_backend.PipeWireNode(
         bound_id=bound_id,
         object_serial=str(bound_id + 1000),
         media_class=media_class,
@@ -25,18 +25,38 @@ def make_node(
 
 
 class FakeOutputBackend:
-    def __init__(self, sinks: list[wp_backend.WirePlumberNode]) -> None:
+    def __init__(self, sinks: list[pw_backend.PipeWireNode]) -> None:
         self.sinks = sinks
 
-    def list_audio_sinks(self) -> list[wp_backend.WirePlumberNode]:
+    def list_audio_sinks(self) -> list[pw_backend.PipeWireNode]:
         return self.sinks
 
-    def audio_sink_by_name(self, sink_name: str) -> wp_backend.WirePlumberNode | None:
+    def audio_sink_by_name(self, sink_name: str) -> pw_backend.PipeWireNode | None:
         for sink in self.sinks:
             if sink.node_name == sink_name:
                 return sink
 
         return None
+
+
+class FakeDefaultOutputBackend(FakeOutputBackend):
+    def __init__(
+        self,
+        sinks: list[pw_backend.PipeWireNode],
+        cached_defaults: pw_backend.PipeWireDefaults,
+        refreshed_defaults: pw_backend.PipeWireDefaults,
+    ) -> None:
+        super().__init__(sinks)
+        self.cached_defaults = cached_defaults
+        self.refreshed_defaults = refreshed_defaults
+        self.refresh_count = 0
+
+    def defaults(self) -> pw_backend.PipeWireDefaults:
+        return self.cached_defaults
+
+    def refresh_defaults(self) -> pw_backend.PipeWireDefaults:
+        self.refresh_count += 1
+        return self.refreshed_defaults
 
 
 def test_list_output_sink_names_uses_wireplumber_sinks_and_filters_internal_nodes() -> None:
@@ -61,6 +81,70 @@ def test_get_sink_uses_wireplumber_node_name() -> None:
     assert routing.SystemWideEqController.get_sink(controller, "missing") is None
 
 
+def test_get_default_output_sink_name_uses_cached_metadata_by_default() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    backend = FakeDefaultOutputBackend(
+        [make_node(1, "cached-speakers"), make_node(2, "fresh-speakers")],
+        cached_defaults=pw_backend.PipeWireDefaults("cached-current", "cached-speakers"),
+        refreshed_defaults=pw_backend.PipeWireDefaults("fresh-speakers", "fresh-configured"),
+    )
+    controller.output_backend = backend
+
+    assert routing.SystemWideEqController.get_default_output_sink_name(controller) == "cached-speakers"
+    assert backend.refresh_count == 0
+
+
+def test_get_default_output_sink_name_skips_virtual_default_when_configured_sink_is_available() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.output_backend = FakeDefaultOutputBackend(
+        [make_node(1, "speakers")],
+        cached_defaults=pw_backend.PipeWireDefaults("mini_eq_sink", "speakers"),
+        refreshed_defaults=pw_backend.PipeWireDefaults("fresh-speakers", None),
+    )
+
+    assert routing.SystemWideEqController.get_default_output_sink_name(controller) == "speakers"
+
+
+def test_get_default_output_sink_name_prefers_configured_sink_over_current_sink() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.output_backend = FakeDefaultOutputBackend(
+        [make_node(1, "current-speakers"), make_node(2, "configured-speakers")],
+        cached_defaults=pw_backend.PipeWireDefaults("current-speakers", "configured-speakers"),
+        refreshed_defaults=pw_backend.PipeWireDefaults("fresh-speakers", None),
+    )
+
+    assert routing.SystemWideEqController.get_default_output_sink_name(controller) == "configured-speakers"
+
+
+def test_resolve_default_output_sink_name_falls_back_to_first_real_sink_when_metadata_is_virtual() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.output_backend = FakeDefaultOutputBackend(
+        [make_node(1, "speakers"), make_node(2, "mini_eq_sink")],
+        cached_defaults=pw_backend.PipeWireDefaults("mini_eq_sink", None),
+        refreshed_defaults=pw_backend.PipeWireDefaults("mini_eq_sink", None),
+    )
+
+    assert routing.SystemWideEqController.resolve_default_output_sink_name(controller) == "speakers"
+
+
+def test_refresh_followed_output_sink_refreshes_metadata_and_skips_virtual_defaults() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    backend = FakeDefaultOutputBackend(
+        [make_node(1, "speakers")],
+        cached_defaults=pw_backend.PipeWireDefaults("old-speakers", None),
+        refreshed_defaults=pw_backend.PipeWireDefaults("mini_eq_sink", "speakers"),
+    )
+    controller.output_backend = backend
+    controller.follow_default_output = True
+    calls: list[object] = []
+
+    controller.switch_output_sink = lambda sink_name, explicit: calls.append((sink_name, explicit))
+
+    assert routing.SystemWideEqController.refresh_followed_output_sink(controller) is True
+    assert backend.refresh_count == 1
+    assert calls == [("speakers", False)]
+
+
 def test_output_metadata_change_schedules_one_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.accept_output_events = True
@@ -78,7 +162,7 @@ def test_output_metadata_change_schedules_one_refresh(monkeypatch: pytest.Monkey
         controller,
         None,
         0,
-        wp_backend.DEFAULT_AUDIO_SINK_KEY,
+        pw_backend.DEFAULT_AUDIO_SINK_KEY,
         None,
         None,
     )
@@ -86,7 +170,7 @@ def test_output_metadata_change_schedules_one_refresh(monkeypatch: pytest.Monkey
         controller,
         None,
         0,
-        wp_backend.DEFAULT_CONFIGURED_AUDIO_SINK_KEY,
+        pw_backend.DEFAULT_CONFIGURED_AUDIO_SINK_KEY,
         None,
         None,
     )
@@ -111,7 +195,7 @@ def test_output_object_added_schedules_refresh_only_for_audio_sinks(monkeypatch:
     routing.SystemWideEqController.handle_output_object_added(
         controller,
         None,
-        make_node(1, "spotify", wp_backend.STREAM_OUTPUT_AUDIO),
+        make_node(1, "spotify", pw_backend.STREAM_OUTPUT_AUDIO),
     )
     routing.SystemWideEqController.handle_output_object_added(controller, None, make_node(2, "speakers"))
 
@@ -216,7 +300,7 @@ def test_switch_output_sink_falls_back_to_restart_when_filter_retarget_fails() -
     ]
 
 
-def test_enabling_analyzer_while_engine_runs_opens_jack_before_restarting_engine() -> None:
+def test_enabling_analyzer_while_engine_runs_opens_stream_before_restarting_engine() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.running = True
     controller.routed = True
@@ -546,8 +630,14 @@ def test_shutdown_skips_route_restore_when_routing_is_inactive() -> None:
     calls: list[str] = []
 
     class FakeBackend:
+        def unload_filter_chain_module(self, _module) -> None:
+            calls.append("unload-engine")
+
+        def sync(self) -> None:
+            calls.append("sync-engine")
+
         def close(self) -> None:
-            raise AssertionError("controller shutdown should not explicitly disconnect WirePlumber")
+            calls.append("close-backend")
 
     controller.routed = False
     controller.stream_router = None
@@ -561,7 +651,7 @@ def test_shutdown_skips_route_restore_when_routing_is_inactive() -> None:
 
     routing.SystemWideEqController.shutdown(controller)
 
-    assert calls == ["stop-monitor"]
+    assert calls == ["stop-monitor", "unload-engine", "sync-engine", "close-backend"]
     assert controller.engine_module is None
     assert controller.filter_node_id is None
     assert controller.running is False
@@ -572,8 +662,14 @@ def test_shutdown_restores_routed_streams_without_refreshing_followed_output() -
     calls: list[object] = []
 
     class FakeBackend:
+        def unload_filter_chain_module(self, _module) -> None:
+            calls.append("unload-engine")
+
+        def sync(self) -> None:
+            calls.append("sync-engine")
+
         def close(self) -> None:
-            raise AssertionError("controller shutdown should not explicitly disconnect WirePlumber")
+            calls.append("close-backend")
 
     class FakeStreamRouter:
         def set_output_sink_name(self, sink_name: str) -> None:
@@ -603,6 +699,9 @@ def test_shutdown_restores_routed_streams_without_refreshing_followed_output() -
         ("target", "speakers"),
         ("disable", False),
         "close-router",
+        "unload-engine",
+        "sync-engine",
+        "close-backend",
     ]
     assert controller.routed is False
     assert controller.engine_module is None
@@ -757,6 +856,33 @@ def test_route_system_audio_can_disable_when_engine_is_not_ready() -> None:
 
     assert calls == ["refresh", "router", "disable:True", "status:system audio routing disabled"]
     assert controller.routed is False
+
+
+def test_stop_engine_unloads_filter_chain_module_before_clearing_state() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    module = object()
+    calls: list[str] = []
+
+    class FakeBackend:
+        def unload_filter_chain_module(self, loaded_module) -> None:
+            assert loaded_module is module
+            calls.append("unload")
+
+        def sync(self) -> None:
+            calls.append("sync")
+
+    controller.engine_module = module
+    controller.filter_node_id = 42
+    controller.running = True
+    controller.output_backend = FakeBackend()
+    controller.emit_status = lambda message: calls.append(f"status:{message}")
+
+    routing.SystemWideEqController.stop_engine(controller, announce=False)
+
+    assert calls == ["unload", "sync"]
+    assert controller.engine_module is None
+    assert controller.filter_node_id is None
+    assert controller.running is False
 
 
 def test_restart_engine_pauses_stream_router_monitoring_during_restart() -> None:

@@ -56,6 +56,15 @@ def filter_type_label(filter_type: int) -> str:
 
 
 class MiniEqWindowGraphMixin:
+    def is_system_routed(self) -> bool:
+        controller = getattr(self, "controller", None)
+        routed = getattr(controller, "routed", None)
+        if routed is not None:
+            return bool(routed)
+
+        route_switch = getattr(self, "route_switch", None)
+        return bool(route_switch is not None and route_switch.get_active())
+
     def is_dark_appearance(self) -> bool:
         application = self.get_application()
         style_manager = application.get_style_manager() if application is not None else None
@@ -151,6 +160,9 @@ class MiniEqWindowGraphMixin:
                 box.add_css_class("eq-band-box-muted")
 
     def schedule_curve_metadata_refresh(self) -> None:
+        if not getattr(self, "ui_shutting_down", False):
+            self.update_preset_state()
+
         if getattr(self, "curve_metadata_refresh_source_id", 0) != 0:
             return
 
@@ -206,7 +218,7 @@ class MiniEqWindowGraphMixin:
         self.band_count_label.set_text(selected_filter_type)
         self.band_count_label.set_visible(True)
         tooltip = f"{selected_filter_type} band at {format_frequency(selected.frequency)}, {selected.gain_db:+.1f} dB"
-        if not self.route_switch.get_active():
+        if not self.is_system_routed():
             tooltip = f"{tooltip}. System-wide EQ is off."
         self.focus_label.set_tooltip_text(tooltip)
         self.band_count_label.set_tooltip_text(tooltip)
@@ -267,7 +279,7 @@ class MiniEqWindowGraphMixin:
         self.bypass_state_label.remove_css_class("compare-state-original")
         self.bypass_state_label.remove_css_class("compare-state-ready")
 
-        route_enabled = self.route_switch.get_active()
+        route_enabled = self.is_system_routed()
         self.bypass_switch.set_sensitive(route_enabled)
 
         if not route_enabled:
@@ -289,18 +301,12 @@ class MiniEqWindowGraphMixin:
         self.updating_ui = True
 
         try:
+            set_switch_confirmed_state(self.route_switch, self.controller.routed)
             set_switch_confirmed_state(self.bypass_switch, self.controller.eq_enabled)
             self.update_eq_power_indicator()
-            set_switch_confirmed_state(self.analyzer_switch, self.analyzer_enabled)
-            set_switch_confirmed_state(self.analyzer_freeze_switch, self.analyzer_frozen)
-            self.analyzer_state_label.set_text(
-                "Frozen"
-                if self.analyzer_frozen and self.analyzer_enabled
-                else ("Live" if self.analyzer_enabled else "Off")
-            )
+            self._sync_monitor_controls_unlocked()
             self.analyzer_smoothing_label.set_text(f"{int(round(self.analyzer_smoothing * 100.0))}%")
             self.analyzer_display_gain_label.set_text(f"{self.analyzer_display_gain_db:+.0f} dB")
-            self.update_analyzer_summary_label()
             self.preamp_scale.set_value(self.controller.preamp_db)
             self.preamp_label.set_text(f"{self.controller.preamp_db:.1f} dB")
             self.mode_combo.set_selected(MODE_INDEX_BY_VALUE[self.controller.eq_mode])

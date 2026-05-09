@@ -70,6 +70,6 @@ body:
     id: extra
     attributes:
       label: Additional context
-      description: Mention whether GTK, Libadwaita, PipeWire, WirePlumber, and PipeWire JACK are installed when relevant.
+      description: Mention whether GTK, Libadwaita, PipeWire, WirePlumber, and pipewire-gobject are installed when relevant.
     validations:
       required: false

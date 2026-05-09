@@ -119,6 +119,7 @@ class OutputPresetWindow(window_presets.MiniEqWindowPresetMixin):
         self.default_preset_clear_button = FakeButton()
         self.output_preset_switch = FakeSwitch()
         self.default_preset_state_label = FakeLabel()
+        self.set_curve_revert_baseline("Neutral")
 
     def set_visible_band_count(self, count: int) -> None:
         self.visible_band_count = count
@@ -153,6 +154,79 @@ def write_test_preset(name: str, gain_db: float) -> None:
     controller.bands[0].gain_db = gain_db
     payload = routing.SystemWideEqController.build_preset_payload(controller, name)
     core.write_mini_eq_preset_file(core.preset_path_for_name(name), payload)
+
+
+def test_revert_action_explains_missing_loaded_preset() -> None:
+    controller = make_controller()
+    controller.bands[0].gain_db = 2.0
+    test_window = OutputPresetWindow(controller)
+    test_window.clear_curve_revert_baseline()
+
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.preset_revert_button.tooltip == "Load or import a preset first"
+
+
+def test_revert_action_tracks_initial_neutral_baseline() -> None:
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.preset_revert_button.tooltip == "No curve changes to revert"
+
+    controller.bands[0].gain_db = 2.0
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_revert_button.sensitive is True
+    assert test_window.preset_revert_button.tooltip == "Revert to Neutral"
+
+
+def test_revert_action_updates_for_named_preset_changes() -> None:
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+    test_window.current_preset_name = "Headphones"
+    test_window.saved_preset_signature = controller.state_signature()
+
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.preset_revert_button.tooltip == "No curve changes to revert"
+
+    controller.bands[0].gain_db = 2.0
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_revert_button.sensitive is True
+    assert test_window.preset_revert_button.tooltip == "Revert to Headphones"
+
+
+def test_revert_action_tracks_unsaved_import_baseline() -> None:
+    controller = make_controller()
+    controller.bands[0].gain_db = 2.0
+    test_window = OutputPresetWindow(controller)
+    test_window.set_curve_revert_baseline("Imported APO Preset")
+
+    test_window.refresh_preset_actions()
+
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.preset_revert_button.tooltip == "No curve changes to revert"
+
+    controller.bands[0].gain_db = 4.0
+    test_window.update_preset_state()
+
+    assert test_window.preset_state_label.text == "Modified"
+    assert test_window.preset_revert_button.sensitive is True
+    assert test_window.preset_revert_button.tooltip == "Revert to Imported APO Preset"
+
+    test_window.on_preset_revert_clicked(FakeButton())
+    test_window.update_preset_state()
+
+    assert test_window.current_preset_name is None
+    assert controller.bands[0].gain_db == 2.0
+    assert test_window.preset_revert_button.sensitive is False
+    assert test_window.statuses[-1] == "Reverted to Imported APO Preset"
 
 
 def test_initial_output_preset_auto_loads_linked_preset(monkeypatch, tmp_path) -> None:

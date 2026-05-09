@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import sys
 import threading
 import time
@@ -57,12 +56,24 @@ ANALYZER_READER_JOIN_TIMEOUT_SECONDS = 0.2
 ANALYZER_DISPLAY_GAIN_MIN = -12.0
 ANALYZER_DISPLAY_GAIN_MAX = 32.0
 ANALYZER_DISPLAY_GAIN_DEFAULT = 0.0
-JACK_CLIENT_NAME = "mini-eq-analyzer"
-JACK_LEFT_INPUT_PORT = "input_FL"
-JACK_RIGHT_INPUT_PORT = "input_FR"
-JACK_CAPTURE_QUEUE_BLOCKS = 128
-JACK_PIPEWIRE_PROPS = (
-    "node.autoconnect = false node.dont-move = true stream.monitor = true media.category = Monitor media.role = DSP"
+ANALYZER_CAPTURE_QUEUE_BLOCKS = 128
+ANALYZER_NODE_NAME = "mini-eq-analyzer"
+ANALYZER_NODE_DESCRIPTION = "Mini EQ Monitor"
+ANALYZER_APPLICATION_ID = "io.github.bhack.mini-eq"
+ANALYZER_MEDIA_CLASS = "Stream/Input/Audio/Internal"
+ANALYZER_PIPEWIRE_PROPERTIES = (
+    ("node.name", ANALYZER_NODE_NAME),
+    ("node.description", ANALYZER_NODE_DESCRIPTION),
+    ("application.name", "Mini EQ"),
+    ("application.id", ANALYZER_APPLICATION_ID),
+    ("media.name", ANALYZER_NODE_DESCRIPTION),
+    ("media.class", ANALYZER_MEDIA_CLASS),
+    ("media.category", "Monitor"),
+    ("media.role", "DSP"),
+    ("node.dont-move", "true"),
+    ("stream.monitor", "true"),
+    ("state.restore-props", "false"),
+    ("state.restore-target", "false"),
 )
 ANALYZER_RESPONSE_MIN = 0.02
 ANALYZER_RESPONSE_MAX = 15.0
@@ -232,6 +243,24 @@ def stereo_f32le_bytes_to_interleaved_float32(left_payload: bytes, right_payload
     return interleaved
 
 
+def interleaved_f32le_bytes_to_channel_payloads(payload: bytes, channels: int) -> tuple[bytes, bytes]:
+    channel_count = max(1, int(channels))
+    frame_size = ANALYZER_SAMPLE_WIDTH_BYTES * channel_count
+    usable_size = len(payload) - (len(payload) % frame_size)
+    if usable_size == 0:
+        return b"", b""
+
+    if channel_count == 1:
+        mono_payload = payload[:usable_size]
+        return mono_payload, mono_payload
+
+    np = require_numpy()
+    frames = np.frombuffer(payload[:usable_size], dtype="<f4").reshape(-1, channel_count)
+    left = np.ascontiguousarray(frames[:, 0]).astype(np.float32, copy=False).tobytes()
+    right = np.ascontiguousarray(frames[:, 1]).astype(np.float32, copy=False).tobytes()
+    return left, right
+
+
 def samples_to_numpy_window(samples: array, fft_size: int):
     np = require_numpy()
     size = max(2, int(fft_size))
@@ -381,93 +410,6 @@ def samples_to_log_band_db_values(
     )
 
 
-def jack_port_name(port) -> str:
-    return str(getattr(port, "name", port))
-
-
-def jack_port_short_name(port) -> str:
-    return str(getattr(port, "shortname", jack_port_name(port).rsplit(":", 1)[-1]))
-
-
-def jack_port_client_name(port) -> str:
-    return jack_port_name(port).rsplit(":", 1)[0]
-
-
-def jack_sink_name_candidates(sink_name: str, sink_description: str | None = None) -> tuple[str, ...]:
-    candidates: list[str] = []
-
-    for candidate in (sink_description, sink_name):
-        if candidate and candidate not in candidates:
-            candidates.append(candidate)
-
-    return tuple(candidates)
-
-
-def jack_port_client_matches_sink(port, sink_candidates: set[str]) -> bool:
-    client_name = jack_port_client_name(port)
-    return any(client_name == candidate or client_name.startswith(f"{candidate}-") for candidate in sink_candidates)
-
-
-def jack_pipewire_props(existing_props: str | None = None) -> str:
-    if existing_props and not existing_props.lstrip().startswith("{"):
-        return f"{existing_props} {JACK_PIPEWIRE_PROPS}"
-
-    return JACK_PIPEWIRE_PROPS
-
-
-def jack_audio_output_ports_for_sink(
-    ports: list,
-    sink_name: str,
-    sink_description: str | None = None,
-) -> list:
-    candidates = set(jack_sink_name_candidates(sink_name, sink_description))
-    return [port for port in ports if jack_port_client_matches_sink(port, candidates)]
-
-
-def select_jack_stereo_output_ports(ports: list) -> tuple[object | None, object | None]:
-    left_suffixes = ("monitor_FL", "monitor_AUX0")
-    right_suffixes = ("monitor_FR", "monitor_AUX1")
-    mono_suffixes = ("monitor_MONO",)
-
-    def find_by_suffix(suffixes: tuple[str, ...]):
-        for suffix in suffixes:
-            for port in ports:
-                if jack_port_short_name(port) == suffix or jack_port_short_name(port).endswith(f"_{suffix}"):
-                    return port
-        return None
-
-    left = find_by_suffix(left_suffixes)
-    right = find_by_suffix(right_suffixes)
-    mono = find_by_suffix(mono_suffixes)
-
-    if left is None and right is None and mono is not None:
-        return mono, mono
-
-    if left is None and right is not None:
-        left = right
-    if right is None and left is not None:
-        right = left
-
-    return left, right
-
-
-def disconnect_jack_input_port_connections(client, input_ports: tuple[object | None, ...]) -> None:
-    for input_port in input_ports:
-        if input_port is None:
-            continue
-
-        try:
-            connections = client.get_all_connections(input_port)
-        except Exception:
-            continue
-
-        for source_port in connections:
-            try:
-                client.disconnect(source_port, input_port)
-            except Exception:
-                pass
-
-
 class OutputSpectrumAnalyzer:
     def __init__(
         self,
@@ -483,16 +425,19 @@ class OutputSpectrumAnalyzer:
         self.loudness_callback = loudness_callback
         self.status_callback = status_callback
         self.enabled = False
-        self.client = None
-        self.client_active = False
-        self.left_input_port = None
-        self.right_input_port = None
+        self.stream = None
+        self.stream_active = False
+        self.stream_signal_handler_ids: list[int] = []
         self.reader_thread: threading.Thread | None = None
         self.stop_event = threading.Event()
         self.stop_event.set()
-        self.audio_blocks = deque(maxlen=JACK_CAPTURE_QUEUE_BLOCKS)
+        self.audio_blocks = deque(maxlen=ANALYZER_CAPTURE_QUEUE_BLOCKS)
         self.sample_rate = SAMPLE_RATE
         self.response_speed = ANALYZER_RESPONSE_DEFAULT
+
+    @property
+    def client(self):
+        return self.stream
 
     def set_levels_callback(self, callback: Callable[[list[float]], None] | None) -> None:
         self.levels_callback = callback
@@ -509,18 +454,13 @@ class OutputSpectrumAnalyzer:
 
         self.output_sink_name = sink_name
         self.output_sink_description = sink_description
+        if self.stream is not None:
+            self.stop(close_stream=True)
+
         if not self.enabled:
             return
 
-        if self.client is None:
-            self.restart()
-            return
-
-        try:
-            disconnect_jack_input_port_connections(self.client, (self.left_input_port, self.right_input_port))
-            self.connect_jack_monitor_ports(self.client)
-        except Exception as exc:
-            self.status_callback(f"analyzer output reconnect failed: {exc}")
+        self.restart()
 
     def set_enabled(self, enabled: bool) -> bool:
         self.enabled = bool(enabled)
@@ -539,31 +479,34 @@ class OutputSpectrumAnalyzer:
         self.stop_event.clear()
 
         try:
-            if self.client is None:
-                self.client = self.open_jack_client()
-            self.activate_jack_client(self.client)
+            if self.stream is None:
+                self.stream = self.open_pwg_stream()
+            self.activate_pwg_stream(self.stream)
         except Exception as exc:
             self.stop_event.set()
             self.status_callback(f"Analyzer Unavailable: {exc}")
             return False
 
-        self.reader_thread = threading.Thread(target=self.read_jack_levels, name="mini-eq-analyzer", daemon=True)
+        self.reader_thread = threading.Thread(target=self.read_audio_levels, name="mini-eq-analyzer", daemon=True)
         self.reader_thread.start()
         return True
 
     def prepare(self) -> bool:
-        if self.client is not None:
+        if self.stream is not None:
             return True
 
         try:
-            self.client = self.open_jack_client()
+            self.stream = self.open_pwg_stream()
         except Exception:
             return False
 
         return True
 
-    def stop(self, *, close_client: bool = False) -> None:
-        client = self.client
+    def stop(self, *, close_stream: bool = False, close_client: bool | None = None) -> None:
+        if close_client is not None:
+            close_stream = close_client
+
+        stream = self.stream
         reader_thread = self.reader_thread
 
         self.reader_thread = None
@@ -571,99 +514,77 @@ class OutputSpectrumAnalyzer:
         self.audio_blocks.clear()
         self.emit_loudness_snapshot(None)
 
-        if client is not None and self.client_active and not close_client:
-            self.deactivate_jack_client(client)
+        if stream is not None and self.stream_active:
+            self.deactivate_pwg_stream(stream)
 
         if reader_thread is not None and reader_thread is not threading.current_thread():
             reader_thread.join(timeout=ANALYZER_READER_JOIN_TIMEOUT_SECONDS)
 
-        if close_client and client is not None:
-            self.close_jack_client(client)
-            self.client = None
-            self.left_input_port = None
-            self.right_input_port = None
+        if close_stream and stream is not None:
+            self.close_pwg_stream(stream)
+            self.stream = None
 
     def close(self) -> None:
-        self.stop(close_client=True)
+        self.stop(close_stream=True)
 
     def restart(self) -> bool:
-        self.stop(close_client=True)
+        self.stop(close_stream=True)
         if not self.enabled:
             return True
 
         return self.start()
 
-    def open_jack_client(self):
-        try:
-            import jack
-        except Exception as exc:
-            raise RuntimeError("Python JACK client is not available") from exc
+    def open_pwg_stream(self):
+        _GLib, Pwg = self._import_pipewire_gobject()
+        Pwg.init()
+        stream = Pwg.Stream.new_audio_capture(self.output_sink_name, True)
+        set_pipewire_property = getattr(stream, "set_pipewire_property", None)
+        if callable(set_pipewire_property):
+            for key, value in ANALYZER_PIPEWIRE_PROPERTIES:
+                set_pipewire_property(key, value)
+        stream.set_requested_format("F32", int(SAMPLE_RATE), 2)
+        stream.set_deliver_audio_blocks(True)
+        handler_id = stream.connect("audio-block", self.process_audio_block)
+        self.stream_signal_handler_ids = [handler_id]
+        self.sample_rate = float(stream.get_requested_rate() or SAMPLE_RATE)
+        return stream
 
-        old_pipewire_props = os.environ.get("PIPEWIRE_PROPS")
-        os.environ["PIPEWIRE_PROPS"] = jack_pipewire_props(old_pipewire_props)
-        try:
-            client = jack.Client(JACK_CLIENT_NAME, no_start_server=True)
-        finally:
-            if old_pipewire_props is None:
-                os.environ.pop("PIPEWIRE_PROPS", None)
-            else:
-                os.environ["PIPEWIRE_PROPS"] = old_pipewire_props
-
-        self.sample_rate = float(client.samplerate or SAMPLE_RATE)
-        return client
-
-    def activate_jack_client(self, client) -> None:
-        if self.client_active:
-            disconnect_jack_input_port_connections(client, (self.left_input_port, self.right_input_port))
-            self.connect_jack_monitor_ports(client)
+    def activate_pwg_stream(self, stream) -> None:
+        if self.stream_active:
             return
 
-        if self.left_input_port is None:
-            self.left_input_port = client.inports.register(JACK_LEFT_INPUT_PORT, is_terminal=True)
-        if self.right_input_port is None:
-            self.right_input_port = client.inports.register(JACK_RIGHT_INPUT_PORT, is_terminal=True)
-
         try:
-            client.set_process_callback(self.process_jack_audio)
-            client.activate()
-            self.client_active = True
-            disconnect_jack_input_port_connections(client, (self.left_input_port, self.right_input_port))
-            self.connect_jack_monitor_ports(client)
+            if not stream.start():
+                raise RuntimeError("PipeWire analyzer stream failed to start")
+            self.stream_active = True
+            self.sample_rate = float(stream.get_rate() or stream.get_requested_rate() or SAMPLE_RATE)
         except Exception:
-            self.deactivate_jack_client(client)
+            self.deactivate_pwg_stream(stream)
             raise
 
-    def deactivate_jack_client(self, client) -> None:
+    def deactivate_pwg_stream(self, stream) -> None:
         try:
-            client.deactivate()
+            stream.stop()
         except Exception:
             pass
 
-        self.client_active = False
+        self.stream_active = False
 
-    def close_jack_client(self, client) -> None:
-        if self.client_active:
-            self.deactivate_jack_client(client)
+    def close_pwg_stream(self, stream) -> None:
+        if self.stream_active:
+            self.deactivate_pwg_stream(stream)
+
+        for handler_id in self.stream_signal_handler_ids:
+            try:
+                stream.disconnect(handler_id)
+            except Exception:
+                pass
+        self.stream_signal_handler_ids = []
 
         try:
-            client.close()
+            stream.stop()
         except Exception:
             pass
-
-    def connect_jack_monitor_ports(self, client) -> None:
-        output_ports = jack_audio_output_ports_for_sink(
-            client.get_ports(is_audio=True, is_output=True),
-            self.output_sink_name,
-            self.output_sink_description,
-        )
-        left_output_port, right_output_port = select_jack_stereo_output_ports(output_ports)
-
-        if left_output_port is None or right_output_port is None:
-            sink_label = self.output_sink_description or self.output_sink_name
-            raise RuntimeError(f"JACK monitor ports not found for {sink_label}")
-
-        client.connect(jack_port_name(left_output_port), jack_port_name(self.left_input_port))
-        client.connect(jack_port_name(right_output_port), jack_port_name(self.right_input_port))
 
     def create_loudness_meter(self):
         try:
@@ -707,18 +628,20 @@ class OutputSpectrumAnalyzer:
         except Exception:
             pass
 
-    def process_jack_audio(self, _frames: int) -> None:
-        if self.stop_event.is_set() or self.left_input_port is None or self.right_input_port is None:
+    def process_audio_block(self, _stream, block) -> None:
+        if self.stop_event.is_set():
             return
 
-        self.audio_blocks.append(
-            (
-                bytes(self.left_input_port.get_buffer()),
-                bytes(self.right_input_port.get_buffer()),
-            )
-        )
+        audio_format = block.get_format()
+        sample_format = audio_format.get_sample_format()
+        if sample_format != "F32":
+            return
 
-    def read_jack_levels(self) -> None:
+        self.sample_rate = float(audio_format.get_rate() or self.sample_rate or SAMPLE_RATE)
+        data = block.get_data().get_data()
+        self.audio_blocks.append(interleaved_f32le_bytes_to_channel_payloads(data, audio_format.get_channels()))
+
+    def read_audio_levels(self) -> None:
         pending_samples = array("f")
         fft_samples = array("f")
         fft_size = analyzer_fft_size(self.sample_rate)
@@ -786,3 +709,26 @@ class OutputSpectrumAnalyzer:
             self.close_loudness_meter(loudness_meter)
             if self.reader_thread is threading.current_thread():
                 self.reader_thread = None
+
+    @staticmethod
+    def _import_pipewire_gobject():
+        shim_error: Exception | None = None
+        try:
+            import pipewire_gobject  # noqa: F401
+        except Exception as exc:  # pragma: no cover - depends on installed packaging layout
+            shim_error = exc
+
+        try:
+            import gi
+
+            gi.require_version("Pwg", "0.1")
+            from gi.repository import GLib, Pwg
+        except Exception as exc:
+            if shim_error is not None:
+                raise RuntimeError(
+                    f"pipewire-gobject is not available: Python shim failed with {shim_error}; "
+                    f"Pwg GI import failed with {exc}"
+                ) from exc
+            raise
+
+        return GLib, Pwg

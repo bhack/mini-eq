@@ -36,6 +36,8 @@ def test_builtin_biquad_filter_chain_uses_pipewire_raw_biquads() -> None:
     assert 'inputs = [ "preamp_l:In" "preamp_r:In" ]' in args
     assert 'outputs = [ "band_l_1:Out" "band_r_1:Out" ]' in args
     assert 'target.object = "alsa_output.test"' in args
+    assert args.count("state.restore-props = false") == 2
+    assert args.count("state.restore-target = false") == 2
 
 
 def test_builtin_biquad_controls_cover_both_channels() -> None:

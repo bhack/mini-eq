@@ -7,6 +7,7 @@ from argparse import Namespace
 import gi
 
 gi.require_version("Adw", "1")
+gi.require_version("GLibUnix", "2.0")
 
 from gi.repository import Adw, Gio, GLib, GLibUnix
 

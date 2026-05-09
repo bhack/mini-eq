@@ -52,6 +52,7 @@ class FakeSwitch:
 class FakeConnection:
     def __init__(self) -> None:
         self.signals: list[tuple[str, object | None]] = []
+        self.closed = False
 
     def emit_signal(
         self,
@@ -62,6 +63,26 @@ class FakeConnection:
         parameters: object | None,
     ) -> None:
         self.signals.append((signal_name, parameters))
+
+    def is_closed(self) -> bool:
+        return self.closed
+
+
+class ClosedErrorConnection(FakeConnection):
+    def emit_signal(
+        self,
+        _destination: str | None,
+        _object_path: str,
+        _interface_name: str,
+        signal_name: str,
+        parameters: object | None,
+    ) -> None:
+        del signal_name, parameters
+        raise dbus_control.GLib.Error(
+            "connection is closed",
+            dbus_control.Gio.io_error_quark(),
+            dbus_control.Gio.IOErrorEnum.CLOSED,
+        )
 
 
 class FakeWindow:
@@ -79,6 +100,51 @@ class FakeWindow:
         self.update_count = 0
         self.output_preset_auto_applied = False
         self.visible = True
+
+    def sync_control_switches_from_controller(self, *, route: bool = True, eq: bool = True) -> None:
+        self.updating_ui = True
+        try:
+            if route:
+                self.route_switch.set_active(self.controller.routed)
+                self.route_switch.set_state(self.controller.routed)
+            if eq:
+                self.bypass_switch.set_active(self.controller.eq_enabled)
+                self.bypass_switch.set_state(self.controller.eq_enabled)
+        finally:
+            self.updating_ui = False
+
+    def refresh_after_route_state_changed(
+        self,
+        *,
+        eq_was_enabled: bool,
+        announce_enabled: bool | None = None,
+        notify: bool = True,
+    ) -> None:
+        del announce_enabled, notify
+        self.sync_control_switches_from_controller()
+        self.update_eq_power_indicator()
+        self.update_info_label()
+        self.update_status_summary()
+        self.update_focus_summary()
+        if not eq_was_enabled and self.controller.eq_enabled:
+            self.invalidate_graph_response_cache()
+            self.queue_graph_draw()
+            self.update_preset_state()
+
+    def refresh_after_eq_state_changed(
+        self,
+        *,
+        announce_enabled: bool | None = None,
+        notify: bool = True,
+    ) -> None:
+        del announce_enabled, notify
+        self.sync_control_switches_from_controller(route=False)
+        self.update_eq_power_indicator()
+        self.update_info_label()
+        self.update_status_summary()
+        self.invalidate_graph_response_cache()
+        self.queue_graph_draw()
+        self.update_preset_state()
 
     def load_library_preset(self, name: str) -> None:
         self.current_preset_name = name
@@ -228,6 +294,34 @@ def test_dbus_control_emits_compact_analyzer_levels_signal() -> None:
             analyzer.analyzer_level_to_display_norm(1.0),
         ]
     )
+
+
+def test_dbus_control_ignores_closed_connection_before_signal_emit() -> None:
+    control, _controller, window = make_control()
+    connection = FakeConnection()
+    connection.closed = True
+    control.connection = connection
+    control.registration_id = 12
+    window.analyzer_enabled = True
+
+    control.emit_analyzer_levels_changed()
+
+    assert connection.signals == []
+    assert control.connection is None
+    assert control.registration_id == 0
+
+
+def test_dbus_control_ignores_closed_connection_error_during_signal_emit() -> None:
+    control, _controller, window = make_control()
+    connection = ClosedErrorConnection()
+    control.connection = connection
+    control.registration_id = 12
+    window.analyzer_enabled = True
+
+    control.emit_analyzer_levels_changed()
+
+    assert control.connection is None
+    assert control.registration_id == 0
 
 
 def test_dbus_control_set_eq_enabled_updates_controller_and_window() -> None:

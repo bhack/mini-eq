@@ -19,13 +19,12 @@ keywords = [
     "filter-chain",
     "flatpak",
     "gtk",
-    "jack",
     "libadwaita",
     "linux",
     "parametric-eq",
+    "pipewire-gobject",
     "pipewire",
     "spectrum-analyzer",
-    "wireplumber",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -41,7 +40,7 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
     "Topic :: Multimedia :: Sound/Audio :: Mixers",
 ]
-dependencies = ["JACK-Client>=0.5.5", "numpy>=1.26"]
+dependencies = ["numpy>=1.26", "pipewire-gobject>=0.3.4,<0.4"]
 
 [project.urls]
 Homepage = "https://github.com/bhack/mini-eq"

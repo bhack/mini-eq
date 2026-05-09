@@ -25,6 +25,40 @@ class FakeSwitch:
         self.state = state
 
 
+class FakeStateLabel:
+    def __init__(self) -> None:
+        self.text = ""
+        self.tooltip = None
+        self.css_classes: set[str] = set()
+
+    def set_text(self, text: str) -> None:
+        self.text = text
+
+    def set_tooltip_text(self, text: str | None) -> None:
+        self.tooltip = text
+
+    def add_css_class(self, css_class: str) -> None:
+        self.css_classes.add(css_class)
+
+    def remove_css_class(self, css_class: str) -> None:
+        self.css_classes.discard(css_class)
+
+
+def bind_control_refresh_methods(fake_window: SimpleNamespace) -> None:
+    fake_window.sync_control_switches_from_controller = MethodType(
+        window.MiniEqWindow.sync_control_switches_from_controller,
+        fake_window,
+    )
+    fake_window.refresh_after_route_state_changed = MethodType(
+        window.MiniEqWindow.refresh_after_route_state_changed,
+        fake_window,
+    )
+    fake_window.refresh_after_eq_state_changed = MethodType(
+        window.MiniEqWindow.refresh_after_eq_state_changed,
+        fake_window,
+    )
+
+
 def test_on_close_request_starts_custom_shutdown_sequence() -> None:
     calls: list[str] = []
     fake_window = SimpleNamespace(
@@ -69,6 +103,7 @@ def test_begin_close_request_shutdown_restores_routing_before_delayed_quit(monke
                 ("route", enabled, announce, refresh_output)
             )
         ),
+        is_system_routed=lambda: True,
         update_info_label=lambda: calls.append("info"),
         update_status_summary=lambda: calls.append("summary"),
         set_visible=lambda visible: calls.append(("visible", visible)),
@@ -95,6 +130,51 @@ def test_begin_close_request_shutdown_restores_routing_before_delayed_quit(monke
 
     assert fake_window.close_finish_source_id == 0
     assert application.quit_count == 1
+
+
+def test_begin_close_request_shutdown_uses_controller_route_state(monkeypatch) -> None:
+    scheduled: list[tuple[int, object]] = []
+    application = SimpleNamespace(quit_count=0)
+    application.quit = lambda: setattr(application, "quit_count", application.quit_count + 1)
+    calls: list[object] = []
+
+    monkeypatch.setattr(
+        window.GLib,
+        "timeout_add",
+        lambda delay_ms, callback: scheduled.append((delay_ms, callback)) or 321,
+    )
+
+    fake_window = SimpleNamespace(
+        ui_shutting_down=False,
+        close_finish_source_id=0,
+        updating_ui=False,
+        route_switch=FakeSwitch(False),
+        controller=SimpleNamespace(
+            routed=True,
+            route_system_audio=lambda enabled, announce=True, refresh_output=True: calls.append(
+                ("route", enabled, announce, refresh_output)
+            ),
+        ),
+        is_system_routed=lambda: True,
+        update_info_label=lambda: calls.append("info"),
+        update_status_summary=lambda: calls.append("summary"),
+        set_visible=lambda visible: calls.append(("visible", visible)),
+        prepare_for_shutdown=lambda: calls.append("prepare"),
+        get_application=lambda: application,
+    )
+    fake_window.finish_close_request = MethodType(window.MiniEqWindow.finish_close_request, fake_window)
+
+    window.MiniEqWindow.begin_close_request_shutdown(fake_window)
+
+    assert fake_window.route_switch.get_active() is False
+    assert calls == [
+        ("route", False, False, False),
+        "info",
+        "summary",
+        ("visible", False),
+        "prepare",
+    ]
+    assert scheduled[0][0] == window.ROUTING_CLOSE_SETTLE_MS
 
 
 def test_begin_close_request_shutdown_hides_when_background_mode_is_enabled() -> None:
@@ -128,9 +208,9 @@ def test_begin_close_request_shutdown_hides_when_background_mode_is_enabled() ->
     ]
 
 
-def test_post_present_setup_routes_before_starting_monitor_for_auto_route() -> None:
+def test_post_present_setup_schedules_auto_route_after_startup_work() -> None:
     calls: list[object] = []
-    controller = SimpleNamespace(routed=False)
+    controller = SimpleNamespace(eq_enabled=True, routed=False)
 
     def route_system_audio(enabled: bool) -> None:
         calls.append(("route", enabled))
@@ -140,6 +220,7 @@ def test_post_present_setup_routes_before_starting_monitor_for_auto_route() -> N
 
     fake_window = SimpleNamespace(
         post_present_source_id=99,
+        startup_auto_route_source_id=0,
         ui_shutting_down=False,
         post_present_ready=False,
         auto_route_on_startup=True,
@@ -149,38 +230,102 @@ def test_post_present_setup_routes_before_starting_monitor_for_auto_route() -> N
         controller=controller,
         start_preset_monitoring=lambda: calls.append("preset-monitor"),
         apply_output_preset_for_current_output=lambda: calls.append("output-preset"),
-        update_eq_power_indicator=lambda: calls.append("power"),
-        update_info_label=lambda: calls.append("info"),
-        update_status_summary=lambda: calls.append("summary"),
+        update_eq_power_indicator=lambda: calls.append(("power", fake_window.route_switch.get_active())),
+        update_info_label=lambda: calls.append(("info", fake_window.route_switch.get_active())),
+        update_status_summary=lambda: calls.append(("summary", fake_window.route_switch.get_active())),
         update_focus_summary=lambda: calls.append("focus"),
         start_analyzer_preview=lambda: calls.append("monitor"),
         notify_control_state_changed=lambda: calls.append("notify"),
         set_status=lambda message: calls.append(("status", message)),
+        schedule_startup_auto_route=lambda: calls.append("schedule-route"),
         present=lambda: calls.append("present"),
     )
+    fake_window.bypass_switch = FakeSwitch(True)
+    bind_control_refresh_methods(fake_window)
 
     keep_source = window.MiniEqWindow.on_post_present_setup_idle(fake_window)
 
     assert keep_source is False
     assert fake_window.post_present_source_id == 0
     assert fake_window.post_present_ready is True
-    assert fake_window.route_switch.get_active() is True
-    assert fake_window.route_switch.get_state() is True
+    assert fake_window.route_switch.get_active() is False
+    assert fake_window.route_switch.get_state() is False
     assert calls == [
         "preset-monitor",
         "output-preset",
-        ("route", True),
-        "power",
-        "info",
-        "summary",
-        "focus",
         "monitor",
+        "notify",
+        "schedule-route",
+    ]
+
+
+def test_startup_auto_route_idle_routes_after_startup_work() -> None:
+    calls: list[object] = []
+    controller = SimpleNamespace(eq_enabled=True, routed=False)
+
+    def route_system_audio(enabled: bool) -> None:
+        calls.append(("route", enabled))
+        controller.routed = enabled
+
+    controller.route_system_audio = route_system_audio
+
+    fake_window = SimpleNamespace(
+        startup_auto_route_source_id=321,
+        ui_shutting_down=False,
+        auto_route_on_startup=True,
+        updating_ui=False,
+        route_switch=FakeSwitch(False),
+        bypass_switch=FakeSwitch(True),
+        controller=controller,
+        update_eq_power_indicator=lambda: calls.append(("power", fake_window.route_switch.get_active())),
+        update_info_label=lambda: calls.append(("info", fake_window.route_switch.get_active())),
+        update_status_summary=lambda: calls.append(("summary", fake_window.route_switch.get_active())),
+        update_focus_summary=lambda: calls.append("focus"),
+        set_status=lambda message: calls.append(("status", message)),
+        notify_control_state_changed=lambda: calls.append("notify"),
+    )
+    bind_control_refresh_methods(fake_window)
+
+    keep_source = window.MiniEqWindow.on_startup_auto_route_idle(fake_window)
+
+    assert keep_source is False
+    assert fake_window.startup_auto_route_source_id == 0
+    assert fake_window.route_switch.get_active() is True
+    assert fake_window.route_switch.get_state() is True
+    assert calls == [
+        ("route", True),
+        ("power", True),
+        ("info", True),
+        ("summary", True),
+        "focus",
         "notify",
     ]
 
 
+def test_status_summary_uses_controller_route_state_over_stale_switch() -> None:
+    headroom_states: list[dict[str, object]] = []
+    state_label = FakeStateLabel()
+    fake_window = SimpleNamespace(
+        route_switch=FakeSwitch(False),
+        controller=SimpleNamespace(eq_enabled=True),
+        system_state_label=state_label,
+        output_sink_info=lambda: object(),
+        is_system_routed=lambda: True,
+        profile_summary=lambda _sink: ("USB output", "48 kHz", False, []),
+        estimate_curve_peak_db=lambda: -3.0,
+        set_headroom_state=lambda **kwargs: headroom_states.append(kwargs),
+    )
+
+    window.MiniEqWindow.update_status_summary(fake_window)
+
+    assert state_label.text == "Applied"
+    assert "system-state-live" in state_label.css_classes
+    assert headroom_states[-1]["kind"] == "safe"
+
+
 def test_on_route_changed_resets_switch_when_routing_fails() -> None:
     calls: list[object] = []
+    route_switch = FakeSwitch(True)
 
     def fail_route(_enabled: bool) -> None:
         raise RuntimeError("metadata permission denied")
@@ -192,6 +337,8 @@ def test_on_route_changed_resets_switch_when_routing_fails() -> None:
             routed=False,
             route_system_audio=fail_route,
         ),
+        route_switch=route_switch,
+        bypass_switch=FakeSwitch(True),
         update_eq_power_indicator=lambda: calls.append("power"),
         update_info_label=lambda: calls.append("info"),
         update_status_summary=lambda: calls.append("summary"),
@@ -199,7 +346,7 @@ def test_on_route_changed_resets_switch_when_routing_fails() -> None:
         set_status=lambda message: calls.append(("status", message)),
         notify_control_state_changed=lambda: calls.append("notify"),
     )
-    route_switch = FakeSwitch(True)
+    bind_control_refresh_methods(fake_window)
 
     handled = window.MiniEqWindow.on_route_changed(fake_window, route_switch, None)
 
@@ -213,6 +360,7 @@ def test_on_route_changed_resets_switch_when_routing_fails() -> None:
 def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
     calls: list[object] = []
     controller = SimpleNamespace(eq_enabled=False, routed=False)
+    route_switch = FakeSwitch(True)
 
     def route_system_audio(enabled: bool) -> None:
         calls.append(("route", enabled))
@@ -224,6 +372,7 @@ def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
     fake_window = SimpleNamespace(
         updating_ui=False,
         controller=controller,
+        route_switch=route_switch,
         bypass_switch=FakeSwitch(False),
         update_eq_power_indicator=lambda: calls.append("power"),
         update_info_label=lambda: calls.append("info"),
@@ -235,7 +384,7 @@ def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
         set_status=lambda message: calls.append(("status", message)),
         notify_control_state_changed=lambda: calls.append("notify"),
     )
-    route_switch = FakeSwitch(True)
+    bind_control_refresh_methods(fake_window)
 
     handled = window.MiniEqWindow.on_route_changed(fake_window, route_switch, None)
 
@@ -260,6 +409,7 @@ def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
 
 def test_on_bypass_changed_resets_switch_when_engine_update_fails() -> None:
     calls: list[object] = []
+    bypass_switch = FakeSwitch(False)
 
     def fail_enabled(_enabled: bool) -> None:
         raise RuntimeError("control update failed")
@@ -267,6 +417,8 @@ def test_on_bypass_changed_resets_switch_when_engine_update_fails() -> None:
     fake_window = SimpleNamespace(
         updating_ui=False,
         controller=SimpleNamespace(eq_enabled=True, set_eq_enabled=fail_enabled),
+        route_switch=FakeSwitch(False),
+        bypass_switch=bypass_switch,
         update_eq_power_indicator=lambda: calls.append("power"),
         update_info_label=lambda: calls.append("info"),
         update_status_summary=lambda: calls.append("summary"),
@@ -276,7 +428,7 @@ def test_on_bypass_changed_resets_switch_when_engine_update_fails() -> None:
         set_status=lambda message: calls.append(("status", message)),
         notify_control_state_changed=lambda: calls.append("notify"),
     )
-    bypass_switch = FakeSwitch(False)
+    bind_control_refresh_methods(fake_window)
 
     handled = window.MiniEqWindow.on_bypass_changed(fake_window, bypass_switch, None)
 

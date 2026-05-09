@@ -46,3 +46,18 @@ def test_allowed_matches_still_cover_public_release_references() -> None:
 
     for line in lines:
         assert release_preflight.allowed_leak_match(line)
+
+
+def test_pipewire_gobject_build_environment_error_lists_missing_tools(monkeypatch) -> None:
+    monkeypatch.setattr(release_preflight, "PIPEWIRE_GOBJECT_BUILD_TOOLS", ("definitely-missing-pwg-tool",))
+    monkeypatch.setattr(release_preflight, "PIPEWIRE_GOBJECT_PKG_CONFIG_MODULES", ())
+
+    try:
+        release_preflight.check_pipewire_gobject_sdist_build_environment()
+    except SystemExit as error:
+        message = str(error)
+        assert "pipewire-gobject from its sdist" in message
+        assert "sudo apt install" in message
+        assert "definitely-missing-pwg-tool" in message
+    else:
+        raise AssertionError("Expected missing pipewire-gobject build tool to fail")

@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       flatpak_runtime_smoke:
-        description: Run the experimental Flatpak PipeWire/WirePlumber routing smoke test
+        description: Run the experimental Flatpak PipeWire routing smoke test
         type: boolean
         default: false
       smoke_only:
@@ -52,7 +52,7 @@ jobs:
       flatpak: ${{ steps.filter.outputs.flatpak }}
       test: ${{ steps.filter.outputs.test }}
       tooling: ${{ steps.filter.outputs.tooling }}
-      wp04: ${{ steps.filter.outputs.wp04 }}
+      pwg: ${{ steps.filter.outputs.pwg }}
 
     steps:
       - name: Detect changed files
@@ -71,7 +71,7 @@ jobs:
             {
               echo "test=true"
               echo "tooling=true"
-              echo "wp04=true"
+              echo "pwg=true"
               echo "flatpak=true"
             } >> "$GITHUB_OUTPUT"
           }
@@ -82,7 +82,7 @@ jobs:
                 {
                   echo "test=false"
                   echo "tooling=false"
-                  echo "wp04=false"
+                  echo "pwg=false"
                   echo "flatpak=false"
                 } >> "$GITHUB_OUTPUT"
                 exit 0
@@ -108,7 +108,7 @@ jobs:
 
           test=false
           tooling=false
-          wp04=false
+          pwg=false
           flatpak=false
 
           while IFS= read -r path; do
@@ -116,7 +116,7 @@ jobs:
               .github/workflows/ci.yml)
                 test=true
                 tooling=true
-                wp04=true
+                pwg=true
                 flatpak=true
                 ;;
               README.md|pyproject.toml|MANIFEST.in|src/*|tests/*|data/*|extensions/*)
@@ -134,13 +134,13 @@ jobs:
             esac
 
             case "$path" in
-              .github/workflows/ci.yml|docker/ubuntu-24.04-wp04.Dockerfile|tools/check_wireplumber_gi.py|src/mini_eq/wireplumber_backend.py)
-                wp04=true
+              .github/workflows/ci.yml|tools/check_pipewire_gobject.py|src/mini_eq/pipewire_backend.py|src/mini_eq/analyzer.py)
+                pwg=true
                 ;;
             esac
 
             case "$path" in
-              .github/workflows/ci.yml|io.github.bhack.mini-eq.yaml|python3-dependencies.yaml|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_wireplumber_gi.py)
+              .github/workflows/ci.yml|io.github.bhack.mini-eq.yaml|python3-dependencies.yaml|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_pipewire_gobject.py)
                 flatpak=true
                 ;;
             esac
@@ -149,7 +149,7 @@ jobs:
           {
             echo "test=$test"
             echo "tooling=$tooling"
-            echo "wp04=$wp04"
+            echo "pwg=$pwg"
             echo "flatpak=$flatpak"
           } >> "$GITHUB_OUTPUT"
 
@@ -158,7 +158,7 @@ jobs:
             echo
             echo "- test: \`$test\`"
             echo "- tooling: \`$tooling\`"
-            echo "- wireplumber-0-4-compat: \`$wp04\`"
+            echo "- pipewire-gobject: \`$pwg\`"
             echo "- flatpak: \`$flatpak\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -220,24 +220,31 @@ jobs:
           sudo apt-get install -y \
             gir1.2-adw-1 \
             gir1.2-gtk-4.0 \
+            gobject-introspection \
+            libgirepository1.0-dev \
+            libglib2.0-dev \
+            libpipewire-0.3-dev \
+            meson \
+            ninja-build \
             pipewire \
-            pipewire-jack \
             python3-cairo \
+            python3-dev \
             python3-gi \
             python3-pip \
+            python3-setuptools \
             python3-venv \
             wireplumber
-          if apt-cache show gir1.2-wp-0.5 >/dev/null 2>&1; then
-            sudo apt-get install -y gir1.2-wp-0.5
-          else
-            sudo apt-get install -y gir1.2-wp-0.4
-          fi
 
       - name: Install Python dependencies
         if: ${{ needs.changes.outputs.test == 'true' }}
         run: |
+          python3 -m venv /tmp/mini-eq-pwg-build
+          /tmp/mini-eq-pwg-build/bin/python -m pip install --upgrade pip
+          /tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.4,<0.4' -w /tmp/mini-eq-wheelhouse
+
           python3 -m venv --system-site-packages .venv
           .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.4,<0.4'
           .venv/bin/python -m pip install -e '.[dev]'
 
       - name: Lint
@@ -263,7 +270,9 @@ jobs:
       - name: Smoke-test wheel CLI
         if: ${{ needs.changes.outputs.test == 'true' }}
         run: |
-          python3 -m venv /tmp/mini-eq-wheel-test
+          python3 -m venv --system-site-packages /tmp/mini-eq-wheel-test
+          /tmp/mini-eq-wheel-test/bin/python -m pip install --upgrade pip
+          /tmp/mini-eq-wheel-test/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.4,<0.4'
           /tmp/mini-eq-wheel-test/bin/python -m pip install dist/mini_eq-*.whl
           /tmp/mini-eq-wheel-test/bin/mini-eq --help
 
@@ -274,32 +283,6 @@ jobs:
           name: mini-eq-dist
           path: dist/*
           if-no-files-found: error
-
-  wireplumber-0-4-compat:
-    needs: changes
-    if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.smoke_only) }}
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Require change detection
-        if: ${{ needs.changes.result != 'success' }}
-        run: exit 1
-
-      - name: Skip unchanged scope
-        if: ${{ needs.changes.outputs.wp04 != 'true' }}
-        run: echo "No WirePlumber 0.4 compatibility changes detected; skipping compatibility job work."
-
-      - name: Check out repository
-        if: ${{ needs.changes.outputs.wp04 == 'true' }}
-        uses: actions/checkout@v6
-
-      - name: Build WirePlumber 0.4 compatibility image
-        if: ${{ needs.changes.outputs.wp04 == 'true' }}
-        run: docker build -f docker/ubuntu-24.04-wp04.Dockerfile -t mini-eq:wp04 .
-
-      - name: Check WirePlumber 0.4 GI compatibility
-        if: ${{ needs.changes.outputs.wp04 == 'true' }}
-        run: docker run --rm mini-eq:wp04
 
   flatpak:
     needs: changes
@@ -345,11 +328,11 @@ jobs:
         if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: flatpak run io.github.bhack.mini-eq --help
 
-      - name: Check WirePlumber 0.5 GI compatibility
+      - name: Check pipewire-gobject GI compatibility
         if: ${{ needs.changes.outputs.flatpak == 'true' }}
         run: |
           flatpak run --filesystem="$PWD":ro --command=python3 io.github.bhack.mini-eq \
-            "$PWD/tools/check_wireplumber_gi.py" --expect-version 0.5
+            "$PWD/tools/check_pipewire_gobject.py" --expect-version 0.3.4
 
       - name: Smoke-test Flatpak runtime modules
         if: ${{ needs.changes.outputs.flatpak == 'true' }}
@@ -375,7 +358,7 @@ jobs:
               "/app/share/licenses/io.github.bhack.mini-eq/mini-eq/LICENSE",
               "/app/share/licenses/io.github.bhack.mini-eq/pipewire-filter-chain-module/COPYING",
               "/app/share/licenses/io.github.bhack.mini-eq/pipewire-filter-chain-module/LICENSE",
-              "/app/share/licenses/io.github.bhack.mini-eq/wireplumber/LICENSE",
+              "/app/share/licenses/io.github.bhack.mini-eq/pipewire-gobject/LICENSE",
           ]
 
           missing = [path for path in required_license_files if not Path(path).exists()]
@@ -386,7 +369,7 @@ jobs:
           flatpak run --command=python3 io.github.bhack.mini-eq - <<'PY'
           import importlib
 
-          required_modules = ["numpy", "jack", "_jack"]
+          required_modules = ["numpy", "pipewire_gobject"]
 
           missing = []
           for name in required_modules:

@@ -23,7 +23,7 @@ body:
       options:
         - App UI
         - PipeWire routing or default output following
-        - WirePlumber integration
+        - pipewire-gobject integration
         - Analyzer or loudness monitoring
         - Presets or AutoEq/Equalizer APO import
         - GNOME Shell extension
