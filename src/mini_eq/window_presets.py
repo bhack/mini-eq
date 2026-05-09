@@ -33,6 +33,7 @@ from .core import (
 from .window_utils import requested_switch_state, set_switch_confirmed_state
 
 APO_IMPORT_LABEL_PREFIX = "Imported APO: "
+DELETED_PRESET_LABEL_PREFIX = "Unsaved copy: "
 
 
 def imported_apo_curve_label(path: str) -> str:
@@ -201,9 +202,53 @@ class MiniEqWindowPresetMixin:
         label = self.current_curve_source_label()
         if label and label.startswith(APO_IMPORT_LABEL_PREFIX):
             return sanitize_preset_name(label[len(APO_IMPORT_LABEL_PREFIX) :])
+        if label and label.startswith(DELETED_PRESET_LABEL_PREFIX):
+            return sanitize_preset_name(label[len(DELETED_PRESET_LABEL_PREFIX) :])
         if label == "Imported APO":
             return label
         return ""
+
+    def preset_name_exists(self, name: str) -> bool:
+        return preset_path_for_name(name).exists()
+
+    def confirm_preset_replacement(
+        self,
+        preset_name: str,
+        body: str,
+        replace_callback: Callable[[], None],
+    ) -> None:
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("Replace preset?")
+        dialog.set_body(body)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("replace", "Replace")
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.set_response_appearance("replace", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.choose(
+            self,
+            None,
+            lambda dialog, result: self.on_preset_replace_dialog_done(dialog, result, replace_callback),
+        )
+
+    def on_preset_replace_dialog_done(
+        self,
+        dialog: Adw.AlertDialog,
+        result: Gio.AsyncResult,
+        replace_callback: Callable[[], None],
+    ) -> None:
+        try:
+            response = dialog.choose_finish(result)
+        except GLib.Error:
+            return
+
+        if response != "replace":
+            return
+
+        try:
+            replace_callback()
+        except Exception as exc:
+            self.set_status(str(exc))
 
     def output_preset_is_active(self) -> bool:
         linked_preset = self.output_preset_link_name()
@@ -539,6 +584,21 @@ class MiniEqWindowPresetMixin:
         self.notify_control_presets_changed()
         self.notify_control_state_changed()
 
+    def save_current_state_to_preset_as(self, name: str) -> None:
+        preset_name = sanitize_preset_name(name)
+        if not preset_name:
+            raise ValueError("Preset name is empty")
+
+        if preset_name != self.current_preset_name and self.preset_name_exists(preset_name):
+            self.confirm_preset_replacement(
+                preset_name,
+                f"{preset_name} already exists. Replace it with the current curve?",
+                lambda: self.save_current_state_to_preset(preset_name),
+            )
+            return
+
+        self.save_current_state_to_preset(preset_name)
+
     def load_library_preset(
         self,
         name: str,
@@ -756,7 +816,7 @@ class MiniEqWindowPresetMixin:
 
     def on_preset_save_as_clicked(self, button: Gtk.Button) -> None:
         initial_name = self.suggested_save_as_name()
-        self.prompt_for_preset_name("Save Preset As", "Save", initial_name, self.save_current_state_to_preset)
+        self.prompt_for_preset_name("Save Preset As", "Save", initial_name, self.save_current_state_to_preset_as)
 
     def on_preset_revert_clicked(self, button: Gtk.Button) -> None:
         if self.current_preset_name is not None:
@@ -907,7 +967,7 @@ class MiniEqWindowPresetMixin:
             delete_preset_file(preset_name)
             self.current_preset_name = None
             self.saved_preset_signature = self.controller.state_signature()
-            self.clear_curve_revert_baseline()
+            self.set_curve_revert_baseline(f"{DELETED_PRESET_LABEL_PREFIX}{preset_name}")
             self.refresh_preset_list()
             self.sync_ui_from_state()
             self.set_status(f"Deleted Preset: {preset_name}; Current Curve Kept")
@@ -926,6 +986,20 @@ class MiniEqWindowPresetMixin:
         dialog.set_filters(filters)
         dialog.set_default_filter(file_filter)
         dialog.open(self, None, self.on_preset_import_done)
+
+    def import_library_preset_payload(self, preset_name: str, payload: dict[str, object]) -> None:
+        write_mini_eq_preset_file(preset_path_for_name(preset_name), payload)
+        self.controller.apply_preset_payload(payload)
+        self.selected_band_index = None
+        self.set_visible_band_count(fader_band_count_for_profile(self.controller.bands))
+        self.current_preset_name = preset_name
+        self.saved_preset_signature = self.controller.state_signature()
+        self.set_curve_revert_baseline(preset_name)
+        self.refresh_preset_list()
+        self.sync_ui_from_state()
+        self.set_status(f"Imported Preset: {preset_name}")
+        self.notify_control_presets_changed()
+        self.notify_control_state_changed()
 
     def on_preset_import_done(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:
         try:
@@ -947,18 +1021,15 @@ class MiniEqWindowPresetMixin:
             stored_payload = dict(payload)
             stored_payload["version"] = PRESET_VERSION
             stored_payload["name"] = preset_name
-            write_mini_eq_preset_file(preset_path_for_name(preset_name), stored_payload)
-            self.controller.apply_preset_payload(stored_payload)
-            self.selected_band_index = None
-            self.set_visible_band_count(fader_band_count_for_profile(self.controller.bands))
-            self.current_preset_name = preset_name
-            self.saved_preset_signature = self.controller.state_signature()
-            self.set_curve_revert_baseline(preset_name)
-            self.refresh_preset_list()
-            self.sync_ui_from_state()
-            self.set_status(f"Imported Preset: {preset_name}")
-            self.notify_control_presets_changed()
-            self.notify_control_state_changed()
+            if self.preset_name_exists(preset_name):
+                self.confirm_preset_replacement(
+                    preset_name,
+                    f"{preset_name} already exists. Replace it with the imported preset?",
+                    lambda: self.import_library_preset_payload(preset_name, stored_payload),
+                )
+                return
+
+            self.import_library_preset_payload(preset_name, stored_payload)
         except Exception as exc:
             self.set_status(str(exc))
 

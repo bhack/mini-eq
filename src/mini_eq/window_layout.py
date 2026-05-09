@@ -29,6 +29,7 @@ from .window_graph import GRAPH_PLOT_BOTTOM, GRAPH_PLOT_LEFT, GRAPH_PLOT_RIGHT, 
 from .window_utils import (
     bind_label_to_control,
     constrain_editor_label,
+    make_ellipsizing_string_list_factory,
     set_accessible_description,
     set_accessible_label,
 )
@@ -107,6 +108,8 @@ class MiniEqWindowLayoutMixin:
         self.output_combo.set_hexpand(False)
         self.output_combo.set_size_request(300, -1)
         self.output_combo.add_css_class("toolbar-select")
+        self.output_combo.set_factory(make_ellipsizing_string_list_factory(34))
+        self.output_combo.set_list_factory(make_ellipsizing_string_list_factory(42))
         set_accessible_label(self.output_combo, "EQ output")
         bind_label_to_control(output_label, self.output_combo)
         output_inline.append(self.output_combo)

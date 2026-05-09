@@ -44,6 +44,22 @@ class FakeStateLabel:
         self.css_classes.discard(css_class)
 
 
+class FakeFile:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def get_path(self) -> str:
+        return self.path
+
+
+class FakeOpenDialog:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def open_finish(self, _result: object) -> FakeFile:
+        return FakeFile(self.path)
+
+
 def bind_control_refresh_methods(fake_window: SimpleNamespace) -> None:
     fake_window.sync_control_switches_from_controller = MethodType(
         window.MiniEqWindow.sync_control_switches_from_controller,
@@ -403,6 +419,47 @@ def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
         "draw",
         "preset-state",
         ("status", "System-wide EQ On"),
+        "notify",
+    ]
+
+
+def test_import_apo_updates_provisional_curve_status_and_control_state(tmp_path) -> None:
+    calls: list[object] = []
+    statuses: list[str] = []
+    apo_path = tmp_path / "HD 650.txt"
+    apo_path.write_text("Preamp: 0 dB\n", encoding="utf-8")
+
+    fake_window = SimpleNamespace(
+        controller=SimpleNamespace(
+            import_apo_preset=lambda path: calls.append(("import", path)) or 7,
+            state_signature=lambda: "imported-signature",
+            build_preset_payload=lambda label: {"name": label},
+        ),
+        selected_band_index=0,
+        current_preset_name="Old",
+        saved_preset_signature="old-signature",
+        output_preset_curve_auto_loaded=True,
+        set_visible_band_count=lambda count: calls.append(("visible-bands", count)),
+        set_curve_revert_baseline=lambda label: calls.append(("baseline", label)),
+        refresh_preset_list=lambda: calls.append("presets"),
+        sync_ui_from_state=lambda: calls.append("sync"),
+        set_status=lambda message: statuses.append(message),
+        notify_control_state_changed=lambda: calls.append("notify"),
+    )
+
+    window.MiniEqWindow.on_import_apo_done(fake_window, FakeOpenDialog(str(apo_path)), None)
+
+    assert fake_window.selected_band_index is None
+    assert fake_window.current_preset_name is None
+    assert fake_window.saved_preset_signature == "imported-signature"
+    assert fake_window.output_preset_curve_auto_loaded is False
+    assert statuses == ["Imported APO: HD 650"]
+    assert calls == [
+        ("import", str(apo_path)),
+        ("visible-bands", 7),
+        ("baseline", "Imported APO: HD 650"),
+        "presets",
+        "sync",
         "notify",
     ]
 
