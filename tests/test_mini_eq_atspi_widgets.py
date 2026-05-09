@@ -143,12 +143,60 @@ def find_accessible_with_roles(root, *, name, roles, showing=None):
     return None
 
 
+def has_descendant_name(root, name):
+    for node in iter_accessibles(root):
+        if node is root:
+            continue
+        if accessible_name(node) == name:
+            return True
+    return False
+
+
+def find_list_item_with_descendant(root, *, descendant_name, showing=None):
+    for node in iter_accessibles(root):
+        if accessible_role(node) != "list item":
+            continue
+        if showing is not None and state_contains(node, pyatspi.STATE_SHOWING) != showing:
+            continue
+        if has_descendant_name(node, descendant_name):
+            return node
+    return None
+
+
 def snapshot_frames(root):
     rows = []
     for node in iter_accessibles(root):
         role = accessible_role(node)
         if role in {"application", "frame"}:
             rows.append((role, accessible_name(node), state_contains(node, pyatspi.STATE_SHOWING)))
+    return rows
+
+
+def snapshot_showing_controls(root, limit=120):
+    rows = []
+    interesting_roles = {
+        "combo box",
+        "label",
+        "list item",
+        "menu item",
+        "push button",
+        "slider",
+        "spin button",
+        "status bar",
+        "switch",
+        "text",
+        "toggle button",
+    }
+    for node in iter_accessibles(root):
+        if not state_contains(node, pyatspi.STATE_SHOWING):
+            continue
+        role = accessible_role(node)
+        name = accessible_name(node)
+        if role not in interesting_roles or not name:
+            continue
+        rows.append((role, name))
+        if len(rows) >= limit:
+            return rows
     return rows
 
 
@@ -175,13 +223,14 @@ def stop_accessible_event_loop(event_thread):
     event_thread.join(timeout=2.0)
 
 
-def wait_for(description, predicate):
-    deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
+def wait_for(description, predicate, timeout_seconds=WAIT_TIMEOUT_SECONDS):
+    deadline = time.monotonic() + timeout_seconds
 
     def timeout_error():
         desktop = pyatspi.Registry.getDesktop(0)
         return AssertionError(
             f"Timed out waiting for {description}; frames: {snapshot_frames(desktop)!r}\n"
+            f"Showing controls: {snapshot_showing_controls(desktop)!r}\n"
             f"Mini EQ log:\n{app_log_path.read_text(errors='replace')}\n"
             f"Shell log:\n{shell_log_path.read_text(errors='replace')}"
         )
@@ -210,6 +259,10 @@ def checked(node):
 
 def sensitive(node):
     return state_contains(node, pyatspi.STATE_SENSITIVE)
+
+
+def expanded(node):
+    return state_contains(node, pyatspi.STATE_EXPANDED)
 
 
 def visible_switch_with_state(root, *, name, expected_checked):
@@ -255,6 +308,49 @@ def activate_control(node):
 
 def toggle_switch(node):
     run_accessible_action(node, ("toggle",))
+
+
+def verify_dropdown_exposes_options(frame, *, combo_name, required_options):
+    dropdown_timeout = 2.0
+    combo = wait_for(
+        f"{combo_name} combo box",
+        lambda: find_accessible(frame, name=combo_name, role="combo box", showing=True),
+    )
+    if not sensitive(combo):
+        raise AssertionError(f"{combo_name} combo box should be sensitive")
+
+    toggle = wait_for(
+        f"{combo_name} dropdown toggle",
+        lambda: find_accessible(frame, name=combo_name, role="toggle button", showing=True),
+    )
+    if not sensitive(toggle):
+        raise AssertionError(f"{combo_name} dropdown toggle should be sensitive")
+
+    activate_control(toggle)
+    wait_for(
+        f"{combo_name} combo box to expand",
+        lambda: expanded(combo),
+        dropdown_timeout,
+    )
+    try:
+        for option_name in required_options:
+            wait_for(
+                f"{option_name} dropdown list item",
+                lambda option_name=option_name: find_list_item_with_descendant(
+                    pyatspi.Registry.getDesktop(0),
+                    descendant_name=option_name,
+                    showing=True,
+                ),
+                dropdown_timeout,
+            )
+    finally:
+        activate_control(toggle)
+
+    wait_for(
+        f"{combo_name} combo box to collapse",
+        lambda: not expanded(combo),
+        dropdown_timeout,
+    )
 
 
 gnome_shell = require_tool("gnome-shell")
@@ -304,7 +400,6 @@ try:
     )
     atspi_event_thread = start_accessible_event_loop()
 
-    time.sleep(1.5)
     frame = wait_for(
         "Mini EQ frame",
         lambda: find_accessible(
@@ -340,6 +435,8 @@ try:
         raise AssertionError("Not Applied status is missing")
     if find_accessible(frame, name="Off", role="status bar", showing=True) is None:
         raise AssertionError("Monitor Off status is missing")
+
+    verify_dropdown_exposes_options(frame, combo_name="Type", required_options=("Notch", "Bell"))
 
     toggle_switch(monitor_switch)
     wait_for(
