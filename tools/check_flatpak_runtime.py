@@ -17,18 +17,24 @@ from typing import Any
 APP_ID = "io.github.bhack.mini-eq"
 DEFAULT_APP_REF = f"{APP_ID}//master"
 STABLE_APP_REF = f"{APP_ID}//stable"
+TEST_APP_REF = f"{APP_ID}//test"
 FULL_AARCH64_MASTER_REF = f"app/{APP_ID}/aarch64/master"
 FULL_AARCH64_STABLE_REF = f"app/{APP_ID}/aarch64/stable"
+FULL_AARCH64_TEST_REF = f"app/{APP_ID}/aarch64/test"
 FULL_X86_64_MASTER_REF = f"app/{APP_ID}/x86_64/master"
 FULL_X86_64_STABLE_REF = f"app/{APP_ID}/x86_64/stable"
+FULL_X86_64_TEST_REF = f"app/{APP_ID}/x86_64/test"
 FLATPAK_APP_REFS = (
     APP_ID,
     DEFAULT_APP_REF,
     STABLE_APP_REF,
+    TEST_APP_REF,
     FULL_AARCH64_MASTER_REF,
     FULL_AARCH64_STABLE_REF,
+    FULL_AARCH64_TEST_REF,
     FULL_X86_64_MASTER_REF,
     FULL_X86_64_STABLE_REF,
+    FULL_X86_64_TEST_REF,
 )
 SMOKE_APPLICATION_NAME = "mini-eq-flatpak-smoke"
 SMOKE_MEDIA_ROLE = "MiniEQSmoke"
@@ -82,14 +88,20 @@ def flatpak_run_command(app_ref: str, *app_args: str) -> list[str]:
         return ["flatpak", "run", DEFAULT_APP_REF, *app_args]
     if app_ref == STABLE_APP_REF:
         return ["flatpak", "run", STABLE_APP_REF, *app_args]
+    if app_ref == TEST_APP_REF:
+        return ["flatpak", "run", TEST_APP_REF, *app_args]
     if app_ref == FULL_AARCH64_MASTER_REF:
         return ["flatpak", "run", FULL_AARCH64_MASTER_REF, *app_args]
     if app_ref == FULL_AARCH64_STABLE_REF:
         return ["flatpak", "run", FULL_AARCH64_STABLE_REF, *app_args]
+    if app_ref == FULL_AARCH64_TEST_REF:
+        return ["flatpak", "run", FULL_AARCH64_TEST_REF, *app_args]
     if app_ref == FULL_X86_64_MASTER_REF:
         return ["flatpak", "run", FULL_X86_64_MASTER_REF, *app_args]
     if app_ref == FULL_X86_64_STABLE_REF:
         return ["flatpak", "run", FULL_X86_64_STABLE_REF, *app_args]
+    if app_ref == FULL_X86_64_TEST_REF:
+        return ["flatpak", "run", FULL_X86_64_TEST_REF, *app_args]
     raise RuntimeError(f"unsupported Flatpak app ref: {app_ref}")
 
 
