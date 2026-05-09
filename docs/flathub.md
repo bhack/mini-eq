@@ -14,6 +14,9 @@ Use this note when maintaining the Mini EQ Flathub package.
 - The manifest builds in project CI and installs the desktop file, AppStream
   metadata, icons, licenses, PipeWire filter-chain module, pipewire-gobject,
   NumPy, and libebur128.
+- PyGObject is supplied by the GNOME runtime's system Python/GI stack. Do not
+  add it to `python3-dependencies.yaml`; that file is for bundled PyPI
+  dependencies such as NumPy.
 - `flatpak-builder-lint manifest io.github.bhack.mini-eq.yaml` passes locally.
 
 ## Repository Split
@@ -67,6 +70,7 @@ packaging branch and open, submit, and merge the Flathub PR manually.
    tag or commit URL before publishing.
 6. Keep `python3-dependencies.yaml` unchanged unless Python dependencies
    changed. If dependencies changed, regenerate it and update both repositories.
+   PyGObject is a runtime-provided GI binding, not a bundled PyPI dependency.
 7. Run the validation commands below.
 8. As the maintainer, open a pull request against the Flathub repository's
    `master` branch.
@@ -86,7 +90,12 @@ before merging.
 Use Flathub PR test builds for normal release handoff validation. Flathub starts
 a temporary test build for pull requests and the bot posts an installable bundle
 when the build is ready; test that build before merging runtime-sensitive
-changes.
+changes. The temporary build installs as the Flatpak `test` branch, so target
+that branch explicitly when running runtime smoke:
+
+```bash
+python3 tools/check_flatpak_runtime.py --app-ref io.github.bhack.mini-eq//test
+```
 
 Use the Flathub `beta` branch only for release-candidate or high-risk changes
 that need a user-installable Flatpak before the stable update. The Flathub
@@ -184,11 +193,19 @@ If a `repo/` is produced, run:
 flatpak run --command=flatpak-builder-lint org.flatpak.Builder repo repo
 ```
 
+Local repo lint can report screenshot mirroring errors when the generated repo
+does not include Flathub's mirrored screenshot refs. If those are the only repo
+lint errors, confirm the AppStream screenshot URLs point at an immutable tag or
+commit and are reachable; then treat the Flathub PR build's `Build ready`
+status as the authoritative screenshot-mirroring check.
+
 ## Packaging Notes
 
 - Mini EQ is an upstream-maintained GTK/Libadwaita graphical application.
 - The app ID `io.github.bhack.mini-eq` matches the GitHub repository ownership.
 - The app requires `xdg-run/pipewire-0` to create and use PipeWire audio nodes.
+- PyGObject comes from `org.gnome.Platform`; bundling it from PyPI would risk
+  mismatches with the runtime GLib, GTK, and GObject-Introspection stack.
 - The Flatpak bundles only the PipeWire filter-chain module and SPA builtin
   filter graph plugin needed inside the app process; it does not bundle or run
   a PipeWire daemon or session manager.
