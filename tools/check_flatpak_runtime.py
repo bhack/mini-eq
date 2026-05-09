@@ -384,7 +384,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--timeout",
         type=float,
-        default=8.0,
+        default=20.0,
         help="Timeout in seconds for each PipeWire state transition.",
     )
     parser.add_argument(
