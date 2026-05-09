@@ -28,6 +28,8 @@ SMOKE_NODE_NAME = "mini-eq-live-ui-smoke"
 ANALYZER_NODE_NAME = "mini-eq-analyzer"
 PRIMARY_SINK_NAME = "ci_null_sink"
 ALT_SINK_NAME = "ci_alt_sink"
+EXPORT_CURRENT_CURVE_ACTION = "Export Current Curve\u2026"
+IMPORT_PRESET_ACTION = "Import Preset\u2026"
 DEFAULT_AUDIO_SINK_KEY = "default.audio.sink"
 DEFAULT_CONFIGURED_AUDIO_SINK_KEY = "default.configured.audio.sink"
 DEFAULT_METADATA_VALUE_TYPE = "Spa:String:JSON"
@@ -241,8 +243,21 @@ def verify_pipewire_gobject_probe(timeout_seconds: float) -> None:
                 raise RuntimeError(f"pipewire-gobject probe did not see sink {sink_name}")
             if not sink.object_serial:
                 raise RuntimeError(f"pipewire-gobject probe saw {sink_name} without object.serial")
+            target = backend.output_preset_target_for_sink_name(sink_name)
+            if target.has_route_key:
+                raise RuntimeError(f"pipewire-gobject probe unexpectedly found a route key for {sink_name}")
+            if target.keys != (sink_name,):
+                raise RuntimeError(f"pipewire-gobject probe built unexpected output preset keys: {target.keys!r}")
 
-        defaults = backend.refresh_defaults()
+        defaults = wait_for(
+            "pipewire-gobject configured default sink",
+            lambda: (
+                defaults
+                if (defaults := backend.refresh_defaults()).configured_audio_sink == PRIMARY_SINK_NAME
+                else None
+            ),
+            timeout_seconds,
+        )
         if defaults.configured_audio_sink != PRIMARY_SINK_NAME:
             raise RuntimeError(
                 f"pipewire-gobject probe read unexpected configured default sink: {defaults.configured_audio_sink!r}"
@@ -478,6 +493,24 @@ def find_list_item_with_descendant(root, pyatspi, *, descendant_name: str, showi
     return None
 
 
+def find_accessible_with_descendant(
+    root,
+    pyatspi,
+    *,
+    descendant_name: str,
+    role: str | None = None,
+    showing: bool | None = None,
+):
+    for node in iter_accessibles(root):
+        if role is not None and accessible_role(node) != role:
+            continue
+        if showing is not None and state_contains(node, pyatspi.STATE_SHOWING) != showing:
+            continue
+        if has_descendant_name(node, descendant_name):
+            return node
+    return None
+
+
 def snapshot_frames(root, pyatspi) -> list[tuple[str, str, bool]]:
     rows = []
     for node in iter_accessibles(root):
@@ -573,6 +606,22 @@ class UiDriver:
             showing=showing,
         )
 
+    def find_with_descendant(
+        self,
+        root,
+        *,
+        descendant_name: str,
+        role: str | None = None,
+        showing: bool | None = None,
+    ):
+        return find_accessible_with_descendant(
+            root,
+            self.pyatspi,
+            descendant_name=descendant_name,
+            role=role,
+            showing=showing,
+        )
+
     def visible_switch_with_state(self, root, *, name: str, expected_checked: bool):
         node = self.find(root, name=name, role="switch", showing=True)
         if node is None or self.checked(node) != expected_checked:
@@ -603,10 +652,44 @@ class UiDriver:
         )
 
     def activate(self, node) -> None:
+        self.run_action_or_ancestor(node, ("press", "click", "activate", "toggle"))
+
+    def run_action_or_ancestor(self, node, action_names: tuple[str, ...]) -> None:
+        exposed_action_names: list[tuple[str, list[str]]] = []
+        current = node
+        for _depth in range(8):
+            try:
+                action = current.queryAction()
+            except Exception:
+                action = None
+
+            if action is not None:
+                current_actions = []
+                for index in range(action.nActions):
+                    name = action.getName(index)
+                    current_actions.append(name)
+                    if name in action_names:
+                        if not action.doAction(index):
+                            raise AssertionError(f"AT-SPI {name!r} action failed for {accessible_name(current)!r}")
+                        return
+                exposed_action_names.append((accessible_name(current), current_actions))
+
+            try:
+                parent = current.parent
+            except Exception:
+                parent = None
+            if parent is None or parent is current:
+                break
+            current = parent
+
+        # Prefer AT-SPI Action. This fallback is only for GTK children that
+        # expose visible text while their clickable ancestor exposes no action.
         try:
-            self.run_action(node, ("press", "click", "activate", "toggle"))
-        except AssertionError:
             self.click(node)
+        except AssertionError as exc:
+            raise AssertionError(
+                f"{accessible_name(node)!r} does not expose an activatable AT-SPI action: {exposed_action_names!r}"
+            ) from exc
 
     def toggle_switch(self, node) -> None:
         self.run_action(node, ("toggle",))
@@ -820,6 +903,75 @@ def verify_dropdown_exposes_options(
     )
 
 
+def find_preset_action(driver: UiDriver, name: str):
+    return driver.find(driver.desktop(), name=name, showing=True) or driver.find_with_descendant(
+        driver.desktop(),
+        descendant_name=name,
+        role="push button",
+        showing=True,
+    )
+
+
+def more_preset_actions_button(driver: UiDriver, frame, timeout_seconds: float):
+    return driver.wait_for_accessible(
+        "More Preset Actions button",
+        lambda: driver.find_with_roles(
+            frame,
+            name="More Preset Actions",
+            roles={"push button", "toggle button"},
+            showing=True,
+        ),
+        min(timeout_seconds, 5.0),
+    )
+
+
+def verify_preset_menu_neutral_state(driver: UiDriver, frame, timeout_seconds: float) -> None:
+    menu_timeout = min(timeout_seconds, 5.0)
+    more_button = more_preset_actions_button(driver, frame, timeout_seconds)
+
+    driver.activate(more_button)
+    try:
+        export_button = driver.wait_for_accessible(
+            "Export Current Curve preset action",
+            lambda: find_preset_action(driver, EXPORT_CURRENT_CURVE_ACTION),
+            menu_timeout,
+        )
+        import_button = driver.wait_for_accessible(
+            "Import Preset preset action",
+            lambda: find_preset_action(driver, IMPORT_PRESET_ACTION),
+            menu_timeout,
+        )
+        if not driver.sensitive(export_button):
+            raise AssertionError("Export Current Curve action should be sensitive")
+        if not driver.sensitive(import_button):
+            raise AssertionError("Import Preset action should be sensitive")
+        if find_preset_action(driver, "Reset to Neutral") is not None:
+            raise AssertionError("Reset to Neutral should be hidden while the curve is already neutral")
+    finally:
+        driver.activate(more_button)
+
+    driver.wait_for_accessible(
+        "More Preset Actions popover to close",
+        lambda: find_preset_action(driver, EXPORT_CURRENT_CURVE_ACTION) is None,
+        menu_timeout,
+    )
+
+
+def reset_curve_through_preset_menu(driver: UiDriver, frame, timeout_seconds: float) -> None:
+    menu_timeout = min(timeout_seconds, 5.0)
+    more_button = more_preset_actions_button(driver, frame, timeout_seconds)
+
+    driver.activate(more_button)
+    reset_button = driver.wait_for_accessible(
+        "Reset to Neutral preset action",
+        lambda: find_preset_action(driver, "Reset to Neutral"),
+        menu_timeout,
+    )
+    if not driver.sensitive(reset_button):
+        raise AssertionError("Reset to Neutral action should be sensitive after editing the curve")
+    driver.activate(reset_button)
+
+
 def run_ui_flow(
     *,
     pyatspi,
@@ -889,6 +1041,24 @@ def run_ui_flow(
             required_options=("Notch", "Bell"),
             timeout_seconds=timeout_seconds,
         )
+        verify_dropdown_exposes_options(
+            driver,
+            frame,
+            combo_name="EQ output",
+            required_options=("Follow system output (CI Null Sink)", "CI Null Sink", "CI Alt Sink"),
+            timeout_seconds=timeout_seconds,
+        )
+        driver.wait_for_accessible(
+            "Output-wide auto preset scope",
+            lambda: driver.find_with_roles(
+                frame,
+                name="Output-wide",
+                roles={"label", "status bar", "text"},
+                showing=True,
+            ),
+            timeout_seconds,
+        )
+        verify_preset_menu_neutral_state(driver, frame, timeout_seconds)
 
         route_switch = driver.wait_for_accessible(
             "System-wide EQ switch to start active",
@@ -985,10 +1155,10 @@ def run_ui_flow(
             timeout_seconds,
         )
 
-        driver.set_numeric_value(gain_spin, 0.0)
+        reset_curve_through_preset_menu(driver, frame, timeout_seconds)
         driver.wait_for_accessible(
-            "Modified preset state to clear after returning band gain to neutral",
-            lambda: not driver.status_is_visible(frame, "Modified"),
+            "Neutral preset state after resetting from preset menu",
+            lambda: driver.status_is_visible(frame, "Neutral"),
             timeout_seconds,
         )
 
@@ -1028,7 +1198,8 @@ def run_ui_flow(
 
         print(
             "Live UI runtime smoke passed: AT-SPI UI flow, dropdown options, "
-            "pipewire-gobject probe, synthetic stream routing, default-output follow, monitor, and shutdown verified."
+            "pipewire-gobject probe, output preset scope, preset menu reset, synthetic stream routing, "
+            "default-output follow, monitor, and shutdown verified."
         )
     finally:
         stop_accessible_event_loop(pyatspi, event_thread)

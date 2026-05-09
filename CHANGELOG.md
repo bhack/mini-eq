@@ -1,11 +1,14 @@
 # Changelog
 
-## 0.6.0 - 2026-05-09
+## 0.7.0 - 2026-05-09
 
 - Replace the direct WirePlumber Python integration with pipewire-gobject for
   app-facing PipeWire registry, metadata, routing, and monitor-capture access.
-- Bundle pipewire-gobject 0.3.4 in Flatpak and require
-  `pipewire-gobject>=0.3.4,<0.4` for PyPI installs.
+- Use pipewire-gobject device route params so auto preset links follow the
+  detected output port when available while preserving output-node links as a
+  fallback.
+- Bundle pipewire-gobject 0.3.5 in Flatpak and require
+  `pipewire-gobject>=0.3.5,<0.4` for PyPI installs.
 - Keep system-wide EQ, monitor capture, output changes, and shutdown behavior
   covered by a live nested-GNOME/AT-SPI runtime smoke test.
 - Remove the old WirePlumber 0.4 compatibility build path and tighten release

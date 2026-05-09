@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .pipewire_routes import PipeWireRouteMixin
+
 DEFAULT_METADATA_NAME = "default"
 DEFAULT_AUDIO_SINK_KEY = "default.audio.sink"
 DEFAULT_CONFIGURED_AUDIO_SINK_KEY = "default.configured.audio.sink"
@@ -12,6 +14,7 @@ TARGET_OBJECT_KEY = "target.object"
 TARGET_NODE_KEY = "target.node"
 SPA_ID_TYPE = "Spa:Id"
 PIPEWIRE_NODE_INTERFACE = "PipeWire:Interface:Node"
+PIPEWIRE_DEVICE_INTERFACE = "PipeWire:Interface:Device"
 STREAM_OUTPUT_AUDIO = "Stream/Output/Audio"
 AUDIO_SINK = "Audio/Sink"
 FILTER_CHAIN_MODULE_NAME = "libpipewire-module-filter-chain"
@@ -30,6 +33,8 @@ class PipeWireNode:
     node_description: str | None
     application_name: str | None
     node_dont_move: bool
+    device_id: int = 0
+    card_profile_device: int = 0
     properties: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -124,7 +129,7 @@ def node_sample_rate(node: PipeWireNode | None) -> float:
     return float(rate) if rate > 0 else 0.0
 
 
-class PipeWireBackend:
+class PipeWireBackend(PipeWireRouteMixin):
     def __init__(self, timeout_ms: int = 2000) -> None:
         self.timeout_ms = timeout_ms
         self._connected = False
@@ -136,9 +141,12 @@ class PipeWireBackend:
         self._metadata: Any = None
         self._metadata_signal_objects: dict[int, Any] = {}
         self._node_signal_objects: dict[int, Any] = {}
+        self._device_signal_objects: dict[int, Any] = {}
         self._node_proxies: dict[int, Any] = {}
+        self._device_proxies: dict[int, Any] = {}
         self._loaded_modules: list[Any] = []
         self._cached_defaults = PipeWireDefaults(None, None)
+        self._device_route_refreshing_bound_ids: set[int] = set()
 
     def __enter__(self) -> PipeWireBackend:
         self.connect()
@@ -187,12 +195,22 @@ class PipeWireBackend:
                 pass
         self._node_signal_objects.clear()
 
+        for handler_id in list(self._device_signal_objects):
+            self.disconnect_device_handler(handler_id)
+
         for node in list(self._node_proxies.values()):
             try:
                 node.stop()
             except Exception:
                 pass
         self._node_proxies.clear()
+
+        for device in list(self._device_proxies.values()):
+            try:
+                device.stop()
+            except Exception:
+                pass
+        self._device_proxies.clear()
 
         for module in list(self._loaded_modules):
             try:
@@ -285,6 +303,61 @@ class PipeWireBackend:
 
         try:
             metadata.disconnect(handler_id)
+        except Exception:
+            pass
+
+    def connect_device_route_changed(self, device_bound_id: int, callback) -> int:
+        self._ensure_connected()
+
+        if not self._has_device_route_subscription_api():
+            return 0
+
+        device = self._device_proxy_by_bound_id(device_bound_id)
+        if device is None:
+            return 0
+
+        route_param_id = self._device_route_param_id(device)
+        if route_param_id is None:
+            return 0
+
+        def on_device_param(_device, param) -> None:
+            try:
+                param_id = int(param.get_id())
+            except Exception:
+                return
+
+            if param_id != route_param_id or int(device_bound_id) in self._device_route_refreshing_bound_ids:
+                return
+
+            callback()
+
+        handler_id = self._GObject.Object.connect(device, "param", on_device_param)
+        self._device_signal_objects[handler_id] = device
+
+        try:
+            device.subscribe_params(self._GLib.Variant("au", [route_param_id]))
+        except Exception:
+            self.disconnect_device_handler(handler_id)
+            return 0
+
+        return handler_id
+
+    def disconnect_device_handler(self, handler_id: int) -> None:
+        if handler_id <= 0:
+            return
+
+        device = self._device_signal_objects.pop(handler_id, None)
+        if device is None:
+            return
+
+        try:
+            if self._GLib is not None and hasattr(device, "subscribe_params"):
+                device.subscribe_params(self._GLib.Variant("au", []))
+        except Exception:
+            pass
+
+        try:
+            device.disconnect(handler_id)
         except Exception:
             pass
 
@@ -471,6 +544,10 @@ class PipeWireBackend:
 
     def _node_from_global(self, global_) -> PipeWireNode:
         properties = self._properties_dict(global_)
+        device_id = parse_positive_int(self._pw_property(global_, "device.id", properties))
+        if device_id > 0:
+            properties = self._properties_with_device_labels(properties, device_id)
+
         return PipeWireNode(
             bound_id=int(global_.get_id()),
             object_serial=self._pw_property(global_, "object.serial", properties),
@@ -479,6 +556,8 @@ class PipeWireBackend:
             node_description=self._pw_property(global_, "node.description", properties),
             application_name=self._pw_property(global_, "application.name", properties),
             node_dont_move=parse_bool_property(self._pw_property(global_, "node.dont-move", properties)),
+            device_id=device_id,
+            card_profile_device=parse_positive_int(self._pw_property(global_, "card.profile.device", properties)),
             properties=properties,
         )
 
@@ -499,6 +578,24 @@ class PipeWireBackend:
 
         self._node_proxies[int(bound_id)] = node
         return node
+
+    def _device_proxy_by_bound_id(self, bound_id: int):
+        global_ = self._registry.lookup_global(int(bound_id))
+        if global_ is None or not global_.is_device():
+            return None
+
+        device = self._device_proxies.get(int(bound_id))
+        if device is not None and device.get_running():
+            return device
+
+        device = self._Pwg.Device.new(self._core, global_)
+        if device is None:
+            return None
+        if not device.start():
+            raise PipeWireBackendError(f"failed to bind device: {bound_id}")
+
+        self._device_proxies[int(bound_id)] = device
+        return device
 
     def _pw_property(self, global_, key: str, properties: dict[str, str] | None = None) -> str | None:
         if properties is not None and key in properties:

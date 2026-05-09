@@ -33,11 +33,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.6.0/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.7.0/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.6.0/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.7.0/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -45,11 +45,12 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
-    <release version="0.6.0" date="2026-05-09">
+    <release version="0.7.0" date="2026-05-09">
       <description>
         <ul>
           <li>Use pipewire-gobject for PipeWire registry, metadata, routing, and monitor capture.</li>
-          <li>Bundle pipewire-gobject 0.3.4 in Flatpak and remove the old WirePlumber 0.4 compatibility build path.</li>
+          <li>Add auto preset links that follow the detected output port when available.</li>
+          <li>Bundle pipewire-gobject 0.3.5 in Flatpak and remove the old WirePlumber 0.4 compatibility build path.</li>
           <li>Improve live runtime validation for routing, monitor capture, output changes, and shutdown behavior.</li>
         </ul>
       </description>

@@ -4,6 +4,7 @@ import pytest
 
 from tests._mini_eq_imports import core, routing
 from tests._mini_eq_imports import pipewire_backend as pw_backend
+from tests._mini_eq_imports import pipewire_routes as pw_routes
 
 
 def make_node(
@@ -11,6 +12,7 @@ def make_node(
     name: str | None,
     media_class: str = pw_backend.AUDIO_SINK,
     properties: dict[str, str] | None = None,
+    device_id: int = 0,
 ) -> pw_backend.PipeWireNode:
     return pw_backend.PipeWireNode(
         bound_id=bound_id,
@@ -20,6 +22,7 @@ def make_node(
         node_description=None,
         application_name=None,
         node_dont_move=False,
+        device_id=device_id,
         properties=properties or {},
     )
 
@@ -79,6 +82,32 @@ def test_get_sink_uses_wireplumber_node_name() -> None:
 
     assert routing.SystemWideEqController.get_sink(controller, "speakers") is sink
     assert routing.SystemWideEqController.get_sink(controller, "missing") is None
+
+
+def test_output_preset_target_is_cached_until_output_changes() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[str | None] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def output_preset_target_for_sink_name(self, sink_name: str | None) -> pw_routes.PipeWireOutputPresetTarget:
+            calls.append(sink_name)
+            return pw_routes.PipeWireOutputPresetTarget(sink_name, None, (sink_name,) if sink_name else ())
+
+    controller.output_backend = FakeBackend([make_node(1, "speakers"), make_node(2, "hdmi")])
+    controller.output_sink = "speakers"
+
+    assert routing.SystemWideEqController.output_preset_target(controller).keys == ("speakers",)
+    assert routing.SystemWideEqController.output_preset_keys(controller) == ("speakers",)
+    assert routing.SystemWideEqController.output_preset_link_key(controller) == "speakers"
+    assert calls == ["speakers"]
+
+    controller.output_sink = "hdmi"
+    assert routing.SystemWideEqController.output_preset_target(controller).keys == ("hdmi",)
+    assert calls == ["speakers", "hdmi"]
+
+    routing.SystemWideEqController.invalidate_output_preset_target(controller)
+    assert routing.SystemWideEqController.output_preset_target(controller).keys == ("hdmi",)
+    assert calls == ["speakers", "hdmi", "hdmi"]
 
 
 def test_get_default_output_sink_name_uses_cached_metadata_by_default() -> None:
@@ -203,6 +232,97 @@ def test_output_object_added_schedules_refresh_only_for_audio_sinks(monkeypatch:
     assert len(scheduled_callbacks) == 1
 
 
+def test_output_event_idle_invalidates_output_preset_target_cache() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.accept_output_events = True
+    controller.output_event_source_id = 123
+    controller._output_preset_target_sink = "speakers"
+    controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("speakers", None, ("speakers",))
+    calls: list[str] = []
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.outputs_changed_callback = lambda: calls.append("outputs")
+
+    assert routing.SystemWideEqController.on_output_event_idle(controller) is False
+
+    assert controller.output_event_source_id == 0
+    assert controller._output_preset_target_sink is None
+    assert controller._output_preset_target is None
+    assert calls == ["refresh", "outputs"]
+
+
+def test_output_route_param_change_schedules_output_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    sink = make_node(1, "speakers", device_id=72)
+    route_callback = None
+    calls: list[object] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def connect_device_route_changed(self, device_id: int, callback) -> int:
+            nonlocal route_callback
+            calls.append(("connect-route", device_id))
+            route_callback = callback
+            return 77
+
+        def disconnect_device_handler(self, handler_id: int) -> None:
+            calls.append(("disconnect-route", handler_id))
+
+    controller.output_backend = FakeBackend([sink])
+    controller.output_sink = "speakers"
+    controller.accept_output_events = True
+    controller.output_event_source_id = 0
+    controller.output_route_param_handler_id = 0
+    controller.output_route_param_device_id = 0
+    scheduled_callbacks: list[object] = []
+    monkeypatch.setattr(
+        routing.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or 321,
+    )
+
+    routing.SystemWideEqController.refresh_output_route_param_monitor(controller)
+
+    assert controller.output_route_param_handler_id == 77
+    assert controller.output_route_param_device_id == 72
+    assert calls == [("connect-route", 72)]
+
+    assert route_callback is not None
+    route_callback()
+
+    assert controller.output_event_source_id == 321
+    assert len(scheduled_callbacks) == 1
+
+
+def test_output_route_param_monitor_moves_with_active_output() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[object] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def connect_device_route_changed(self, device_id: int, _callback) -> int:
+            calls.append(("connect-route", device_id))
+            return device_id + 1000
+
+        def disconnect_device_handler(self, handler_id: int) -> None:
+            calls.append(("disconnect-route", handler_id))
+
+    controller.output_backend = FakeBackend(
+        [
+            make_node(1, "speakers", device_id=72),
+            make_node(2, "hdmi", device_id=84),
+        ]
+    )
+    controller.accept_output_events = True
+    controller.output_sink = "speakers"
+    controller.output_route_param_handler_id = 1072
+    controller.output_route_param_device_id = 72
+
+    controller.output_sink = "hdmi"
+    routing.SystemWideEqController.refresh_output_route_param_monitor(controller)
+
+    assert controller.output_route_param_handler_id == 1084
+    assert controller.output_route_param_device_id == 84
+    assert calls == [("disconnect-route", 1072), ("connect-route", 84)]
+
+
 def test_follow_system_default_output_enables_follow_mode_and_refreshes() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.follow_default_output = False
@@ -218,6 +338,28 @@ def test_follow_system_default_output_enables_follow_mode_and_refreshes() -> Non
 
     assert controller.follow_default_output is True
     assert calls == ["refresh"]
+
+
+def test_follow_system_default_output_schedules_refresh_when_output_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.follow_default_output = False
+    controller.output_sink = "speakers"
+    controller.accept_output_events = True
+    controller.output_event_source_id = 0
+    scheduled_callbacks: list[object] = []
+
+    def fake_refresh() -> bool:
+        controller.output_sink = "hdmi"
+        return True
+
+    controller.refresh_followed_output_sink = fake_refresh
+    monkeypatch.setattr(routing.GLib, "idle_add", lambda callback: scheduled_callbacks.append(callback) or 321)
+
+    routing.SystemWideEqController.follow_system_default_output(controller)
+
+    assert controller.follow_default_output is True
+    assert controller.output_event_source_id == 321
+    assert len(scheduled_callbacks) == 1
 
 
 def test_switch_output_sink_retargets_running_filter_output_without_restart() -> None:
@@ -256,6 +398,36 @@ def test_switch_output_sink_retargets_running_filter_output_without_restart() ->
         "apply",
         ("status", "filter-chain PipeWire EQ ready: mini_eq_sink -> hdmi"),
     ]
+
+
+def test_explicit_output_change_schedules_coalesced_output_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    scheduled_callbacks: list[object] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def move_named_output_stream_to_target(self, _stream_node_name: str, _target_node_name: str) -> None:
+            return
+
+    controller.output_backend = FakeBackend([make_node(1, "speakers"), make_node(2, "hdmi")])
+    controller.output_sink = "speakers"
+    controller.follow_default_output = True
+    controller.accept_output_events = True
+    controller.output_event_source_id = 0
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.filter_output_name = "mini_eq_sink_output"
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.stream_router = None
+    controller.output_analyzer = None
+    controller.apply_state_to_engine = lambda: None
+    controller.emit_status = lambda _message: None
+    monkeypatch.setattr(routing.GLib, "idle_add", lambda callback: scheduled_callbacks.append(callback) or 321)
+
+    routing.SystemWideEqController.switch_output_sink(controller, "hdmi", explicit=True)
+
+    assert controller.output_sink == "hdmi"
+    assert controller.output_event_source_id == 321
+    assert len(scheduled_callbacks) == 1
 
 
 def test_switch_output_sink_falls_back_to_restart_when_filter_retarget_fails() -> None:

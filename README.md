@@ -23,12 +23,12 @@ also show live LUFS loudness.
 - PipeWire filter-chain DSP using builtin biquad filters.
 - Optional spectrum analyzer and LUFS loudness readout through a PipeWire monitor
   capture stream.
-- Per-output preset links for automatically using different saved presets with
-  headphones, speakers, HDMI, and other outputs.
+- Auto preset links can follow the detected PipeWire port when available and
+  fall back to the selected EQ output when a port is not reported.
 - Optional background mode keeps the EQ active after closing the window, with a
   separate Start at Login preference and optional active-at-login routing.
 - Optional GNOME Shell extension for quick panel access to routing, EQ,
-  analyzer status, presets, and output preset links.
+  analyzer status, presets, and auto preset links.
 - Equalizer APO preset import from the UI or `--import-apo`, including
   compatible presets exported by [AutoEq](https://autoeq.app/).
 
@@ -134,11 +134,11 @@ Install the Python package after the system packages are present:
 ```bash
 python3 -m venv /tmp/mini-eq-pwg-build
 /tmp/mini-eq-pwg-build/bin/python -m pip install --upgrade pip
-/tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.4,<0.4' -w /tmp/mini-eq-wheelhouse
+/tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.5,<0.4' -w /tmp/mini-eq-wheelhouse
 
 python3 -m venv --system-site-packages ~/.local/share/mini-eq/venv
 ~/.local/share/mini-eq/venv/bin/python -m pip install --upgrade pip
-~/.local/share/mini-eq/venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.4,<0.4'
+~/.local/share/mini-eq/venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.5,<0.4'
 ~/.local/share/mini-eq/venv/bin/python -m pip install mini-eq
 ~/.local/share/mini-eq/venv/bin/mini-eq --check-deps
 ~/.local/share/mini-eq/venv/bin/mini-eq
@@ -168,7 +168,7 @@ mini-eq --install-desktop
 ## GNOME Shell Extension
 
 Mini EQ also has an optional GNOME Shell extension for quick panel access to
-routing, EQ, analyzer status, presets, and output preset links.
+routing, EQ, analyzer status, presets, and auto preset links.
 
 Install it from GNOME Shell Extensions:
 https://extensions.gnome.org/extension/9803/mini-eq-controls/

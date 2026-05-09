@@ -59,6 +59,11 @@
     min-height: 32px;
 }
 
+.utility-pane-dense .toolbar-button {
+    padding: 2px 8px;
+    min-height: 30px;
+}
+
 .toolbar-icon-button {
     padding: 0;
     min-width: 36px;
@@ -66,14 +71,12 @@
     border-radius: 999px;
 }
 
-.popover-action {
-    min-width: 132px;
-    padding: 6px 10px;
-    border-radius: 10px;
-}
-
 .toolbar-select {
     min-height: 32px;
+}
+
+.utility-pane-dense .toolbar-select {
+    min-height: 30px;
 }
 
 .toolbar-compact-actions {
@@ -144,10 +147,24 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     background-color: var(--mini-utility-section-bg);
 }
 
+.utility-pane-dense .utility-section {
+    padding: 5px 8px;
+    border-radius: 10px;
+}
+
 .utility-row {
     padding: 4px 0;
     border-radius: 0;
     background-color: transparent;
+}
+
+.utility-pane-dense .utility-row,
+.utility-pane-dense .compare-row {
+    padding: 2px 0;
+}
+
+.output-scope-state-label {
+    color: alpha(var(--window-fg-color), 0.86);
 }
 
 .compare-row {
@@ -185,11 +202,61 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     margin-top: 2px;
 }
 
+.preset-more-menu {
+    min-width: 190px;
+}
+
+.preset-menu-separator {
+    margin-top: 4px;
+    margin-bottom: 4px;
+    background-color: var(--mini-border-soft);
+}
+
+button.popover-action {
+    min-width: 178px;
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border-color: transparent;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+button.popover-action:hover {
+    background-color: alpha(var(--window-fg-color), 0.070);
+}
+
+button.popover-action:disabled {
+    opacity: 0.46;
+    background-color: transparent;
+    background-image: none;
+}
+
+button.popover-action label {
+    font-weight: 600;
+}
+
+button.popover-action.destructive-action:not(:disabled) {
+    color: var(--mini-danger-color);
+}
+
+.utility-pane-dense .preset-row {
+    margin-top: 0;
+}
+
 .preset-state-chip {
     padding: 3px 10px;
     border-radius: 999px;
     font-size: 9pt;
     font-weight: 800;
+}
+
+.utility-pane-dense .preset-state-chip,
+.utility-pane-dense .system-state-chip,
+.utility-pane-dense .compare-state-chip,
+.utility-pane-dense .headroom-peak-chip {
+    padding: 2px 8px;
 }
 
 .preset-state-saved {
@@ -205,6 +272,11 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
 .preset-state-unsaved {
     background-color: rgba(127, 145, 165, 0.14);
     color: alpha(var(--window-fg-color), 0.90);
+}
+
+.preset-state-neutral {
+    background-color: rgba(82, 151, 233, 0.12);
+    color: var(--mini-toggle-checked-color);
 }
 
 .system-state-chip {
@@ -240,6 +312,10 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     background-color: transparent;
 }
 
+.utility-pane-dense .headroom-panel {
+    padding: 2px 6px;
+}
+
 .headroom-panel-risk {
     background-color: rgba(255, 92, 80, 0.055);
 }
@@ -248,6 +324,10 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     font-size: 13pt;
     font-weight: 800;
     color: var(--window-fg-color);
+}
+
+.utility-pane-dense .headroom-state {
+    font-size: 12pt;
 }
 
 .headroom-peak-chip {
@@ -283,6 +363,10 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     margin-top: 1px;
 }
 
+.utility-pane-dense .headroom-preamp-row {
+    margin-top: 0;
+}
+
 .headroom-preamp-row scale trough {
     min-height: 4px;
 }
@@ -293,14 +377,28 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     border-top: 1px solid var(--mini-border-subtle);
 }
 
+.utility-pane-dense .monitor-strip {
+    margin-top: 0;
+    padding-top: 3px;
+}
+
 .monitor-detail-row {
     min-height: 24px;
+}
+
+.utility-pane-dense .monitor-detail-row {
+    min-height: 20px;
 }
 
 .monitor-settings-button {
     min-width: 32px;
     min-height: 32px;
     border-radius: 8px;
+}
+
+.utility-pane-dense .monitor-settings-button {
+    min-width: 30px;
+    min-height: 30px;
 }
 
 .loudness-value-label {
@@ -311,6 +409,10 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
 
 .loudness-meter-area {
     min-height: 14px;
+}
+
+.utility-pane-dense .loudness-meter-area {
+    min-height: 12px;
 }
 
 .headroom-state.headroom-safe {
