@@ -8,10 +8,10 @@
 <a href="https://flathub.org/apps/io.github.bhack.mini-eq"><img width="240" alt="Get it on Flathub" src="https://flathub.org/api/badge?locale=en"/></a>
 
 Mini EQ is a small system-wide parametric equalizer for PipeWire desktops.
-It uses GTK/Libadwaita for the UI, WirePlumber for routing/default-output
-control, PipeWire filter-chain with builtin biquad filters for the equalizer,
-and the JACK API on PipeWire plus NumPy FFT analysis for the analyzer. When
-libebur128 is available, the monitor can also show live LUFS loudness.
+It uses GTK/Libadwaita for the UI, pipewire-gobject for app-facing PipeWire
+routing, metadata, and monitor streams, and PipeWire filter-chain with builtin
+biquad filters for the equalizer. When libebur128 is available, the monitor can
+also show live LUFS loudness.
 
 ![Mini EQ screenshot](https://raw.githubusercontent.com/bhack/mini-eq/main/docs/screenshots/mini-eq.png)
 
@@ -19,10 +19,10 @@ libebur128 is available, the monitor can also show live LUFS loudness.
 
 - System-wide parametric EQ for PipeWire desktop playback.
 - GTK/Libadwaita interface with a compact 10-band fader workflow.
-- WirePlumber routing and default-output tracking.
+- PipeWire routing and default-output tracking through pipewire-gobject.
 - PipeWire filter-chain DSP using builtin biquad filters.
-- Optional spectrum analyzer and LUFS loudness readout through the PipeWire JACK
-  compatibility layer.
+- Optional spectrum analyzer and LUFS loudness readout through a PipeWire monitor
+  capture stream.
 - Per-output preset links for automatically using different saved presets with
   headphones, speakers, HDMI, and other outputs.
 - Optional background mode keeps the EQ active after closing the window, with a
@@ -57,15 +57,20 @@ flatpak install flathub io.github.bhack.mini-eq
 flatpak run io.github.bhack.mini-eq
 ```
 
-Mini EQ depends on system desktop/audio packages that are not installed by
-Python packaging: GTK 4.12+ and Libadwaita 1.7+ GI bindings, WirePlumber
-introspection, PipeWire, and PipeWire JACK compatibility.
+Mini EQ depends on system desktop/audio packages that Python packaging cannot
+fully install: GTK 4.12+ and Libadwaita 1.7+ GI bindings, PyGObject, PipeWire,
+WirePlumber as the session manager, and the native libraries required by
+pipewire-gobject. Install PyGObject from your distro, such as `python3-gi` or
+`python3-gobject`, rather than adding a PyPI PyGObject dependency to Mini EQ.
 
 If your distro ships older GTK or Libadwaita builds, prefer the Flatpak build.
 
-Package names vary by distro release. Mini EQ prefers WirePlumber 0.5
-introspection when available and falls back to WirePlumber 0.4, which is what
-Ubuntu 24.04 provides.
+Package names vary by distro release. If pip builds pipewire-gobject from its
+source distribution, install the GLib, GObject-Introspection, and PipeWire
+development packages first. Virtual environments that need distro GI bindings
+should use `--system-site-packages`; on Ubuntu/Debian, build the
+pipewire-gobject wheel in a plain venv first, then install that wheel into the
+system-site Mini EQ venv.
 
 These are good starting points:
 
@@ -74,11 +79,19 @@ These are good starting points:
 sudo apt install \
   gir1.2-adw-1 \
   gir1.2-gtk-4.0 \
-  gir1.2-wp-0.4 \
+  gobject-introspection \
+  libgirepository1.0-dev \
+  libglib2.0-dev \
+  libpipewire-0.3-dev \
+  meson \
+  ninja-build \
+  pkg-config \
   pipewire \
-  pipewire-jack \
   python3-cairo \
+  python3-pip \
   python3-gi \
+  python3-setuptools \
+  python3-venv \
   wireplumber \
   libebur128-1
 
@@ -86,36 +99,49 @@ sudo apt install \
 sudo dnf install \
   gtk4 \
   libadwaita \
+  gobject-introspection-devel \
+  glib2-devel \
+  meson \
+  ninja-build \
+  pkgconf-pkg-config \
   pipewire \
-  pipewire-jack-audio-connection-kit \
+  pipewire-devel \
   python3-cairo \
   python3-gobject \
+  python3-pip \
   wireplumber \
-  wireplumber-libs \
   libebur128
 
 # Arch Linux
 sudo pacman -S \
   gtk4 \
   libadwaita \
-  libwireplumber \
+  gobject-introspection \
+  glib2 \
+  meson \
+  ninja \
+  pkgconf \
   pipewire \
-  pipewire-jack \
   python-cairo \
   python-gobject \
+  python-pip \
   wireplumber \
   libebur128
 ```
 
-Use `gir1.2-wp-0.5` instead of `gir1.2-wp-0.4` on distro releases that package
-WirePlumber 0.5 introspection.
-
 Install the Python package after the system packages are present:
 
 ```bash
-python3 -m pip install mini-eq
-mini-eq --check-deps
-mini-eq
+python3 -m venv /tmp/mini-eq-pwg-build
+/tmp/mini-eq-pwg-build/bin/python -m pip install --upgrade pip
+/tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.4,<0.4' -w /tmp/mini-eq-wheelhouse
+
+python3 -m venv --system-site-packages ~/.local/share/mini-eq/venv
+~/.local/share/mini-eq/venv/bin/python -m pip install --upgrade pip
+~/.local/share/mini-eq/venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.4,<0.4'
+~/.local/share/mini-eq/venv/bin/python -m pip install mini-eq
+~/.local/share/mini-eq/venv/bin/mini-eq --check-deps
+~/.local/share/mini-eq/venv/bin/mini-eq
 ```
 
 For a source checkout:
@@ -159,11 +185,10 @@ python3 -m pytest -q
 Some integration tests are skipped automatically when optional PipeWire runtime
 tools are not installed.
 
-Check the Ubuntu 24.04 WirePlumber 0.4 GI compatibility surface in Docker:
+Check the pipewire-gobject GI compatibility surface:
 
 ```bash
-docker build -f docker/ubuntu-24.04-wp04.Dockerfile -t mini-eq:wp04 .
-docker run --rm mini-eq:wp04
+PYTHONPATH=src python3 tools/check_pipewire_gobject.py
 ```
 
 ## Flatpak
@@ -171,9 +196,8 @@ docker run --rm mini-eq:wp04
 The Flatpak manifest uses the GNOME runtime. It does not ship a full PipeWire
 daemon or session manager; it builds only the local PipeWire filter-chain module
 and SPA builtin filter-graph support that Mini EQ loads inside the app process.
-The analyzer uses the runtime JACK compatibility library with bundled Python
-JACK and NumPy dependencies. The Flatpak build also bundles libebur128 for the
-live LUFS readout.
+It also builds pipewire-gobject for Mini EQ's app-facing PipeWire access and
+bundles NumPy and libebur128 for analyzer and live LUFS support.
 
 Install the local build tools:
 
@@ -195,8 +219,8 @@ flatpak run io.github.bhack.mini-eq
 Runtime data is stored under `~/.config/mini-eq`.
 
 `pip install mini-eq` installs only the Python package. The system packages
-above are still required for the app to connect to GTK, WirePlumber, PipeWire,
-and PipeWire JACK.
+above are still required for the app to connect to GTK, PipeWire, and the host
+WirePlumber-managed session.
 
 ## Acknowledgements
 

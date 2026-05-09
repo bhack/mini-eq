@@ -2,81 +2,27 @@ from __future__ import annotations
 
 import pytest
 
-from tests._mini_eq_imports import wireplumber_backend as wp_backend
-
-
-class FakeSpaPodBuilder:
-    builders: list[FakeSpaPodBuilder] = []
-
-    def __init__(self, kind: str, args: tuple[str, ...] = ()) -> None:
-        self.kind = kind
-        self.args = args
-        self.calls: list[tuple[str, object]] = []
-        FakeSpaPodBuilder.builders.append(self)
-
-    @classmethod
-    def new_struct(cls) -> FakeSpaPodBuilder:
-        return cls("struct")
-
-    @classmethod
-    def new_object(cls, type_name: str, id_name: str) -> FakeSpaPodBuilder:
-        return cls("object", (type_name, id_name))
-
-    def add_string(self, value: str) -> None:
-        self.calls.append(("string", value))
-
-    def add_float(self, value: float) -> None:
-        self.calls.append(("float", value))
-
-    def add_property(self, value: str) -> None:
-        self.calls.append(("property", value))
-
-    def add_pod(self, pod) -> None:
-        self.calls.append(("pod", pod))
-
-    def end(self):
-        return self
-
-
-class FakeImplModule:
-    load_calls: list[tuple[object, str, str, object | None]] = []
-    result: object | None = object()
-
-    @classmethod
-    def load(cls, core, name: str, arguments: str, properties):
-        cls.load_calls.append((core, name, arguments, properties))
-        return cls.result
-
-
-class FakeWp:
-    SpaPodBuilder = FakeSpaPodBuilder
-    ImplModule = FakeImplModule
-
-
-class FakeProperties:
-    def __init__(self) -> None:
-        self.values: dict[str, str] = {}
-
-    @classmethod
-    def new_empty(cls) -> FakeProperties:
-        return cls()
-
-    def set(self, key: str, value: str) -> None:
-        self.values[key] = value
+from tests._mini_eq_imports import pipewire_backend as pw_backend
 
 
 class FakeCore:
-    calls: list[tuple[object | None, object | None, FakeProperties | None]] = []
+    calls: int = 0
+
+    def __init__(self) -> None:
+        self.pipewire_properties: dict[str, str | None] = {}
 
     @classmethod
-    def new(cls, context, conf, properties=None):
-        cls.calls.append((context, conf, properties))
-        return object()
+    def new(cls):
+        cls.calls += 1
+        return cls()
+
+    def set_pipewire_property(self, key: str, value: str | None) -> bool:
+        self.pipewire_properties[key] = value
+        return True
 
 
-class FakeCoreWp:
+class FakeCorePwg:
     Core = FakeCore
-    Properties = FakeProperties
 
 
 class FakeNodeProxy:
@@ -138,6 +84,9 @@ class FakePropertyProxy:
     def __init__(self, properties: FakeGlobalProperties) -> None:
         self.properties = properties
 
+    def get_properties(self) -> FakeGlobalProperties:
+        return self.properties
+
     def get_global_properties(self) -> FakeGlobalProperties:
         return self.properties
 
@@ -169,9 +118,18 @@ class FakeSyncCore:
 class FakeMainContext:
     def __init__(self, source: FakeSource) -> None:
         self.source = source
+        self.pending_count = 1
+        self.iterations = 0
 
     def default(self) -> FakeMainContext:
         return self
+
+    def pending(self) -> bool:
+        return self.pending_count > 0
+
+    def iteration(self, _may_block: bool) -> None:
+        self.iterations += 1
+        self.pending_count -= 1
 
     def find_source_by_id(self, source_id: int) -> FakeSource | None:
         return self.source if source_id == 77 else None
@@ -204,50 +162,73 @@ class FakeSyncGLib:
         return 77
 
 
+class FakeVariant:
+    def __init__(self, signature: str, value: dict[str, float]) -> None:
+        self.signature = signature
+        self.value = value
+
+
+class FakeGLib:
+    Variant = FakeVariant
+
+
+class FakePwgParam:
+    calls: list[FakeVariant] = []
+
+    @classmethod
+    def new_props_controls(cls, variant: FakeVariant):
+        cls.calls.append(variant)
+        return ("param", variant)
+
+
+class FakePwg:
+    Param = FakePwgParam
+
+
 def test_parse_metadata_node_name_reads_wireplumber_json_name() -> None:
-    assert wp_backend.parse_metadata_node_name('{"name":"alsa_output.test"}') == "alsa_output.test"
+    assert pw_backend.parse_metadata_node_name('{"name":"alsa_output.test"}') == "alsa_output.test"
 
 
 def test_parse_metadata_node_name_accepts_plain_string() -> None:
-    assert wp_backend.parse_metadata_node_name("mini_eq_sink") == "mini_eq_sink"
+    assert pw_backend.parse_metadata_node_name("mini_eq_sink") == "mini_eq_sink"
 
 
 def test_parse_metadata_node_name_rejects_invalid_shape() -> None:
-    assert wp_backend.parse_metadata_node_name("[1, 2, 3]") is None
+    assert pw_backend.parse_metadata_node_name("[1, 2, 3]") is None
 
 
 def test_parse_bool_property_accepts_wireplumber_truthy_values() -> None:
-    assert wp_backend.parse_bool_property("true") is True
-    assert wp_backend.parse_bool_property("1") is True
-    assert wp_backend.parse_bool_property("false") is False
-    assert wp_backend.parse_bool_property(None) is False
+    assert pw_backend.parse_bool_property("true") is True
+    assert pw_backend.parse_bool_property("1") is True
+    assert pw_backend.parse_bool_property("false") is False
+    assert pw_backend.parse_bool_property(None) is False
 
 
 def test_node_sample_rate_uses_audio_rate_and_latency_fallbacks() -> None:
-    direct_rate = wp_backend.WirePlumberNode(
+    direct_rate = pw_backend.PipeWireNode(
         bound_id=39,
         object_serial="67",
-        media_class=wp_backend.AUDIO_SINK,
+        media_class=pw_backend.AUDIO_SINK,
         node_name="alsa_output.direct",
         node_description=None,
         application_name=None,
         node_dont_move=False,
         properties={"audio.rate": "48000", "node.max-latency": "1024/44100"},
     )
-    max_latency_rate = wp_backend.WirePlumberNode(
+    max_latency_rate = pw_backend.PipeWireNode(
         bound_id=40,
         object_serial="68",
-        media_class=wp_backend.AUDIO_SINK,
+        media_class=pw_backend.AUDIO_SINK,
         node_name="alsa_output.max_latency",
         node_description=None,
         application_name=None,
         node_dont_move=False,
         properties={"node.max-latency": "1024/44100"},
     )
-    latency_rate = wp_backend.WirePlumberNode(
+    latency_rate = pw_backend.PipeWireNode(
         bound_id=41,
         object_serial="69",
-        media_class=wp_backend.AUDIO_SINK,
+        media_class=pw_backend.AUDIO_SINK,
         node_name="alsa_output.latency",
         node_description=None,
         application_name=None,
@@ -255,26 +236,26 @@ def test_node_sample_rate_uses_audio_rate_and_latency_fallbacks() -> None:
         properties={"node.latency": "1024/96000"},
     )
 
-    assert wp_backend.node_sample_rate(direct_rate) == 48000.0
-    assert wp_backend.node_sample_rate(max_latency_rate) == 44100.0
-    assert wp_backend.node_sample_rate(latency_rate) == 96000.0
-    assert wp_backend.node_sample_rate(None) == 0.0
+    assert pw_backend.node_sample_rate(direct_rate) == 48000.0
+    assert pw_backend.node_sample_rate(max_latency_rate) == 44100.0
+    assert pw_backend.node_sample_rate(latency_rate) == 96000.0
+    assert pw_backend.node_sample_rate(None) == 0.0
 
 
 def test_node_classification_and_display_name() -> None:
-    sink = wp_backend.WirePlumberNode(
+    sink = pw_backend.PipeWireNode(
         bound_id=39,
         object_serial="67",
-        media_class=wp_backend.AUDIO_SINK,
+        media_class=pw_backend.AUDIO_SINK,
         node_name="alsa_output.test",
         node_description="Test Sink",
         application_name=None,
         node_dont_move=False,
     )
-    stream = wp_backend.WirePlumberNode(
+    stream = pw_backend.PipeWireNode(
         bound_id=126,
         object_serial="300",
-        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        media_class=pw_backend.STREAM_OUTPUT_AUDIO,
         node_name="spotify",
         node_description=None,
         application_name="spotify",
@@ -289,48 +270,45 @@ def test_node_classification_and_display_name() -> None:
     assert stream.display_name == "spotify"
 
 
-def test_new_core_requests_pipewire_manager_access() -> None:
-    FakeCore.calls = []
+def test_new_core_uses_pipewire_gobject_core_constructor() -> None:
+    FakeCore.calls = 0
 
-    wp_backend.WirePlumberBackend._new_core(FakeCoreWp)
+    core = pw_backend.PipeWireBackend._new_core(FakeCorePwg)
 
-    assert len(FakeCore.calls) == 1
-    _context, _conf, properties = FakeCore.calls[0]
-    assert properties is not None
-    assert properties.values == {
-        "application.name": wp_backend.PIPEWIRE_CLIENT_NAME,
-        "media.category": wp_backend.PIPEWIRE_MEDIA_CATEGORY,
+    assert FakeCore.calls == 1
+    assert core.pipewire_properties == {
+        "application.name": "Mini EQ",
+        "media.category": "Manager",
     }
 
 
-def test_sync_core_removes_timeout_source_after_success() -> None:
+def test_sync_core_drains_pending_main_context_events() -> None:
     core = FakeSyncCore()
     glib = FakeSyncGLib(core)
-    backend = wp_backend.WirePlumberBackend()
+    backend = pw_backend.PipeWireBackend()
     backend._core = core
     backend._GLib = glib
 
     backend._sync_core()
 
-    assert glib.source.destroyed is True
-    assert glib.timeout_callback is not None
+    assert glib.MainContext.iterations == 1
 
 
 def test_move_stream_to_target_sets_stream_target_without_metadata_readback() -> None:
-    backend = wp_backend.WirePlumberBackend()
-    stream = wp_backend.WirePlumberNode(
+    backend = pw_backend.PipeWireBackend()
+    stream = pw_backend.PipeWireNode(
         bound_id=126,
         object_serial="300",
-        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        media_class=pw_backend.STREAM_OUTPUT_AUDIO,
         node_name="spotify",
         node_description=None,
         application_name="spotify",
         node_dont_move=False,
     )
-    sink = wp_backend.WirePlumberNode(
+    sink = pw_backend.PipeWireNode(
         bound_id=39,
         object_serial="67",
-        media_class=wp_backend.AUDIO_SINK,
+        media_class=pw_backend.AUDIO_SINK,
         node_name="alsa_output.test",
         node_description="Test Sink",
         application_name=None,
@@ -348,11 +326,11 @@ def test_move_stream_to_target_sets_stream_target_without_metadata_readback() ->
 
 
 def test_move_named_output_stream_to_target_uses_matching_stream() -> None:
-    backend = wp_backend.WirePlumberBackend()
-    stream = wp_backend.WirePlumberNode(
+    backend = pw_backend.PipeWireBackend()
+    stream = pw_backend.PipeWireNode(
         bound_id=126,
         object_serial="300",
-        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        media_class=pw_backend.STREAM_OUTPUT_AUDIO,
         node_name="mini_eq_sink_output",
         node_description=None,
         application_name=None,
@@ -369,22 +347,23 @@ def test_move_named_output_stream_to_target_uses_matching_stream() -> None:
 
 
 def test_move_named_output_stream_to_target_requires_existing_stream() -> None:
-    backend = wp_backend.WirePlumberBackend()
+    backend = pw_backend.PipeWireBackend()
     backend.output_stream_by_name = lambda _name: None
 
-    with pytest.raises(wp_backend.WirePlumberError, match="output stream not found: mini_eq_sink_output"):
+    with pytest.raises(pw_backend.PipeWireBackendError, match="output stream not found: mini_eq_sink_output"):
         backend.move_named_output_stream_to_target("mini_eq_sink_output", "alsa_output.test")
 
 
 def test_set_stream_target_writes_node_and_object_metadata() -> None:
-    backend = wp_backend.WirePlumberBackend()
+    backend = pw_backend.PipeWireBackend()
 
     class FakeMetadata:
         def __init__(self) -> None:
             self.calls: list[tuple[int, str, str, str]] = []
 
-        def set(self, subject: int, key: str, type_name: str, value: str) -> None:
+        def set(self, subject: int, key: str, type_name: str, value: str) -> bool:
             self.calls.append((subject, key, type_name, value))
+            return True
 
     metadata = FakeMetadata()
     syncs: list[str] = []
@@ -394,14 +373,72 @@ def test_set_stream_target_writes_node_and_object_metadata() -> None:
     backend.set_stream_target(126, 39, "67")
 
     assert metadata.calls == [
-        (126, wp_backend.TARGET_NODE_KEY, wp_backend.SPA_ID_TYPE, "39"),
-        (126, wp_backend.TARGET_OBJECT_KEY, wp_backend.SPA_ID_TYPE, "67"),
+        (126, pw_backend.TARGET_NODE_KEY, pw_backend.SPA_ID_TYPE, "39"),
+        (126, pw_backend.TARGET_OBJECT_KEY, pw_backend.SPA_ID_TYPE, "67"),
+    ]
+    assert syncs == ["sync"]
+
+
+def test_stream_target_reads_node_and_object_metadata() -> None:
+    backend = pw_backend.PipeWireBackend()
+
+    class FakeMetadata:
+        def dup_value(self, subject: int, key: str) -> str | None:
+            values = {
+                (126, pw_backend.TARGET_NODE_KEY): "39",
+                (126, pw_backend.TARGET_OBJECT_KEY): "67",
+            }
+            return values.get((subject, key))
+
+        def dup_value_type(self, subject: int, key: str) -> str | None:
+            values = {
+                (126, pw_backend.TARGET_NODE_KEY): pw_backend.SPA_ID_TYPE,
+                (126, pw_backend.TARGET_OBJECT_KEY): pw_backend.SPA_ID_TYPE,
+            }
+            return values.get((subject, key))
+
+    backend._default_metadata = lambda: FakeMetadata()
+
+    target = backend.stream_target(126)
+
+    assert target == pw_backend.PipeWireStreamTarget("39", pw_backend.SPA_ID_TYPE, "67", pw_backend.SPA_ID_TYPE)
+
+
+def test_restore_stream_target_writes_saved_metadata() -> None:
+    backend = pw_backend.PipeWireBackend()
+
+    class FakeMetadata:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, str, str | None, str | None]] = []
+
+        def set(self, subject: int, key: str, type_name: str | None, value: str | None) -> bool:
+            self.calls.append((subject, key, type_name, value))
+            return True
+
+    metadata = FakeMetadata()
+    syncs: list[str] = []
+    backend._default_metadata = lambda: metadata
+    backend._sync_core = lambda: syncs.append("sync")
+
+    backend.restore_stream_target(
+        126,
+        pw_backend.PipeWireStreamTarget(
+            target_node=None,
+            target_node_type=None,
+            target_object=None,
+            target_object_type=None,
+        ),
+    )
+
+    assert metadata.calls == [
+        (126, pw_backend.TARGET_NODE_KEY, None, None),
+        (126, pw_backend.TARGET_OBJECT_KEY, None, None),
     ]
     assert syncs == ["sync"]
 
 
 def test_properties_dict_skips_undecodable_property_values() -> None:
-    backend = wp_backend.WirePlumberBackend()
+    backend = pw_backend.PipeWireBackend()
     proxy = FakePropertyProxy(
         FakeGlobalProperties(
             [
@@ -415,52 +452,61 @@ def test_properties_dict_skips_undecodable_property_values() -> None:
 
 
 def test_pw_property_falls_back_when_pipewire_property_is_undecodable() -> None:
-    backend = wp_backend.WirePlumberBackend()
+    backend = pw_backend.PipeWireBackend()
 
-    class FakePipewireObject:
-        @staticmethod
-        def get_property(_proxy, _key: str):
+    class FakeGlobal(FakePropertyProxy):
+        def dup_property(self, _key: str):
             raise UnicodeDecodeError("utf-8", b"\x96", 0, 1, "invalid start byte")
 
-    class FakeWirePlumber:
-        PipewireObject = FakePipewireObject
-
-    backend._Wp = FakeWirePlumber
-    proxy = FakePropertyProxy(FakeGlobalProperties([], {"node.name": "spotify"}))
+    proxy = FakeGlobal(FakeGlobalProperties([FakePropertyItem("node.name", "spotify")]))
 
     assert backend._pw_property(proxy, "node.name") == "spotify"
 
 
 def test_list_nodes_skips_proxy_with_undecodable_identity() -> None:
-    backend = wp_backend.WirePlumberBackend()
+    backend = pw_backend.PipeWireBackend()
     good_node = object()
     bad_node = object()
-    parsed_node = wp_backend.WirePlumberNode(
+    parsed_node = pw_backend.PipeWireNode(
         bound_id=1,
         object_serial="1001",
-        media_class=wp_backend.STREAM_OUTPUT_AUDIO,
+        media_class=pw_backend.STREAM_OUTPUT_AUDIO,
         node_name="spotify",
         node_description=None,
         application_name="Spotify",
         node_dont_move=False,
     )
 
-    def node_from_proxy(node):
+    class FakeModel:
+        def __init__(self, items: list[object]) -> None:
+            self.items = items
+
+        def get_n_items(self) -> int:
+            return len(self.items)
+
+        def get_item(self, index: int):
+            return self.items[index]
+
+    class FakeRegistry:
+        def dup_globals_by_interface(self, interface_type: str) -> FakeModel:
+            assert interface_type == pw_backend.PIPEWIRE_NODE_INTERFACE
+            return FakeModel([bad_node, good_node])
+
+    def node_from_global(node):
         if node is bad_node:
             raise UnicodeDecodeError("utf-8", b"\xea", 3, 4, "invalid continuation byte")
         return parsed_node
 
     backend._ensure_connected = lambda: None
-    backend._node_manager = object()
-    backend._iterate_manager = lambda _manager: [bad_node, good_node]
-    backend._node_from_proxy = node_from_proxy
+    backend._registry = FakeRegistry()
+    backend._node_from_global = node_from_global
 
     assert backend.list_nodes() == [parsed_node]
 
 
 def test_defaults_returns_cached_value_without_metadata_read(monkeypatch) -> None:
-    backend = wp_backend.WirePlumberBackend()
-    backend._cached_defaults = wp_backend.WirePlumberDefaults("cached.default", "cached.configured")
+    backend = pw_backend.PipeWireBackend()
+    backend._cached_defaults = pw_backend.PipeWireDefaults("cached.default", "cached.configured")
     reads: list[bool] = []
 
     monkeypatch.setattr(backend, "_read_defaults", lambda: reads.append(True))
@@ -470,8 +516,8 @@ def test_defaults_returns_cached_value_without_metadata_read(monkeypatch) -> Non
 
 
 def test_refresh_defaults_falls_back_to_cache_on_undecodable_metadata(monkeypatch) -> None:
-    backend = wp_backend.WirePlumberBackend()
-    backend._cached_defaults = wp_backend.WirePlumberDefaults("cached.default", None)
+    backend = pw_backend.PipeWireBackend()
+    backend._cached_defaults = pw_backend.PipeWireDefaults("cached.default", None)
     syncs: list[bool] = []
 
     def raise_decode_error():
@@ -485,91 +531,111 @@ def test_refresh_defaults_falls_back_to_cache_on_undecodable_metadata(monkeypatc
 
 
 def test_remember_default_metadata_change_updates_cache() -> None:
-    backend = wp_backend.WirePlumberBackend()
+    backend = pw_backend.PipeWireBackend()
 
     assert backend.remember_default_metadata_change(
-        wp_backend.DEFAULT_AUDIO_SINK_KEY,
+        pw_backend.DEFAULT_AUDIO_SINK_KEY,
         '{"name":"alsa_output.new"}',
     )
     assert backend.defaults().default_audio_sink == "alsa_output.new"
 
 
-def test_build_spa_params_pod_uses_filter_chain_props_shape() -> None:
-    FakeSpaPodBuilder.builders = []
+def test_build_props_controls_param_uses_variant_control_map() -> None:
+    FakePwgParam.calls = []
 
-    pod = wp_backend.build_spa_params_pod(FakeWp, {"eq:enabled": 0.0, "eq:g_out": 1.0})
+    param = pw_backend.build_props_controls_param(FakePwg, FakeGLib, {"eq:enabled": 0.0, "eq:g_out": 1.0})
 
-    struct_builder, object_builder = FakeSpaPodBuilder.builders
-    assert pod is object_builder
-    assert struct_builder.kind == "struct"
-    assert struct_builder.calls == [
-        ("string", "eq:enabled"),
-        ("float", 0.0),
-        ("string", "eq:g_out"),
-        ("float", 1.0),
-    ]
-    assert object_builder.kind == "object"
-    assert object_builder.args == ("Spa:Pod:Object:Param:Props", "Props")
-    assert object_builder.calls == [("property", "params"), ("pod", struct_builder)]
+    variant = FakePwgParam.calls[0]
+    assert param == ("param", variant)
+    assert variant.signature == "a{sd}"
+    assert variant.value == {"eq:enabled": 0.0, "eq:g_out": 1.0}
 
 
-def test_set_node_params_uses_wireplumber_set_param(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeSpaPodBuilder.builders = []
-    node = FakeNodeProxy(42)
-    backend = wp_backend.WirePlumberBackend()
-    backend._Wp = FakeWp
-    backend._node_manager = object()
+def test_set_node_params_uses_pwg_node_set_param(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakePwgParam.calls = []
+
+    class FakeLiveNode:
+        def __init__(self) -> None:
+            self.set_calls: list[object] = []
+
+        def set_param(self, param) -> bool:
+            self.set_calls.append(param)
+            return True
+
+    node = FakeLiveNode()
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = FakePwg
+    backend._GLib = FakeGLib
 
     monkeypatch.setattr(backend, "_ensure_connected", lambda: None)
-    monkeypatch.setattr(backend, "_iterate_manager", lambda _manager: [node])
+    monkeypatch.setattr(backend, "_node_proxy_by_bound_id", lambda _bound_id: node)
 
     backend.set_node_params(42, {"eq:enabled": 1.0})
 
-    assert node.set_calls == [("Props", 0, FakeSpaPodBuilder.builders[-1])]
+    assert node.set_calls == [("param", FakePwgParam.calls[-1])]
 
 
 def test_set_node_params_raises_when_node_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    backend = wp_backend.WirePlumberBackend()
-    backend._Wp = FakeWp
-    backend._node_manager = object()
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = FakePwg
+    backend._GLib = FakeGLib
 
     monkeypatch.setattr(backend, "_ensure_connected", lambda: None)
-    monkeypatch.setattr(backend, "_iterate_manager", lambda _manager: [])
+    monkeypatch.setattr(backend, "_node_proxy_by_bound_id", lambda _bound_id: None)
 
-    with pytest.raises(wp_backend.WirePlumberError, match="node not found"):
+    with pytest.raises(pw_backend.PipeWireBackendError, match="node not found"):
         backend.set_node_params(42, {"eq:enabled": 1.0})
 
 
-def test_load_filter_chain_module_uses_wireplumber_impl_module(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeImplModule.load_calls = []
-    FakeImplModule.result = object()
-    backend = wp_backend.WirePlumberBackend()
-    backend._Wp = FakeWp
-    backend._core = object()
+def test_load_filter_chain_module_uses_pwg_core_load_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeLoadCore:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+            self.result = object()
+
+        def load_module(self, name: str, arguments: str):
+            self.calls.append((name, arguments))
+            return self.result
+
+    core = FakeLoadCore()
+    backend = pw_backend.PipeWireBackend()
+    backend._core = core
 
     monkeypatch.setattr(backend, "_ensure_connected", lambda: None)
 
     module = backend.load_filter_chain_module("{ node.name = test }")
 
-    assert module is FakeImplModule.result
-    assert FakeImplModule.load_calls == [
-        (
-            backend._core,
-            wp_backend.FILTER_CHAIN_MODULE_NAME,
-            "{ node.name = test }",
-            None,
-        )
-    ]
+    assert module is core.result
+    assert core.calls == [(pw_backend.FILTER_CHAIN_MODULE_NAME, "{ node.name = test }")]
+    assert backend._loaded_modules == [module]
+
+
+def test_unload_filter_chain_module_unloads_and_forgets_loaded_module() -> None:
+    calls: list[str] = []
+
+    class FakeModule:
+        def unload(self) -> None:
+            calls.append("unload")
+
+    module = FakeModule()
+    backend = pw_backend.PipeWireBackend()
+    backend._loaded_modules = [module]
+
+    backend.unload_filter_chain_module(module)
+
+    assert calls == ["unload"]
+    assert backend._loaded_modules == []
 
 
 def test_load_filter_chain_module_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    FakeImplModule.load_calls = []
-    FakeImplModule.result = None
-    backend = wp_backend.WirePlumberBackend()
-    backend._Wp = FakeWp
-    backend._core = object()
+    class FakeLoadCore:
+        def load_module(self, _name: str, _arguments: str):
+            return None
+
+    backend = pw_backend.PipeWireBackend()
+    backend._core = FakeLoadCore()
 
     monkeypatch.setattr(backend, "_ensure_connected", lambda: None)
 
-    with pytest.raises(wp_backend.WirePlumberError, match="failed to load PipeWire module"):
+    with pytest.raises(pw_backend.PipeWireBackendError, match="failed to load PipeWire module"):
         backend.load_filter_chain_module("{}")

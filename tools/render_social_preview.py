@@ -18,7 +18,7 @@ SUBTITLE_LINES = (
 )
 FOOTER_LINES = (
     "GTK / Libadwaita",
-    "WirePlumber + filter-chain",
+    "pipewire-gobject + filter-chain",
 )
 
 

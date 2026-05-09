@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
-import sys
 from array import array
 
 import pytest
@@ -234,171 +232,152 @@ def test_stereo_f32le_bytes_to_interleaved_float32_preserves_channels() -> None:
     assert decoded.tolist() == pytest.approx([1.0, 0.0, 0.5, -0.5, -0.25, 0.25])
 
 
-class FakeJackPort:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.shortname = name.rsplit(":", 1)[-1]
+def test_interleaved_f32le_bytes_to_channel_payloads_splits_stereo() -> None:
+    interleaved = array("f", [1.0, 0.0, 0.5, -0.5, -0.25, 0.25])
+
+    left, right = analyzer.interleaved_f32le_bytes_to_channel_payloads(interleaved.tobytes(), 2)
+
+    assert list(analyzer.pcm_f32le_bytes_to_samples(left)) == pytest.approx([1.0, 0.5, -0.25])
+    assert list(analyzer.pcm_f32le_bytes_to_samples(right)) == pytest.approx([0.0, -0.5, 0.25])
 
 
-def test_jack_audio_output_ports_for_sink_matches_description() -> None:
-    ports = [
-        FakeJackPort("Other Sink:monitor_FL"),
-        FakeJackPort("Test Sink:monitor_FL"),
-        FakeJackPort("Test Sink:monitor_FR"),
-    ]
+def test_interleaved_f32le_bytes_to_channel_payloads_duplicates_mono() -> None:
+    mono = array("f", [0.25, -0.25])
 
-    selected = analyzer.jack_audio_output_ports_for_sink(ports, "alsa_output.test", "Test Sink")
+    left, right = analyzer.interleaved_f32le_bytes_to_channel_payloads(mono.tobytes(), 1)
 
-    assert [port.name for port in selected] == ["Test Sink:monitor_FL", "Test Sink:monitor_FR"]
+    assert left == mono.tobytes()
+    assert right == mono.tobytes()
 
 
-def test_jack_pipewire_props_marks_analyzer_as_monitor() -> None:
-    props = analyzer.jack_pipewire_props("node.latency = 512/48000")
+class FakePwgStream:
+    def __init__(self, target_object: str | None, monitor: bool) -> None:
+        self.target_object = target_object
+        self.monitor = monitor
+        self.requested_format = None
+        self.pipewire_properties: dict[str, str] = {}
+        self.deliver_audio_blocks = False
+        self.signal_handlers: list[tuple[str, object]] = []
+        self.disconnected: list[int] = []
+        self.start_count = 0
+        self.stop_count = 0
+        self.rate = 44100
 
-    assert "node.latency = 512/48000" in props
-    assert "node.autoconnect = false" in props
-    assert "stream.monitor = true" in props
-    assert "media.category = Monitor" in props
+    def set_requested_format(self, sample_format: str, rate: int, channels: int) -> None:
+        self.requested_format = (sample_format, rate, channels)
 
+    def set_pipewire_property(self, key: str, value: str) -> None:
+        self.pipewire_properties[key] = value
 
-def test_jack_audio_output_ports_for_sink_matches_description_with_pipewire_suffix() -> None:
-    ports = [
-        FakeJackPort("Test Sink-114:monitor_MONO"),
-        FakeJackPort("Bluetooth internal capture stream for Test Sink:monitor_MONO"),
-    ]
+    def set_deliver_audio_blocks(self, deliver_audio_blocks: bool) -> None:
+        self.deliver_audio_blocks = deliver_audio_blocks
 
-    selected = analyzer.jack_audio_output_ports_for_sink(ports, "bluez_output.test", "Test Sink")
+    def connect(self, signal_name: str, callback) -> int:
+        self.signal_handlers.append((signal_name, callback))
+        return len(self.signal_handlers)
 
-    assert [port.name for port in selected] == ["Test Sink-114:monitor_MONO"]
+    def disconnect(self, handler_id: int) -> None:
+        self.disconnected.append(handler_id)
 
+    def start(self) -> bool:
+        self.start_count += 1
+        return True
 
-def test_select_jack_stereo_output_ports_prefers_monitor_pair() -> None:
-    ports = [
-        FakeJackPort("Test Sink:playback_FL"),
-        FakeJackPort("Test Sink:monitor_FR"),
-        FakeJackPort("Test Sink:monitor_FL"),
-    ]
+    def stop(self) -> None:
+        self.stop_count += 1
 
-    left, right = analyzer.select_jack_stereo_output_ports(ports)
+    def get_requested_rate(self) -> int:
+        return self.requested_format[1] if self.requested_format is not None else analyzer.SAMPLE_RATE
 
-    assert left.name == "Test Sink:monitor_FL"
-    assert right.name == "Test Sink:monitor_FR"
-
-
-def test_select_jack_stereo_output_ports_accepts_aux_monitor_pair() -> None:
-    ports = [
-        FakeJackPort("Test Sink:monitor_AUX1"),
-        FakeJackPort("Test Sink:monitor_AUX0"),
-    ]
-
-    left, right = analyzer.select_jack_stereo_output_ports(ports)
-
-    assert left.name == "Test Sink:monitor_AUX0"
-    assert right.name == "Test Sink:monitor_AUX1"
+    def get_rate(self) -> int:
+        return self.rate
 
 
-def test_select_jack_stereo_output_ports_ignores_capture_ports() -> None:
-    ports = [
-        FakeJackPort("Test Sink:capture_MONO"),
-        FakeJackPort("Test Sink:capture_FL"),
-        FakeJackPort("Test Sink:capture_FR"),
-    ]
+class FakePwg:
+    init_count = 0
+    streams: list[FakePwgStream] = []
 
-    left, right = analyzer.select_jack_stereo_output_ports(ports)
+    class Stream:
+        @staticmethod
+        def new_audio_capture(target_object: str | None, monitor: bool) -> FakePwgStream:
+            stream = FakePwgStream(target_object, monitor)
+            FakePwg.streams.append(stream)
+            return stream
 
-    assert left is None
-    assert right is None
-
-
-def test_disconnect_jack_input_port_connections_removes_autoconnections() -> None:
-    class FakeJackClient:
-        def __init__(self) -> None:
-            self.disconnected: list[tuple[str, str]] = []
-
-        def get_all_connections(self, port: str) -> list[str]:
-            return [f"source-for-{port}"]
-
-        def disconnect(self, source: str, destination: str) -> None:
-            self.disconnected.append((source, destination))
-
-    client = FakeJackClient()
-
-    analyzer.disconnect_jack_input_port_connections(client, ("input_FL", "input_FR", None))
-
-    assert client.disconnected == [
-        ("source-for-input_FL", "input_FL"),
-        ("source-for-input_FR", "input_FR"),
-    ]
+    @staticmethod
+    def init() -> None:
+        FakePwg.init_count += 1
 
 
-def test_enabled_analyzer_reconnects_existing_jack_client_on_output_change(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_open_pwg_stream_configures_monitor_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakePwg.init_count = 0
+    FakePwg.streams = []
+    monkeypatch.setattr(
+        analyzer.OutputSpectrumAnalyzer,
+        "_import_pipewire_gobject",
+        staticmethod(lambda: (object(), FakePwg)),
+    )
+    spectrum = analyzer.OutputSpectrumAnalyzer("alsa_output.test", None, lambda _message: None)
+
+    stream = spectrum.open_pwg_stream()
+
+    assert stream is FakePwg.streams[0]
+    assert FakePwg.init_count == 1
+    assert stream.target_object == "alsa_output.test"
+    assert stream.monitor is True
+    assert stream.pipewire_properties["node.name"] == "mini-eq-analyzer"
+    assert stream.pipewire_properties["application.name"] == "Mini EQ"
+    assert stream.pipewire_properties["media.class"] == analyzer.ANALYZER_MEDIA_CLASS
+    assert stream.pipewire_properties["media.category"] == "Monitor"
+    assert stream.pipewire_properties["media.role"] == "DSP"
+    assert stream.pipewire_properties["node.dont-move"] == "true"
+    assert stream.pipewire_properties["stream.monitor"] == "true"
+    assert stream.pipewire_properties["state.restore-props"] == "false"
+    assert stream.pipewire_properties["state.restore-target"] == "false"
+    assert stream.requested_format == ("F32", analyzer.SAMPLE_RATE, 2)
+    assert stream.deliver_audio_blocks is True
+    assert stream.signal_handlers[0][0] == "audio-block"
+    assert spectrum.sample_rate == analyzer.SAMPLE_RATE
+
+
+def test_enabled_analyzer_recreates_existing_pwg_stream_on_output_change() -> None:
     spectrum = analyzer.OutputSpectrumAnalyzer("old-sink", None, lambda _message: None)
     spectrum.enabled = True
-    spectrum.client = object()
-    spectrum.left_input_port = "input_FL"
-    spectrum.right_input_port = "input_FR"
-    calls: list[tuple[str, object]] = []
+    spectrum.stream = object()
+    calls: list[tuple[str, dict[str, object]]] = []
 
-    monkeypatch.setattr(
-        analyzer,
-        "disconnect_jack_input_port_connections",
-        lambda client, ports: calls.append(("disconnect", ports)),
-    )
-    spectrum.connect_jack_monitor_ports = lambda client: calls.append(("connect", client))
+    def stop(**kwargs) -> None:
+        calls.append(("stop", kwargs))
+        spectrum.stream = None
+
+    def restart() -> bool:
+        calls.append(("restart", {}))
+        return True
+
+    spectrum.stop = stop
+    spectrum.restart = restart
 
     spectrum.set_output_sink_name("new-sink", "New Sink")
 
     assert spectrum.output_sink_name == "new-sink"
     assert spectrum.output_sink_description == "New Sink"
-    assert calls == [
-        ("disconnect", ("input_FL", "input_FR")),
-        ("connect", spectrum.client),
-    ]
+    assert calls == [("stop", {"close_stream": True}), ("restart", {})]
 
 
-def test_open_jack_client_sets_pipewire_props_temporarily(monkeypatch: pytest.MonkeyPatch) -> None:
-    opened_with_props: list[str | None] = []
-
-    class FakeJackClient:
-        def __init__(self, _name: str, no_start_server: bool) -> None:
-            assert no_start_server is True
-            opened_with_props.append(os.environ.get("PIPEWIRE_PROPS"))
-            self.samplerate = 44100
-
-    class FakeJackModule:
-        Client = FakeJackClient
-
-    monkeypatch.setitem(sys.modules, "jack", FakeJackModule)
-    monkeypatch.setenv("PIPEWIRE_PROPS", "node.latency = 512/48000")
+def test_prepare_opens_pwg_stream_without_start() -> None:
     spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
-
-    client = spectrum.open_jack_client()
-
-    assert client.samplerate == 44100
-    assert opened_with_props
-    assert "node.latency = 512/48000" in opened_with_props[0]
-    assert "node.autoconnect = false" in opened_with_props[0]
-    assert "stream.monitor = true" in opened_with_props[0]
-    assert os.environ["PIPEWIRE_PROPS"] == "node.latency = 512/48000"
-
-
-def test_prepare_opens_jack_client_without_activating_ports() -> None:
-    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
-    client = object()
+    stream = FakePwgStream("test_sink", True)
     calls: list[str] = []
 
-    def open_client():
+    def open_stream():
         calls.append("open")
-        return client
+        return stream
 
-    spectrum.open_jack_client = open_client
+    spectrum.open_pwg_stream = open_stream
 
     assert spectrum.prepare() is True
-    assert spectrum.client is client
-    assert spectrum.left_input_port is None
-    assert spectrum.right_input_port is None
+    assert spectrum.stream is stream
+    assert stream.start_count == 0
     assert calls == ["open"]
 
     assert spectrum.prepare() is True
@@ -420,54 +399,64 @@ def test_stop_uses_short_reader_thread_join_timeout() -> None:
     assert join_timeouts == [analyzer.ANALYZER_READER_JOIN_TIMEOUT_SECONDS]
 
 
-def test_close_deactivates_jack_client_once_before_close() -> None:
+def test_close_stops_pwg_stream_and_disconnects_signal() -> None:
     spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
-    calls: list[str] = []
-
-    class FakeClient:
-        def deactivate(self) -> None:
-            calls.append("deactivate")
-
-        def close(self) -> None:
-            calls.append("close")
-
-    spectrum.client = FakeClient()
-    spectrum.client_active = True
+    stream = FakePwgStream("test_sink", True)
+    spectrum.stream = stream
+    spectrum.stream_active = True
+    spectrum.stream_signal_handler_ids = [7]
 
     spectrum.close()
 
-    assert calls == ["deactivate", "close"]
-    assert spectrum.client is None
-    assert spectrum.client_active is False
+    assert stream.stop_count >= 1
+    assert stream.disconnected == [7]
+    assert spectrum.stream is None
+    assert spectrum.stream_active is False
 
 
-def test_analyzer_registers_terminal_jack_input_ports(monkeypatch: pytest.MonkeyPatch) -> None:
-    registered: list[tuple[str, bool]] = []
-
-    class FakeInputPorts:
-        def register(self, name: str, is_terminal: bool = False):
-            registered.append((name, is_terminal))
-            return name
-
-    class FakeJackClient:
-        inports = FakeInputPorts()
-
-        def set_process_callback(self, _callback) -> None:
-            pass
-
-        def activate(self) -> None:
-            pass
-
+def test_activate_pwg_stream_starts_stream_and_updates_sample_rate() -> None:
     spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
-    spectrum.connect_jack_monitor_ports = lambda _client: None
-    monkeypatch.setattr(analyzer, "disconnect_jack_input_port_connections", lambda _client, _ports: None)
+    stream = FakePwgStream("test_sink", True)
 
-    spectrum.activate_jack_client(FakeJackClient())
+    spectrum.activate_pwg_stream(stream)
 
-    assert registered == [
-        (analyzer.JACK_LEFT_INPUT_PORT, True),
-        (analyzer.JACK_RIGHT_INPUT_PORT, True),
-    ]
+    assert stream.start_count == 1
+    assert spectrum.stream_active is True
+    assert spectrum.sample_rate == 44100.0
+
+
+def test_process_audio_block_queues_interleaved_audio() -> None:
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+    spectrum.stop_event.clear()
+    payload = array("f", [1.0, 0.0, 0.5, -0.5]).tobytes()
+
+    class FakeFormat:
+        def get_sample_format(self) -> str:
+            return "F32"
+
+        def get_rate(self) -> int:
+            return 44100
+
+        def get_channels(self) -> int:
+            return 2
+
+    class FakeBytes:
+        def get_data(self) -> bytes:
+            return payload
+
+    class FakeBlock:
+        def get_format(self) -> FakeFormat:
+            return FakeFormat()
+
+        def get_data(self) -> FakeBytes:
+            return FakeBytes()
+
+    spectrum.process_audio_block(None, FakeBlock())
+
+    left, right = spectrum.audio_blocks.pop()
+    assert list(analyzer.pcm_f32le_bytes_to_samples(left)) == pytest.approx([1.0, 0.5])
+    assert list(analyzer.pcm_f32le_bytes_to_samples(right)) == pytest.approx([0.0, -0.5])
+    assert spectrum.sample_rate == 44100.0
 
 
 def test_analyzer_feeds_loudness_meter_with_interleaved_stereo() -> None:
@@ -589,7 +578,7 @@ def test_analyzer_starts_loudness_meter_when_callback_is_added_late(monkeypatch:
     monkeypatch.setattr(analyzer, "spectrum_db_values_to_levels", lambda _db_values: [0.5])
     spectrum.set_levels_callback(levels_callback)
 
-    spectrum.read_jack_levels()
+    spectrum.read_audio_levels()
 
     assert snapshots == [analyzer.AnalyzerLoudnessSnapshot(-20.0, -18.0, -17.0)]
     assert len(created_meters) == 1

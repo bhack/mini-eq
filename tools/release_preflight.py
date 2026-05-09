@@ -46,6 +46,34 @@ BACKGROUND_PORTAL_REVIEW_PATHS = (
     Path("src/mini_eq/window_preferences.py"),
     Path("extensions/gnome-shell/mini-eq@bhack.github.io/extension.js"),
 )
+FLATPAK_RUNTIME_REVIEW_PATHS = (
+    Path(".github/workflows/ci.yml"),
+    Path("io.github.bhack.mini-eq.yaml"),
+    Path("python3-dependencies.yaml"),
+    Path("pyproject.toml"),
+    Path("src/mini_eq/analyzer.py"),
+    Path("src/mini_eq/cli.py"),
+    Path("src/mini_eq/deps.py"),
+    Path("src/mini_eq/filter_chain.py"),
+    Path("src/mini_eq/routing.py"),
+    Path("src/mini_eq/window.py"),
+    Path("src/mini_eq/pipewire_backend.py"),
+    Path("src/mini_eq/pipewire_stream_router.py"),
+    Path("tools/check_flatpak_runtime.py"),
+    Path("tools/check_live_ui_runtime.py"),
+    Path("tools/run_flatpak_runtime_smoke_ci.sh"),
+    Path("tests/test_mini_eq_live_ui_runtime.py"),
+)
+PIPEWIRE_GOBJECT_BUILD_TOOLS = ("g-ir-compiler", "g-ir-scanner", "pkg-config")
+PIPEWIRE_GOBJECT_PKG_CONFIG_MODULES = ("glib-2.0", "gio-2.0", "gobject-2.0", "libpipewire-0.3")
+PIPEWIRE_GOBJECT_DEBIAN_BUILD_PACKAGES = (
+    "build-essential",
+    "gobject-introspection",
+    "libgirepository1.0-dev",
+    "libglib2.0-dev",
+    "libpipewire-0.3-dev",
+    "pkg-config",
+)
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -150,6 +178,23 @@ def run_background_portal_smoke_notice() -> None:
     print("Run one clean-permission Flatpak portal smoke in a real GNOME session before releasing this change.")
 
 
+def run_flatpak_runtime_smoke_notice() -> None:
+    base_tag = extension_comparison_base_tag()
+    if base_tag is None:
+        print("\nFlatpak runtime smoke notice skipped; no release tag found.")
+        return
+
+    changes = changed_paths_for_review(base_tag, FLATPAK_RUNTIME_REVIEW_PATHS)
+    if not changes:
+        print(f"\nFlatpak runtime smoke not indicated; runtime integration unchanged since {base_tag}.")
+        return
+
+    print(f"\nFlatpak runtime smoke may be needed; runtime integration changed since {base_tag}:")
+    for path in changes:
+        print(f"  {path}")
+    print("Run the installed Flatpak runtime smoke and interactive audio check before releasing this change.")
+
+
 def run_leak_scan() -> None:
     run(["git", "rev-list", "--count", "HEAD"])
     run(["git", "ls-remote", "--heads", "origin"])
@@ -238,6 +283,46 @@ def untracked_leak_matches() -> list[str]:
     return matches
 
 
+def missing_pkg_config_modules(modules: tuple[str, ...]) -> list[str]:
+    missing: list[str] = []
+    for module in modules:
+        result = subprocess.run(
+            ["pkg-config", "--exists", module],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if result.returncode != 0:
+            missing.append(module)
+    return missing
+
+
+def check_pipewire_gobject_sdist_build_environment() -> None:
+    missing_tools = [tool for tool in PIPEWIRE_GOBJECT_BUILD_TOOLS if shutil.which(tool) is None]
+    missing_modules = (
+        list(PIPEWIRE_GOBJECT_PKG_CONFIG_MODULES)
+        if shutil.which("pkg-config") is None
+        else missing_pkg_config_modules(PIPEWIRE_GOBJECT_PKG_CONFIG_MODULES)
+    )
+    if not missing_tools and not missing_modules:
+        return
+
+    details: list[str] = [
+        "The release wheel smoke installs Mini EQ in a fresh venv and must be able to build "
+        "pipewire-gobject from its sdist.",
+        "Install the PipeWire/GObject build dependencies first.",
+        "",
+        "Debian/Ubuntu:",
+        f"  sudo apt install {' '.join(PIPEWIRE_GOBJECT_DEBIAN_BUILD_PACKAGES)}",
+    ]
+    if missing_tools:
+        details.append(f"Missing tools: {', '.join(missing_tools)}")
+    if missing_modules:
+        details.append(f"Missing pkg-config modules: {', '.join(missing_modules)}")
+    raise SystemExit("\n".join(details))
+
+
 def run_wheel_smoke_test(python: Path, wheel: Path, scratch: Path) -> None:
     venv = scratch / "wheel-test"
     run([python, "-m", "venv", "--system-site-packages", venv])
@@ -247,6 +332,7 @@ def run_wheel_smoke_test(python: Path, wheel: Path, scratch: Path) -> None:
     mini_eq = bin_dir / ("mini-eq.exe" if os.name == "nt" else "mini-eq")
 
     run([venv_python, "-m", "pip", "install", "--upgrade", "pip"])
+    check_pipewire_gobject_sdist_build_environment()
     run([venv_python, "-m", "pip", "install", wheel])
     run([mini_eq, "--check-deps"])
     run([mini_eq, "--help"])
@@ -268,22 +354,6 @@ def run_build_checks(python: Path) -> None:
         run_wheel_smoke_test(python, wheels[0], scratch)
 
 
-def run_flathub_drift_check(python: Path) -> None:
-    flathub_manifest = ROOT.parent / "io.github.bhack.mini-eq" / "io.github.bhack.mini-eq.yaml"
-    if not flathub_manifest.exists():
-        print("\nSkipping Flathub manifest drift check; sibling Flathub checkout not found.")
-        return
-
-    run(
-        [
-            python,
-            ROOT / "tools/check_flathub_manifest_drift.py",
-            ROOT / "io.github.bhack.mini-eq.yaml",
-            flathub_manifest,
-        ]
-    )
-
-
 def main() -> int:
     python = Path(sys.executable)
     require_tools("appstreamcli", "desktop-file-validate", "git", "gnome-extensions")
@@ -292,6 +362,7 @@ def main() -> int:
     run([python, "-m", "pytest", "tests/test_version_metadata.py", "-q"])
     run([python, ROOT / "tools/check_gnome_shell_extension.py"])
     run_gnome_shell_extension_upload_notice()
+    run_flatpak_runtime_smoke_notice()
     run_background_portal_smoke_notice()
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])
@@ -301,7 +372,6 @@ def main() -> int:
     run(["desktop-file-validate", ROOT / "data/io.github.bhack.mini-eq.desktop"])
     run_build_checks(python)
     run_leak_scan()
-    run_flathub_drift_check(python)
 
     print("\nRelease preflight completed successfully.")
     return 0

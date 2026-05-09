@@ -6,7 +6,7 @@ import math
 from mini_eq import core
 from mini_eq.analyzer import ANALYZER_BIN_COUNT, AnalyzerLoudnessSnapshot
 from mini_eq.core import EQ_MODES, FILTER_TYPES, PRESET_VERSION, EqBand, eq_band_to_dict
-from mini_eq.wireplumber_backend import WirePlumberNode
+from mini_eq.pipewire_backend import PipeWireNode
 
 DEMO_PRESET_NAME = "Studio Reference"
 DEMO_OUTPUT_NAME = "studio-monitor"
@@ -48,7 +48,7 @@ class DemoController:
         self.analyzer_loudness_callback = None
         self.analyzer_enabled = False
         self.route_enabled = False
-        self.demo_sink = WirePlumberNode(
+        self.demo_sink = PipeWireNode(
             bound_id=101,
             object_serial="101",
             media_class="Audio/Sink",
@@ -117,13 +117,13 @@ class DemoController:
             payload["name"] = preset_name
         return payload
 
-    def list_sinks(self) -> list[WirePlumberNode]:
+    def list_sinks(self) -> list[PipeWireNode]:
         return [self.demo_sink]
 
     def list_output_sink_names(self) -> list[str]:
         return [DEMO_OUTPUT_NAME]
 
-    def get_sink(self, sink_name: str | None) -> WirePlumberNode | None:
+    def get_sink(self, sink_name: str | None) -> PipeWireNode | None:
         return self.demo_sink if sink_name == DEMO_OUTPUT_NAME else None
 
     def get_default_output_sink_name(self) -> str:

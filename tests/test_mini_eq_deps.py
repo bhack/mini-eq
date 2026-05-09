@@ -36,16 +36,16 @@ def test_dependency_report_includes_hints_for_failed_checks() -> None:
 
 def test_first_available_gi_repository_accepts_later_version(monkeypatch) -> None:
     def fake_check(namespace: str, version: str, label: str, required: bool, hint: str) -> deps.DependencyCheck:
-        if version == "0.4":
+        if version == "1.0":
             return deps.DependencyCheck(label, "ok", required, f"GI namespace {namespace} {version}", hint)
         return deps.DependencyCheck(label, "missing", required, f"{namespace} {version} missing", hint)
 
     monkeypatch.setattr(deps, "check_gi_repository", fake_check)
 
-    check = deps.check_first_available_gi_repository("Wp", ("0.5", "0.4"), "WirePlumber GI namespace", True, "hint")
+    check = deps.check_first_available_gi_repository("Example", ("2.0", "1.0"), "Example GI namespace", True, "hint")
 
     assert check.ok
-    assert check.detail == "GI namespace Wp 0.4"
+    assert check.detail == "GI namespace Example 1.0"
 
 
 def test_first_available_gi_repository_reports_all_failures(monkeypatch) -> None:
@@ -54,11 +54,11 @@ def test_first_available_gi_repository_reports_all_failures(monkeypatch) -> None
 
     monkeypatch.setattr(deps, "check_gi_repository", fake_check)
 
-    check = deps.check_first_available_gi_repository("Wp", ("0.5", "0.4"), "WirePlumber GI namespace", True, "hint")
+    check = deps.check_first_available_gi_repository("Example", ("2.0", "1.0"), "Example GI namespace", True, "hint")
 
     assert not check.ok
-    assert "Wp 0.5: Wp 0.5 missing" in check.detail
-    assert "Wp 0.4: Wp 0.4 missing" in check.detail
+    assert "Example 2.0: Example 2.0 missing" in check.detail
+    assert "Example 1.0: Example 1.0 missing" in check.detail
 
 
 def test_gi_repository_attribute_requires_named_attribute(monkeypatch) -> None:
@@ -89,6 +89,58 @@ def test_gi_repository_attribute_reports_missing_attribute(monkeypatch) -> None:
 
     assert not check.ok
     assert check.detail == "GI namespace lacks Gtk.Button.set_can_shrink"
+
+
+def test_pipewire_gobject_check_requires_current_library_version(monkeypatch) -> None:
+    fake_pwg = SimpleNamespace(
+        get_library_version=lambda: "0.3.2",
+        Core=SimpleNamespace(set_pipewire_property=object()),
+        Param=SimpleNamespace(new_props_controls=object()),
+        Stream=SimpleNamespace(set_pipewire_property=object()),
+    )
+
+    monkeypatch.setattr(
+        deps,
+        "check_python_import",
+        lambda _module, label, required, hint: deps.DependencyCheck(label, "ok", required, "shim ok", hint),
+    )
+    monkeypatch.setattr(
+        deps,
+        "check_gi_repository",
+        lambda _namespace, _version, label, required, hint: deps.DependencyCheck(label, "ok", required, "Pwg ok", hint),
+    )
+    monkeypatch.setattr(deps.importlib, "import_module", lambda _name: fake_pwg)
+
+    check = deps.check_pipewire_gobject()
+
+    assert not check.ok
+    assert "older than required 0.3.4" in check.detail
+
+
+def test_pipewire_gobject_check_requires_property_override_symbols(monkeypatch) -> None:
+    fake_pwg = SimpleNamespace(
+        get_library_version=lambda: "0.3.4",
+        Core=SimpleNamespace(),
+        Param=SimpleNamespace(new_props_controls=object()),
+        Stream=SimpleNamespace(set_pipewire_property=object()),
+    )
+
+    monkeypatch.setattr(
+        deps,
+        "check_python_import",
+        lambda _module, label, required, hint: deps.DependencyCheck(label, "ok", required, "shim ok", hint),
+    )
+    monkeypatch.setattr(
+        deps,
+        "check_gi_repository",
+        lambda _namespace, _version, label, required, hint: deps.DependencyCheck(label, "ok", required, "Pwg ok", hint),
+    )
+    monkeypatch.setattr(deps.importlib, "import_module", lambda _name: fake_pwg)
+
+    check = deps.check_pipewire_gobject()
+
+    assert not check.ok
+    assert "Pwg.Core.set_pipewire_property" in check.detail
 
 
 def test_native_ebur128_check_is_optional_when_library_is_missing(monkeypatch) -> None:

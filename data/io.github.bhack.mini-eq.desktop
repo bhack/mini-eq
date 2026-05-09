@@ -2,7 +2,7 @@
 Name=Mini EQ
 GenericName=System-wide Equalizer
 Comment=Compact system-wide parametric equalizer for PipeWire
-Keywords=equalizer;audio;pipewire;jack;
+Keywords=equalizer;audio;pipewire;
 Categories=AudioVideo;Audio;
 Exec=mini-eq
 Icon=io.github.bhack.mini-eq

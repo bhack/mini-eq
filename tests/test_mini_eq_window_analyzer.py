@@ -73,12 +73,13 @@ class AnalyzerAllocatedWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
 
 
 class FakeAnalyzerController:
-    def __init__(self) -> None:
+    def __init__(self, *, start_result: bool = True) -> None:
         self.enabled_values: list[bool] = []
+        self.start_result = start_result
 
     def set_analyzer_enabled(self, enabled: bool) -> bool:
         self.enabled_values.append(enabled)
-        return True
+        return self.start_result
 
 
 class TickAnalyzerArea:
@@ -95,13 +96,42 @@ class TickAnalyzerArea:
 
 
 class AnalyzerPreviewWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
-    def __init__(self) -> None:
+    def __init__(self, *, start_result: bool = True) -> None:
+        self.application = FakeApplication()
+        self.updating_ui = False
         self.analyzer_enabled = True
+        self.analyzer_frozen = False
+        self.analyzer_switch = FakeSwitch(True)
+        self.analyzer_freeze_switch = FakeSwitch(False)
+        self.analyzer_state_label = FakeSummaryLabel()
+        self.analyzer_summary_label = FakeSummaryLabel()
+        self.analyzer_loudness_value_label = FakeSummaryLabel()
+        self.analyzer_loudness_meter_area = FakeMeterArea()
+        self.analyzer_display_gain_db = 0.0
+        self.analyzer_levels = [0.0, 0.0]
+        self.analyzer_loudness_snapshot = None
+        self.analyzer_session_max_shortterm_lufs = None
         self.analyzer_preview_source_id = 0
         self.analyzer_preview_uses_tick_callback = False
         self.analyzer_preview_last_tick_time = 0.0
-        self.controller = FakeAnalyzerController()
+        self.controller = FakeAnalyzerController(start_result=start_result)
         self.analyzer_area = TickAnalyzerArea()
+        self.graph_background_invalidations = 0
+        self.graph_draws = 0
+        self.analyzer_draws = 0
+
+    def get_application(self) -> FakeApplication:
+        return self.application
+
+    def invalidate_graph_background_cache(self) -> None:
+        self.graph_background_invalidations += 1
+
+    def queue_graph_draw(self) -> None:
+        self.graph_draws += 1
+
+    def queue_analyzer_draw(self, *, force: bool = False) -> None:
+        del force
+        self.analyzer_draws += 1
 
 
 class FakeFrameClock:
@@ -141,26 +171,6 @@ class FakeSwitch:
         self.state = state
 
 
-class AnalyzerToggleWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
-    def __init__(self) -> None:
-        self.application = FakeApplication()
-        self.updating_ui = False
-        self.analyzer_enabled = True
-        self.analyzer_levels = [0.8, 0.4]
-        self.analyzer_loudness_snapshot = analyzer.AnalyzerLoudnessSnapshot(-18.0, -17.0, -16.0)
-        self.analyzer_session_max_shortterm_lufs = -12.0
-        self.analyzer_preview_source_id = 0
-        self.analyzer_preview_uses_tick_callback = False
-        self.controller = FakeAnalyzerController()
-        self.sync_count = 0
-
-    def get_application(self) -> FakeApplication:
-        return self.application
-
-    def sync_ui_from_state(self) -> None:
-        self.sync_count += 1
-
-
 class FakeSummaryLabel:
     def __init__(self) -> None:
         self.text = ""
@@ -195,6 +205,43 @@ class FakeMeterArea:
 
     def set_tooltip_text(self, tooltip: str) -> None:
         self.tooltip = tooltip
+
+
+class AnalyzerToggleWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
+    def __init__(self) -> None:
+        self.application = FakeApplication()
+        self.updating_ui = False
+        self.analyzer_enabled = True
+        self.analyzer_frozen = False
+        self.analyzer_switch = FakeSwitch(True)
+        self.analyzer_freeze_switch = FakeSwitch(False)
+        self.analyzer_state_label = FakeSummaryLabel()
+        self.analyzer_summary_label = FakeSummaryLabel()
+        self.analyzer_loudness_value_label = FakeSummaryLabel()
+        self.analyzer_loudness_meter_area = FakeMeterArea()
+        self.analyzer_display_gain_db = 0.0
+        self.analyzer_levels = [0.8, 0.4]
+        self.analyzer_loudness_snapshot = analyzer.AnalyzerLoudnessSnapshot(-18.0, -17.0, -16.0)
+        self.analyzer_session_max_shortterm_lufs = -12.0
+        self.analyzer_preview_source_id = 0
+        self.analyzer_preview_uses_tick_callback = False
+        self.controller = FakeAnalyzerController()
+        self.graph_background_invalidations = 0
+        self.graph_draws = 0
+        self.analyzer_draws = 0
+
+    def get_application(self) -> FakeApplication:
+        return self.application
+
+    def invalidate_graph_background_cache(self) -> None:
+        self.graph_background_invalidations += 1
+
+    def queue_graph_draw(self) -> None:
+        self.graph_draws += 1
+
+    def queue_analyzer_draw(self, *, force: bool = False) -> None:
+        del force
+        self.analyzer_draws += 1
 
 
 class AnalyzerSummaryWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
@@ -355,6 +402,21 @@ def test_analyzer_preview_uses_frame_clock_tick_callback() -> None:
     assert window.analyzer_preview_uses_tick_callback is False
 
 
+def test_analyzer_preview_failure_refreshes_monitor_controls() -> None:
+    window = AnalyzerPreviewWindow(start_result=False)
+
+    window.start_analyzer_preview()
+
+    assert window.controller.enabled_values == [True]
+    assert window.analyzer_enabled is False
+    assert window.analyzer_switch.get_state() is False
+    assert window.analyzer_state_label.text == "Off"
+    assert window.graph_background_invalidations == 1
+    assert window.graph_draws == 1
+    assert window.analyzer_draws == 1
+    assert window.application.state_count == 1
+
+
 def test_analyzer_preview_frame_coalesces_to_30hz() -> None:
     window = PreviewFrameWindow()
 
@@ -374,7 +436,9 @@ def test_analyzer_toggle_off_emits_zero_level_signal(monkeypatch) -> None:
     handled = window.on_analyzer_changed(monitor_switch, None)
 
     assert handled is True
-    assert monitor_switch.get_state() is False
+    assert window.analyzer_switch.get_state() is False
+    assert window.analyzer_state_label.text == "Off"
+    assert window.analyzer_summary_label.text == "Off"
     assert window.controller.enabled_values == [False]
     assert window.analyzer_enabled is False
     assert window.analyzer_levels == [0.0, 0.0]
@@ -382,8 +446,27 @@ def test_analyzer_toggle_off_emits_zero_level_signal(monkeypatch) -> None:
     assert window.analyzer_session_max_shortterm_lufs is None
     assert window.application.analyzer_count == 1
     assert window.application.state_count == 1
-    assert window.sync_count == 1
+    assert window.graph_background_invalidations == 1
+    assert window.graph_draws == 1
+    assert window.analyzer_draws == 2
     assert saved_values == [False]
+
+
+def test_analyzer_freeze_refreshes_monitor_controls() -> None:
+    window = AnalyzerToggleWindow()
+    freeze_switch = FakeSwitch(True)
+
+    handled = window.on_analyzer_freeze_changed(freeze_switch, None)
+
+    assert handled is True
+    assert window.analyzer_frozen is True
+    assert window.analyzer_freeze_switch.get_state() is True
+    assert window.analyzer_state_label.text == "Frozen"
+    assert window.analyzer_summary_label.text == "Frozen · -17.0 LUFS"
+    assert window.application.state_count == 1
+    assert window.graph_background_invalidations == 0
+    assert window.graph_draws == 0
+    assert window.analyzer_draws == 1
 
 
 def test_analyzer_summary_prefers_live_shortterm_loudness() -> None:

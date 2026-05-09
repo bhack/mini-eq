@@ -178,12 +178,7 @@ class MiniEqWindowAnalyzerMixin:
 
         if not started:
             self.analyzer_enabled = False
-            self.updating_ui = True
-            try:
-                set_switch_confirmed_state(self.analyzer_switch, False)
-            finally:
-                self.updating_ui = False
-            self.sync_ui_from_state()
+            self.refresh_after_monitor_state_changed(monitor_visibility_changed=True)
             return
 
         self.start_analyzer_preview_clock()
@@ -400,8 +395,38 @@ class MiniEqWindowAnalyzerMixin:
 
         return True
 
+    def _sync_monitor_controls_unlocked(self) -> None:
+        set_switch_confirmed_state(self.analyzer_switch, self.analyzer_enabled)
+        set_switch_confirmed_state(self.analyzer_freeze_switch, self.analyzer_frozen)
+        self.analyzer_state_label.set_text(
+            "Frozen" if self.analyzer_frozen and self.analyzer_enabled else ("Live" if self.analyzer_enabled else "Off")
+        )
+        self.update_analyzer_summary_label()
+
+    def sync_monitor_controls_from_state(self) -> None:
+        self.updating_ui = True
+        try:
+            self._sync_monitor_controls_unlocked()
+        finally:
+            self.updating_ui = False
+
+    def refresh_after_monitor_state_changed(
+        self,
+        *,
+        monitor_visibility_changed: bool = False,
+        notify: bool = True,
+    ) -> None:
+        self.sync_monitor_controls_from_state()
+        if monitor_visibility_changed:
+            self.invalidate_graph_background_cache()
+            self.queue_graph_draw()
+        self.queue_analyzer_draw(force=True)
+        if notify:
+            self.emit_control_state_changed()
+
     def on_analyzer_changed(self, switch: Gtk.Switch, state: object | None) -> bool:
         enabled = requested_switch_state(switch, state)
+        del switch
 
         if self.updating_ui:
             return False
@@ -425,13 +450,7 @@ class MiniEqWindowAnalyzerMixin:
                 self.queue_analyzer_draw(force=True)
                 self.emit_control_analyzer_levels_changed()
         save_monitor_enabled(self.analyzer_enabled)
-        self.sync_ui_from_state()
-        self.updating_ui = True
-        try:
-            set_switch_confirmed_state(switch, self.analyzer_enabled)
-        finally:
-            self.updating_ui = False
-        self.emit_control_state_changed()
+        self.refresh_after_monitor_state_changed(monitor_visibility_changed=enabled != previous_enabled)
         return True
 
     def update_analyzer_summary_label(self) -> None:
@@ -462,18 +481,13 @@ class MiniEqWindowAnalyzerMixin:
 
     def on_analyzer_freeze_changed(self, switch: Gtk.Switch, state: object | None) -> bool:
         frozen = requested_switch_state(switch, state)
+        del switch
 
         if self.updating_ui:
             return False
 
         self.analyzer_frozen = frozen
-        self.sync_ui_from_state()
-        self.updating_ui = True
-        try:
-            set_switch_confirmed_state(switch, self.analyzer_frozen)
-        finally:
-            self.updating_ui = False
-        self.emit_control_state_changed()
+        self.refresh_after_monitor_state_changed()
         return True
 
     def on_analyzer_smoothing_changed(self, scale: Gtk.Scale) -> None:

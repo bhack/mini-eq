@@ -7,7 +7,6 @@ from gi.repository import Gio, GLib
 from . import __version__
 from .analyzer import analyzer_level_to_display_norm
 from .core import list_preset_names, sanitize_preset_name
-from .window_utils import set_switch_confirmed_state
 
 BUS_NAME = "io.github.bhack.mini-eq"
 OBJECT_PATH = "/io/github/bhack/mini_eq/Control"
@@ -68,21 +67,13 @@ class ControllerProtocol(Protocol):
     def route_system_audio(self, enabled: bool) -> None: ...
 
 
-class SwitchProtocol(Protocol):
-    def set_active(self, active: bool) -> None: ...
-    def set_state(self, state: bool) -> None: ...
-
-
 class WindowProtocol(Protocol):
     current_preset_name: str | None
     ui_shutting_down: bool
-    updating_ui: bool
     analyzer_enabled: bool
     analyzer_levels: list[float]
     analyzer_display_gain_db: float
     controller: ControllerProtocol
-    bypass_switch: SwitchProtocol
-    route_switch: SwitchProtocol
 
     def load_library_preset(self, name: str) -> None: ...
 
@@ -90,21 +81,22 @@ class WindowProtocol(Protocol):
 
     def get_visible(self) -> bool: ...
 
-    def sync_ui_from_state(self) -> None: ...
+    def sync_control_switches_from_controller(self, *, route: bool = True, eq: bool = True) -> None: ...
 
-    def update_eq_power_indicator(self) -> None: ...
+    def refresh_after_route_state_changed(
+        self,
+        *,
+        eq_was_enabled: bool,
+        announce_enabled: bool | None = None,
+        notify: bool = True,
+    ) -> None: ...
 
-    def update_info_label(self) -> None: ...
-
-    def update_status_summary(self) -> None: ...
-
-    def update_focus_summary(self) -> None: ...
-
-    def invalidate_graph_response_cache(self) -> None: ...
-
-    def queue_graph_draw(self) -> None: ...
-
-    def update_preset_state(self) -> None: ...
+    def refresh_after_eq_state_changed(
+        self,
+        *,
+        announce_enabled: bool | None = None,
+        notify: bool = True,
+    ) -> None: ...
 
     def output_preset_link_name(self) -> str | None: ...
 
@@ -200,38 +192,57 @@ class MiniEqDbusControl:
     def analyzer_levels(self) -> list[float]:
         return panel_analyzer_levels(self.app.window)
 
-    def emit_state_changed(self) -> None:
-        if self.connection is None:
+    def _connection_is_closed(self, connection: Gio.DBusConnection) -> bool:
+        is_closed = getattr(connection, "is_closed", None)
+        if is_closed is None:
+            return False
+
+        return bool(is_closed())
+
+    def _drop_closed_connection(self, connection: Gio.DBusConnection) -> None:
+        if self.connection is connection:
+            self.registration_id = 0
+            self.connection = None
+
+    def _is_closed_connection_error(self, exc: GLib.GError) -> bool:
+        return bool(exc.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CLOSED))
+
+    def _emit_signal(self, signal_name: str, parameters: GLib.Variant | None) -> None:
+        connection = self.connection
+        if connection is None:
+            return
+        if self._connection_is_closed(connection):
+            self._drop_closed_connection(connection)
             return
 
-        self.connection.emit_signal(
-            None,
-            OBJECT_PATH,
-            INTERFACE_NAME,
+        try:
+            connection.emit_signal(
+                None,
+                OBJECT_PATH,
+                INTERFACE_NAME,
+                signal_name,
+                parameters,
+            )
+        except GLib.GError as exc:
+            if self._is_closed_connection_error(exc) or self._connection_is_closed(connection):
+                self._drop_closed_connection(connection)
+                return
+            raise
+
+    def emit_state_changed(self) -> None:
+        self._emit_signal(
             "StateChanged",
             GLib.Variant("(a{sv})", (self.state(),)),
         )
 
     def emit_analyzer_levels_changed(self) -> None:
-        if self.connection is None:
-            return
-
-        self.connection.emit_signal(
-            None,
-            OBJECT_PATH,
-            INTERFACE_NAME,
+        self._emit_signal(
             "AnalyzerLevelsChanged",
             GLib.Variant("(ad)", (self.analyzer_levels(),)),
         )
 
     def emit_presets_changed(self) -> None:
-        if self.connection is None:
-            return
-
-        self.connection.emit_signal(
-            None,
-            OBJECT_PATH,
-            INTERFACE_NAME,
+        self._emit_signal(
             "PresetsChanged",
             None,
         )
@@ -247,18 +258,7 @@ class MiniEqDbusControl:
 
         controller.set_eq_enabled(enabled)
         if window is not None and not window.ui_shutting_down:
-            window.updating_ui = True
-            try:
-                set_switch_confirmed_state(window.bypass_switch, enabled)
-            finally:
-                window.updating_ui = False
-
-            window.update_eq_power_indicator()
-            window.update_info_label()
-            window.update_status_summary()
-            window.invalidate_graph_response_cache()
-            window.queue_graph_draw()
-            window.update_preset_state()
+            window.refresh_after_eq_state_changed(notify=False)
 
         self.emit_state_changed()
 
@@ -276,29 +276,11 @@ class MiniEqDbusControl:
             controller.route_system_audio(enabled)
         except Exception:
             if window is not None and not window.ui_shutting_down:
-                window.updating_ui = True
-                try:
-                    set_switch_confirmed_state(window.bypass_switch, controller.eq_enabled)
-                    set_switch_confirmed_state(window.route_switch, controller.routed)
-                finally:
-                    window.updating_ui = False
+                window.sync_control_switches_from_controller()
             raise
 
         if window is not None and not window.ui_shutting_down:
-            window.updating_ui = True
-            try:
-                set_switch_confirmed_state(window.bypass_switch, controller.eq_enabled)
-                set_switch_confirmed_state(window.route_switch, controller.routed)
-            finally:
-                window.updating_ui = False
-            window.update_eq_power_indicator()
-            window.update_info_label()
-            window.update_status_summary()
-            window.update_focus_summary()
-            if not eq_was_enabled and controller.eq_enabled:
-                window.invalidate_graph_response_cache()
-                window.queue_graph_draw()
-                window.update_preset_state()
+            window.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled, notify=False)
 
         self.emit_state_changed()
 

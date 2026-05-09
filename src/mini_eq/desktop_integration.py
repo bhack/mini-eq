@@ -70,7 +70,7 @@ def build_desktop_file() -> str:
             f"Name={APP_DISPLAY_NAME}",
             "GenericName=System-wide Equalizer",
             "Comment=Minimal system-wide parametric equalizer for PipeWire",
-            "Keywords=equalizer;audio;pipewire;jack;",
+            "Keywords=equalizer;audio;pipewire;",
             "Categories=GTK;AudioVideo;Audio;",
             f"Exec={exec_line}",
             f"Icon={APP_ICON_NAME}",

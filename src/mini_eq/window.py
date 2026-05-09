@@ -36,6 +36,7 @@ from .core import (
 )
 from .glib_utils import destroy_glib_source
 from .gtk_utils import create_dropdown_from_strings
+from .pipewire_backend import PipeWireNode, node_sample_rate, parse_positive_int
 from .routing import SystemWideEqController
 from .settings import load_monitor_enabled
 from .window_analyzer import MiniEqWindowAnalyzerMixin
@@ -46,7 +47,6 @@ from .window_preferences import MiniEqWindowPreferencesMixin
 from .window_presets import MiniEqWindowPresetMixin
 from .window_utility import MiniEqWindowUtilityPaneMixin
 from .window_utils import requested_switch_state, set_switch_confirmed_state
-from .wireplumber_backend import WirePlumberNode, node_sample_rate, parse_positive_int
 
 TOAST_TIMEOUT_SECONDS = 2
 MIN_WINDOW_WIDTH = 980
@@ -87,6 +87,7 @@ class MiniEqWindow(
         self.controller = controller
         self.auto_route_on_startup = auto_route
         self.post_present_source_id = 0
+        self.startup_auto_route_source_id = 0
         self.post_present_ready = False
         self.present_after_setup = True
         self.responsive_layout_source_id = 0
@@ -98,7 +99,7 @@ class MiniEqWindow(
         self.set_default_size(1360, DEFAULT_WINDOW_HEIGHT)
         self.set_size_request(self.min_window_width, self.compact_min_window_height)
         self.updating_ui = False
-        self.selected_band_index: int | None = None
+        self.selected_band_index: int | None = 0
         self.visible_band_count = DEFAULT_ACTIVE_BANDS
         self.band_fader_boxes: list[Gtk.Box] = []
         self.band_fader_widgets: list[EqBandFader] = []
@@ -113,6 +114,10 @@ class MiniEqWindow(
         self.current_preset_name: str | None = None
         self.saved_preset_signature = self.controller.state_signature()
         self.default_preset_signature = self.controller.default_state_signature()
+        self.curve_revert_baseline_label: str | None = None
+        self.curve_revert_baseline_signature: str | None = None
+        self.curve_revert_baseline_payload: dict[str, object] | None = None
+        self.set_curve_revert_baseline("Neutral")
         self.output_preset_auto_applied = False
         self.output_preset_curve_auto_loaded = False
         self.updating_output_preset_switch = False
@@ -244,28 +249,33 @@ class MiniEqWindow(
         if self.ui_shutting_down:
             return False
 
-        if self.auto_route_on_startup:
-            try:
-                self.controller.route_system_audio(True)
-            except Exception as exc:
-                self.set_status(str(exc))
-            else:
-                self.update_eq_power_indicator()
-                self.update_info_label()
-                self.update_status_summary()
-                self.update_focus_summary()
-            finally:
-                self.updating_ui = True
-                try:
-                    set_switch_confirmed_state(self.route_switch, self.controller.routed)
-                finally:
-                    self.updating_ui = False
-
         self.start_analyzer_preview()
         self.notify_control_state_changed()
+        if self.auto_route_on_startup:
+            self.schedule_startup_auto_route()
 
         if not self.ui_shutting_down and self.present_after_setup:
             self.present()
+        return False
+
+    def schedule_startup_auto_route(self) -> None:
+        if self.startup_auto_route_source_id != 0:
+            return
+
+        self.startup_auto_route_source_id = GLib.idle_add(self.on_startup_auto_route_idle)
+
+    def on_startup_auto_route_idle(self) -> bool:
+        self.startup_auto_route_source_id = 0
+
+        if self.ui_shutting_down or not self.auto_route_on_startup:
+            return False
+
+        eq_was_enabled = self.controller.eq_enabled
+        try:
+            self.controller.route_system_audio(True)
+        except Exception as exc:
+            self.set_status(str(exc))
+        self.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled)
         return False
 
     def prepare_for_shutdown(self) -> None:
@@ -277,6 +287,9 @@ class MiniEqWindow(
         if self.post_present_source_id > 0:
             destroy_glib_source(self.post_present_source_id)
             self.post_present_source_id = 0
+        if self.startup_auto_route_source_id > 0:
+            destroy_glib_source(self.startup_auto_route_source_id)
+            self.startup_auto_route_source_id = 0
         if self.responsive_layout_source_id > 0:
             destroy_glib_source(self.responsive_layout_source_id)
             self.responsive_layout_source_id = 0
@@ -362,7 +375,7 @@ class MiniEqWindow(
                 update_background_status()
             return
 
-        routed = self.route_switch.get_active()
+        routed = self.is_system_routed()
         if routed:
             self.updating_ui = True
             try:
@@ -423,6 +436,55 @@ class MiniEqWindow(
         callback = getattr(app, "emit_control_presets_changed", None)
         if callback is not None:
             callback()
+
+    def sync_control_switches_from_controller(self, *, route: bool = True, eq: bool = True) -> None:
+        self.updating_ui = True
+        try:
+            if route:
+                set_switch_confirmed_state(self.route_switch, self.controller.routed)
+            if eq:
+                set_switch_confirmed_state(self.bypass_switch, self.controller.eq_enabled)
+        finally:
+            self.updating_ui = False
+
+    def refresh_after_route_state_changed(
+        self,
+        *,
+        eq_was_enabled: bool,
+        announce_enabled: bool | None = None,
+        notify: bool = True,
+    ) -> None:
+        self.sync_control_switches_from_controller()
+        self.update_eq_power_indicator()
+        self.update_info_label()
+        self.update_status_summary()
+        self.update_focus_summary()
+        if not eq_was_enabled and self.controller.eq_enabled:
+            self.invalidate_graph_response_cache()
+            self.queue_graph_draw()
+            self.update_preset_state()
+        if announce_enabled is not None:
+            self.set_status("System-wide EQ On" if announce_enabled else "System-wide EQ Off")
+        if notify:
+            self.notify_control_state_changed()
+
+    def refresh_after_eq_state_changed(
+        self,
+        *,
+        announce_enabled: bool | None = None,
+        notify: bool = True,
+    ) -> None:
+        self.sync_control_switches_from_controller(route=False)
+        self.update_eq_power_indicator()
+        self.update_info_label()
+        self.update_status_summary()
+        self.invalidate_graph_response_cache()
+        self.queue_graph_draw()
+        self.update_preset_state()
+        if announce_enabled is not None:
+            self.set_status("Equalizer On" if announce_enabled else "Equalizer Off")
+        if notify:
+            self.notify_control_state_changed()
 
     def start_preset_monitoring(self) -> None:
         if self.preset_monitor is not None:
@@ -488,10 +550,10 @@ class MiniEqWindow(
         self.begin_close_request_shutdown()
         return True
 
-    def output_sink_info(self) -> WirePlumberNode | None:
+    def output_sink_info(self) -> PipeWireNode | None:
         return self.controller.get_sink(self.controller.output_sink)
 
-    def format_sample_spec(self, sink: WirePlumberNode | None) -> str:
+    def format_sample_spec(self, sink: PipeWireNode | None) -> str:
         if sink is None:
             return "Unavailable"
 
@@ -505,7 +567,7 @@ class MiniEqWindow(
 
         return channel_text
 
-    def transport_label_for_sink(self, sink: WirePlumberNode | None) -> str:
+    def transport_label_for_sink(self, sink: PipeWireNode | None) -> str:
         if sink is None:
             return "Unavailable"
 
@@ -523,7 +585,7 @@ class MiniEqWindow(
 
         return api.upper() if api else "Audio output"
 
-    def output_display_name(self, sink: WirePlumberNode | None) -> str:
+    def output_display_name(self, sink: PipeWireNode | None) -> str:
         if sink is None:
             return self.controller.output_sink
 
@@ -534,14 +596,14 @@ class MiniEqWindow(
             or self.controller.output_sink
         )
 
-    def list_visible_output_sinks(self) -> list[WirePlumberNode]:
+    def list_visible_output_sinks(self) -> list[PipeWireNode]:
         return [
             sink
             for sink in self.controller.list_sinks()
             if sink.node_name is not None and self.controller.is_valid_output_sink(sink.node_name)
         ]
 
-    def build_output_sink_labels(self, sinks: list[WirePlumberNode]) -> list[str]:
+    def build_output_sink_labels(self, sinks: list[PipeWireNode]) -> list[str]:
         labels = [self.output_display_name(sink) for sink in sinks]
         counts: dict[str, int] = {}
 
@@ -566,7 +628,7 @@ class MiniEqWindow(
 
         return f"Follow system output ({self.output_display_name(default_sink)})"
 
-    def profile_summary(self, sink: WirePlumberNode | None) -> tuple[str, str, bool, list[str]]:
+    def profile_summary(self, sink: PipeWireNode | None) -> tuple[str, str, bool, list[str]]:
         if sink is None:
             return "No output", "The selected sink is not available.", True, ["Selected output sink is unavailable."]
 
@@ -594,7 +656,7 @@ class MiniEqWindow(
 
     def update_status_summary(self) -> None:
         sink = self.output_sink_info()
-        route_enabled = self.route_switch.get_active()
+        route_enabled = self.is_system_routed()
 
         warnings = self.profile_summary(sink)[3]
         headroom_needs_attention = False
@@ -734,6 +796,9 @@ class MiniEqWindow(
             imported_count = self.controller.import_apo_preset(path)
             self.selected_band_index = None
             self.set_visible_band_count(imported_count)
+            self.current_preset_name = None
+            self.saved_preset_signature = self.controller.state_signature()
+            self.set_curve_revert_baseline("Imported APO Preset")
             self.output_preset_curve_auto_loaded = False
             self.sync_ui_from_state()
         except Exception as exc:
@@ -743,6 +808,9 @@ class MiniEqWindow(
         self.controller.reset_state()
         self.selected_band_index = None
         self.set_visible_band_count(DEFAULT_ACTIVE_BANDS)
+        self.current_preset_name = None
+        self.saved_preset_signature = self.controller.state_signature()
+        self.set_curve_revert_baseline("Neutral")
         self.output_preset_curve_auto_loaded = False
         self.sync_ui_from_state()
         self.set_status("Equalizer Reset")
@@ -803,32 +871,13 @@ class MiniEqWindow(
         try:
             self.controller.route_system_audio(enabled)
             route_changed = True
-            self.updating_ui = True
-            try:
-                set_switch_confirmed_state(switch, self.controller.routed)
-                if self.controller.eq_enabled != eq_was_enabled:
-                    set_switch_confirmed_state(self.bypass_switch, self.controller.eq_enabled)
-            finally:
-                self.updating_ui = False
         except Exception as exc:
-            self.updating_ui = True
-            try:
-                set_switch_confirmed_state(switch, self.controller.routed)
-            finally:
-                self.updating_ui = False
             self.set_status(str(exc))
         finally:
-            self.update_eq_power_indicator()
-            self.update_info_label()
-            self.update_status_summary()
-            self.update_focus_summary()
-            if not eq_was_enabled and self.controller.eq_enabled:
-                self.invalidate_graph_response_cache()
-                self.queue_graph_draw()
-                self.update_preset_state()
-            if route_changed:
-                self.set_status("System-wide EQ On" if enabled else "System-wide EQ Off")
-            self.notify_control_state_changed()
+            self.refresh_after_route_state_changed(
+                eq_was_enabled=eq_was_enabled,
+                announce_enabled=enabled if route_changed else None,
+            )
         return True
 
     def on_bypass_changed(self, switch: Gtk.Switch, state: object | None) -> bool:
@@ -840,25 +889,9 @@ class MiniEqWindow(
 
         try:
             self.controller.set_eq_enabled(enabled)
-            self.updating_ui = True
-            try:
-                set_switch_confirmed_state(switch, self.controller.eq_enabled)
-            finally:
-                self.updating_ui = False
-            self.update_eq_power_indicator()
-            self.update_info_label()
-            self.update_status_summary()
-            self.invalidate_graph_response_cache()
-            self.queue_graph_draw()
-            self.update_preset_state()
-            self.set_status("Equalizer On" if enabled else "Equalizer Off")
-            self.notify_control_state_changed()
+            self.refresh_after_eq_state_changed(announce_enabled=enabled)
         except Exception as exc:
-            self.updating_ui = True
-            try:
-                set_switch_confirmed_state(switch, self.controller.eq_enabled)
-            finally:
-                self.updating_ui = False
+            self.sync_control_switches_from_controller(route=False)
             self.update_eq_power_indicator()
             self.set_status(str(exc))
         return True
