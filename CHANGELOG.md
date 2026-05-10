@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.3 - 2026-05-11
+
+- Require pipewire-gobject 0.3.6 and use its synchronous PipeWire registry,
+  metadata, node, and device APIs for startup and routing state.
+- Replace Mini EQ's PipeWire startup and routing sleep loops with bounded sync
+  or registry-event waits for route params, virtual sink creation, and stream
+  routing.
+- Avoid a headless startup hang when system-wide EQ fails synchronously before
+  the GLib main loop starts.
+
 ## 0.7.2 - 2026-05-10
 
 - Finish GNOME Shell startup notification after Mini EQ's delayed first-window

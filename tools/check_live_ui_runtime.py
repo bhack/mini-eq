@@ -1024,15 +1024,15 @@ def run_ui_flow(
             timeout_seconds,
         )
         compare_switch = driver.wait_for_accessible(
-            "Compare switch",
-            lambda: driver.find(frame, name="Compare", role="switch", showing=True),
+            "A/B compare switch",
+            lambda: driver.find(frame, name="A/B", role="switch", showing=True),
             timeout_seconds,
         )
 
         if not driver.sensitive(route_switch):
             raise AssertionError("System-wide EQ switch is not sensitive")
         if not driver.sensitive(compare_switch):
-            raise AssertionError("Compare switch should become sensitive when routing is active")
+            raise AssertionError("A/B compare switch should become sensitive when routing is active")
 
         verify_dropdown_exposes_options(
             driver,
