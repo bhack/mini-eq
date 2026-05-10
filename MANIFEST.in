@@ -9,6 +9,7 @@ include src/mini_eq/assets/icons/hicolor/symbolic/apps/*.svg
 include data/*.desktop
 include data/*.metainfo.xml
 include docs/flathub.md
+include docs/development.md
 include docs/performance.md
 include docs/release.md
 include docs/social-preview.png

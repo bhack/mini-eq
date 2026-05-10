@@ -34,6 +34,8 @@ paths in ignored repo-local skills under `.agents/skills/`.
 - `io.github.bhack.mini-eq.yaml`: local Flatpak manifest.
 - `python3-dependencies.yaml`: generated Flatpak Python dependencies.
 - `tests/`: pytest suite for core behavior and non-visual integration seams.
+- `docs/development.md`: source checkout, PyPI, local Flatpak, and extended
+  development test commands.
 
 ## Development Commands
 
@@ -61,15 +63,8 @@ and no-assert tests are candidates for human review, not automatic removals.
 GTK virtual methods, signal callbacks, property bindings, and other framework
 entry points often look unused to static analysis.
 
-For release/package checks:
-
-```bash
-appstreamcli validate --no-net data/io.github.bhack.mini-eq.metainfo.xml
-desktop-file-validate data/io.github.bhack.mini-eq.desktop
-.venv/bin/python tools/check_gnome_shell_extension.py
-.venv/bin/python -m build
-.venv/bin/python -m twine check dist/*
-```
+For source install, PyPI package validation, local Flatpak builds, and extended
+runtime smoke commands, use `docs/development.md`.
 
 The app depends on system GI/audio packages that Python packaging cannot fully
 install: GTK4, Libadwaita, PipeWire, a WirePlumber-managed session, and the
@@ -92,11 +87,9 @@ PipeWire/WirePlumber graph with synthetic playback and AT-SPI UI driving:
 MINI_EQ_RUN_LIVE_UI=1 .venv/bin/python -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 ```
 
-When creating a fresh venv for pip/package validation, build pipewire-gobject in
-a plain wheel-build venv first, then install that wheel into a
-`--system-site-packages` Mini EQ venv. This keeps distro GI bindings visible at
-runtime without making Ubuntu/Debian `g-ir-scanner` import partial `distutils`
-modules from a system-site build venv.
+When creating a fresh venv for pip/package validation, follow
+`docs/development.md` so pipewire-gobject is built in a plain wheel-build venv
+before being installed into a `--system-site-packages` Mini EQ venv.
 
 ## Change Guidelines
 
@@ -166,19 +159,13 @@ Use `docs/social-preview.png` for GitHub and social link previews. This is not a
 Flathub quality-check input, so it may use branded/dark promotional composition,
 but it should be refreshed when the public screenshot changes materially.
 
-Generate the public release screenshot with deterministic demo data:
-
-```bash
-PYTHONPATH=src python3 tools/render_demo_screenshot.py docs/screenshots/mini-eq.png
-PYTHONPATH=src python3 tools/render_demo_screenshot.py docs/screenshots/mini-eq-dark.png --appearance dark
-```
-
 Do not commit screenshots that show personal device names, Bluetooth device
 names, usernames, hostnames, local paths, or private preset names. Prefer
 `tools/render_demo_screenshot.py` over desktop screenshots because it renders
 only the Mini EQ window from deterministic demo data. Keep the public release
 screenshot in the platform-default light appearance unless you are adding
 additional screenshots that intentionally demonstrate other appearance modes.
+Use `docs/screenshots/README.md` for the generation commands.
 
 For visual or adaptive-layout changes, inspect deterministic screenshot
 matrices before considering the work done. Cover the minimum, default, narrow,
@@ -201,31 +188,16 @@ renders on light and dark backgrounds.
 
 ## Release And Security
 
-Use `docs/release.md` as the public release checklist. Before publishing
-release artifacts, verify the rendered README, package URLs, issue tracker,
-license, screenshots, and AppStream metadata.
-During release preparation, verify that version-bearing files agree:
-`pyproject.toml`, `CHANGELOG.md`, and the AppStream release entry and screenshot
-URL. The package `__version__` is derived from release metadata and should not
-be hardcoded separately.
+Use `docs/release.md` as the public release checklist. Use
+`tools/prepare_release.py`, `tools/release_status.py`,
+`tools/run_release_preflight_container.sh`, and
+`tools/release_post_publish.py` for repeatable release checks. Keep
+owner-specific workflow dispatch, deployment approval, and local Flathub merge
+steps in ignored repo-local skills under `.agents/skills/`.
 
-Before publishing artifacts, run the release preflight. Prefer the
-containerized wrapper when the host does not already have the `pipewire-gobject`
-sdist build dependencies installed:
-
-```bash
-tools/run_release_preflight_container.sh
-```
-
-Set `MINI_EQ_FLATHUB_MANIFEST` to a Flathub publishing manifest path when the
-containerized preflight should include the manifest drift check.
 The preflight owns the focused leak scan for `HEAD`, tracked worktree changes,
 and untracked non-ignored text files. Use Gitleaks as an extra check when
-release history or generated artifacts look suspicious:
-
-```bash
-gitleaks git --no-banner --redact .
-```
+release history or generated artifacts look suspicious.
 
 Do not push local scratch branches or local safety tags.
 Do not rewrite public history unless the user explicitly asks for it and accepts
