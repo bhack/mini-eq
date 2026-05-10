@@ -141,6 +141,38 @@ def test_finish_startup_notification_ignores_missing_gdk_startup_id(monkeypatch)
     app.MiniEqApplication.finish_startup_notification(SimpleNamespace())
 
 
+def test_run_headless_skips_loop_after_synchronous_start_error(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+
+    class FakeLoop:
+        def run(self) -> None:
+            calls.append("run")
+            raise AssertionError("run should not be called after a synchronous startup error")
+
+        def quit(self) -> None:
+            calls.append("quit")
+
+    class FakeController:
+        def __init__(self, output_sink: str | None) -> None:
+            calls.append(f"controller:{output_sink}")
+
+        def start(self, *, on_ready=None, on_error=None) -> None:
+            calls.append("start")
+            on_error(RuntimeError("startup failed"))
+
+        def shutdown(self) -> None:
+            calls.append("shutdown")
+
+    monkeypatch.setattr(app.GLib, "MainLoop", FakeLoop)
+    monkeypatch.setattr(app, "install_unix_signal_handlers", lambda _callback: [])
+    monkeypatch.setattr(app, "SystemWideEqController", FakeController)
+    args = SimpleNamespace(duration=None, output_sink="speakers", import_apo=None, auto_route=False)
+
+    assert app.run_headless(args) == 1
+    assert calls == ["controller:speakers", "start", "quit", "shutdown"]
+    assert "startup failed" in capsys.readouterr().err
+
+
 def test_close_action_closes_active_window() -> None:
     window = FakeWindow(ui_shutting_down=False)
     application = FakeApplication(window=window)

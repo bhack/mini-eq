@@ -94,6 +94,100 @@ class FakePropertyProxy:
         return self.properties
 
 
+def make_node_global(
+    bound_id: int,
+    name: str | None,
+    media_class: str = pw_backend.AUDIO_SINK,
+) -> FakePropertyProxy:
+    properties = [
+        FakePropertyItem("object.serial", str(bound_id + 1000)),
+        FakePropertyItem("media.class", media_class),
+    ]
+    if name is not None:
+        properties.append(FakePropertyItem("node.name", name))
+
+    class FakeGlobal(FakePropertyProxy):
+        def get_id(self) -> int:
+            return bound_id
+
+    return FakeGlobal(FakeGlobalProperties(properties))
+
+
+class FakeModel:
+    def __init__(self, items: list[object]) -> None:
+        self.items = items
+
+    def get_n_items(self) -> int:
+        return len(self.items)
+
+    def get_item(self, index: int) -> object:
+        return self.items[index]
+
+
+class FakeWaitRegistry:
+    def __init__(self, globals_: list[object]) -> None:
+        self.globals = globals_
+        self.callbacks = {}
+        self.disconnected: list[int] = []
+        self.next_handler_id = 1
+
+    def dup_globals_by_interface(self, interface_type: str) -> FakeModel:
+        assert interface_type == pw_backend.PIPEWIRE_NODE_INTERFACE
+        return FakeModel(self.globals)
+
+    def connect(self, signal_name: str, callback) -> int:
+        assert signal_name == "global-added"
+        handler_id = self.next_handler_id
+        self.next_handler_id += 1
+        self.callbacks[handler_id] = callback
+        return handler_id
+
+    def disconnect(self, handler_id: int) -> None:
+        self.disconnected.append(handler_id)
+        self.callbacks.pop(handler_id, None)
+
+    def emit_global_added(self, global_) -> None:
+        for callback in list(self.callbacks.values()):
+            callback(self, global_)
+
+
+class FakeWaitObject:
+    @staticmethod
+    def connect(obj, signal_name: str, callback) -> int:
+        return obj.connect(signal_name, callback)
+
+
+class FakeWaitGObject:
+    Object = FakeWaitObject
+
+
+class FakeWaitGLib:
+    def __init__(self) -> None:
+        self.idle_callback = None
+        self.removed_sources: list[int] = []
+        self.timeout_callback = None
+        self.timeout_ms: int | None = None
+
+    def idle_add(self, callback) -> int:
+        self.idle_callback = callback
+        return 88
+
+    def timeout_add(self, timeout_ms: int, callback) -> int:
+        self.timeout_ms = timeout_ms
+        self.timeout_callback = callback
+        return 77
+
+    def source_remove(self, source_id: int) -> bool:
+        self.removed_sources.append(source_id)
+        return True
+
+    def run_idle(self) -> None:
+        assert self.idle_callback is not None
+        callback = self.idle_callback
+        self.idle_callback = None
+        callback()
+
+
 class FakeSource:
     def __init__(self) -> None:
         self.destroyed = False
@@ -104,18 +198,11 @@ class FakeSource:
 
 class FakeSyncCore:
     def __init__(self) -> None:
-        self.callback = None
+        self.sync_calls: list[int] = []
 
-    def sync(self, _cancellable, callback, _user_data) -> bool:
-        self.callback = callback
+    def sync(self, timeout_ms: int) -> bool:
+        self.sync_calls.append(timeout_ms)
         return True
-
-    def sync_finish(self, _result) -> bool:
-        return True
-
-    def complete_sync(self) -> None:
-        assert self.callback is not None
-        self.callback(self, object(), None)
 
 
 class FakeMainContext:
@@ -138,27 +225,11 @@ class FakeMainContext:
         return self.source if source_id == 77 else None
 
 
-class FakeSyncLoop:
-    def __init__(self, core: FakeSyncCore) -> None:
-        self.core = core
-        self.quit_count = 0
-
-    def run(self) -> None:
-        self.core.complete_sync()
-
-    def quit(self) -> None:
-        self.quit_count += 1
-
-
 class FakeSyncGLib:
     def __init__(self, core: FakeSyncCore) -> None:
-        self.core = core
         self.source = FakeSource()
         self.MainContext = FakeMainContext(self.source)
         self.timeout_callback = None
-
-    def MainLoop(self) -> FakeSyncLoop:
-        return FakeSyncLoop(self.core)
 
     def timeout_add(self, _timeout_ms: int, callback) -> int:
         self.timeout_callback = callback
@@ -190,7 +261,7 @@ class FakePwg:
 
 class FakeDeviceApi:
     @staticmethod
-    def enum_params():
+    def enum_params_sync():
         return None
 
     @staticmethod
@@ -199,6 +270,10 @@ class FakeDeviceApi:
 
     @staticmethod
     def subscribe_params():
+        return None
+
+    @staticmethod
+    def sync():
         return None
 
 
@@ -378,16 +453,73 @@ def test_new_core_uses_pipewire_gobject_core_constructor() -> None:
     }
 
 
-def test_sync_core_drains_pending_main_context_events() -> None:
+def test_sync_core_uses_roundtrip() -> None:
     core = FakeSyncCore()
-    glib = FakeSyncGLib(core)
     backend = pw_backend.PipeWireBackend()
     backend._core = core
-    backend._GLib = glib
 
     backend._sync_core()
 
-    assert glib.MainContext.iterations == 1
+    assert core.sync_calls == [2000]
+
+
+def test_watch_for_audio_sink_reports_existing_registry_node_on_idle() -> None:
+    registry = FakeWaitRegistry([make_node_global(42, "mini_eq_sink")])
+    glib = FakeWaitGLib()
+    backend = pw_backend.PipeWireBackend()
+    backend._ensure_connected = lambda: None
+    backend._registry = registry
+    backend._GLib = glib
+    backend._GObject = FakeWaitGObject
+    nodes: list[pw_backend.PipeWireNode | None] = []
+
+    backend.watch_for_audio_sink("mini_eq_sink", nodes.append, timeout_ms=1234)
+
+    assert nodes == []
+    glib.run_idle()
+    assert nodes[0] is not None
+    assert nodes[0].bound_id == 42
+    assert glib.timeout_ms is None
+    assert registry.disconnected == [1]
+
+
+def test_watch_for_audio_sink_resolves_from_global_added_signal() -> None:
+    registry = FakeWaitRegistry([make_node_global(1, "speakers")])
+    glib = FakeWaitGLib()
+    backend = pw_backend.PipeWireBackend()
+    backend._ensure_connected = lambda: None
+    backend._registry = registry
+    backend._GLib = glib
+    backend._GObject = FakeWaitGObject
+    nodes: list[pw_backend.PipeWireNode | None] = []
+
+    backend.watch_for_audio_sink("mini_eq_sink", nodes.append, timeout_ms=1234)
+    registry.emit_global_added(make_node_global(42, "mini_eq_sink"))
+
+    assert nodes[0] is not None
+    assert nodes[0].bound_id == 42
+    assert glib.timeout_ms == 1234
+    assert glib.removed_sources == [77]
+    assert registry.disconnected == [1]
+
+
+def test_watch_for_audio_sink_reports_none_on_timeout() -> None:
+    registry = FakeWaitRegistry([make_node_global(1, "speakers")])
+    glib = FakeWaitGLib()
+    backend = pw_backend.PipeWireBackend()
+    backend._ensure_connected = lambda: None
+    backend._registry = registry
+    backend._GLib = glib
+    backend._GObject = FakeWaitGObject
+    nodes: list[pw_backend.PipeWireNode | None] = []
+
+    backend.watch_for_audio_sink("mini_eq_sink", nodes.append, timeout_ms=1234)
+    glib.timeout_callback()
+
+    assert nodes == [None]
+    assert glib.timeout_ms == 1234
+    assert glib.removed_sources == []
+    assert registry.disconnected == [1]
 
 
 def test_move_stream_to_target_sets_stream_target_without_metadata_readback() -> None:
@@ -579,11 +711,16 @@ def test_output_preset_keys_fall_back_to_sink_name_without_route_api(monkeypatch
 
 def test_enumerate_device_routes_ignores_enum_route_params(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeParam:
-        def __init__(self, name: str) -> None:
+        def __init__(self, name: str, *, seq: int = 12, next_index: int = 0) -> None:
             self.name = name
+            self.seq = seq
+            self.next_index = next_index
 
         def get_seq(self) -> int:
-            return 12
+            return self.seq
+
+        def get_next(self) -> int:
+            return self.next_index
 
         def dup_name(self) -> str:
             return self.name
@@ -611,9 +748,9 @@ def test_enumerate_device_routes_ignores_enum_route_params(monkeypatch: pytest.M
             self.param_infos = FakeModel([FakeParamInfo()])
             self.enum_calls: list[tuple[int, int, int]] = []
 
-        def enum_params(self, param_id: int, start: int, num: int) -> int:
+        def enum_params_sync(self, param_id: int, start: int, num: int, _timeout_ms: int) -> FakeModel:
             self.enum_calls.append((param_id, start, num))
-            return 12
+            return self.params
 
         def get_params(self) -> FakeModel:
             return self.params
@@ -668,10 +805,111 @@ def test_enumerate_device_routes_ignores_enum_route_params(monkeypatch: pytest.M
     assert backend._device_route_refreshing_bound_ids == set()
 
 
+def test_enumerate_device_routes_uses_request_scoped_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeParam:
+        def __init__(self, name: str, *, seq: int, route_name: str) -> None:
+            self.name = name
+            self.seq = seq
+            self.route_name = route_name
+
+        def get_seq(self) -> int:
+            return self.seq
+
+        def get_next(self) -> int:
+            return 0
+
+        def dup_name(self) -> str:
+            return self.name
+
+    class FakeParamInfo:
+        def get_id(self) -> int:
+            return 13
+
+        def dup_name(self) -> str:
+            return "Route"
+
+    class FakeModel:
+        def __init__(self, items: list[object]) -> None:
+            self.items = items
+
+        def get_n_items(self) -> int:
+            return len(self.items)
+
+        def get_item(self, index: int) -> object:
+            return self.items[index]
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.params = FakeModel(
+                [
+                    FakeParam("Route", seq=12, route_name="analog-output-headphones"),
+                ]
+            )
+            self.param_infos = FakeModel([FakeParamInfo()])
+
+        def enum_params_sync(self, _param_id: int, _start: int, _num: int, _timeout_ms: int) -> FakeModel:
+            return self.params
+
+        def get_params(self) -> FakeModel:
+            return self.params
+
+        def get_param_infos(self) -> FakeModel:
+            return self.param_infos
+
+    class FakeRouteInfo:
+        def __init__(self, param: FakeParam) -> None:
+            self.param = param
+
+        def get_index(self) -> int:
+            return 1
+
+        def get_device(self) -> int:
+            return 6
+
+        def get_profile(self) -> int:
+            return 0
+
+        def get_priority(self) -> int:
+            return 200
+
+        def dup_direction(self) -> str:
+            return "output"
+
+        def dup_name(self) -> str:
+            return self.param.route_name
+
+        def dup_description(self) -> str:
+            return self.param.route_name
+
+        def dup_availability(self) -> str:
+            return "yes"
+
+        def get_info(self) -> dict[str, str]:
+            return {}
+
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(RouteInfo=SimpleNamespace(new_from_param=FakeRouteInfo))
+    monkeypatch.setattr(backend, "_device_name_by_bound_id", lambda _bound_id: "alsa_card.test")
+
+    routes = backend._enumerate_device_routes(FakeDevice(), 72)
+
+    assert [route.name for route in routes] == ["analog-output-headphones"]
+
+
 def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeParam:
-        def __init__(self, param_id: int) -> None:
+        def __init__(
+            self,
+            param_id: int,
+            *,
+            route_device: int = 6,
+            direction: str = "output",
+            route_name: str = "analog-output-headphones",
+        ) -> None:
             self.param_id = param_id
+            self.route_device = route_device
+            self.direction = direction
+            self.route_name = route_name
 
         def get_id(self) -> int:
             return self.param_id
@@ -709,9 +947,40 @@ def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pyt
         def disconnect(self, handler_id: int) -> None:
             self.disconnected.append(handler_id)
 
-        def emit_param(self, param_id: int) -> None:
+        def emit_param(self, param_id: int, **kwargs) -> None:
             assert self.param_callback is not None
-            self.param_callback(self, FakeParam(param_id))
+            self.param_callback(self, FakeParam(param_id, **kwargs))
+
+    class FakeRouteInfo:
+        def __init__(self, param: FakeParam) -> None:
+            self.param = param
+
+        def get_index(self) -> int:
+            return 1
+
+        def get_device(self) -> int:
+            return self.param.route_device
+
+        def get_profile(self) -> int:
+            return 0
+
+        def get_priority(self) -> int:
+            return 200
+
+        def dup_direction(self) -> str:
+            return self.param.direction
+
+        def dup_name(self) -> str:
+            return self.param.route_name
+
+        def dup_description(self) -> str:
+            return self.param.route_name
+
+        def dup_availability(self) -> str:
+            return "yes"
+
+        def get_info(self) -> dict[str, str]:
+            return {}
 
     class FakeGObjectObject:
         @staticmethod
@@ -722,11 +991,12 @@ def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pyt
 
     backend = pw_backend.PipeWireBackend()
     device = FakeDevice()
-    backend._Pwg = SimpleNamespace(Device=FakeDeviceApi, RouteInfo=FakeRouteInfoApi)
+    backend._Pwg = SimpleNamespace(Device=FakeDeviceApi, RouteInfo=SimpleNamespace(new_from_param=FakeRouteInfo))
     backend._GLib = FakeGLib
     backend._GObject = SimpleNamespace(Object=FakeGObjectObject)
     backend._ensure_connected = lambda: None
     monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: device)
+    monkeypatch.setattr(backend, "_device_name_by_bound_id", lambda _bound_id: "alsa_card.test")
     calls: list[str] = []
 
     handler_id = backend.connect_device_route_changed(72, lambda: calls.append("route"))
@@ -737,16 +1007,62 @@ def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pyt
     device.emit_param(12)
     assert calls == []
 
-    device.emit_param(13)
+    device.emit_param(13, direction="input")
+    assert calls == []
+
+    device.emit_param(13, route_name="analog-output-headphones")
     assert calls == ["route"]
+    assert backend._device_active_output_routes[72][6].name == "analog-output-headphones"
+
+    device.emit_param(13, route_device=7, route_name="analog-output-speaker")
+    assert calls == ["route", "route"]
+    assert tuple(backend._device_active_output_routes[72]) == (7,)
+    assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 
     backend._device_route_refreshing_bound_ids.add(72)
-    device.emit_param(13)
-    assert calls == ["route"]
+    device.emit_param(13, route_device=6, route_name="analog-output-headphones")
+    assert calls == ["route", "route"]
+    assert tuple(backend._device_active_output_routes[72]) == (7,)
+    assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 
     backend.disconnect_device_handler(handler_id)
     assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13]), ("au", [])]
     assert device.disconnected == [77]
+
+
+def test_output_preset_keys_use_subscribed_active_route_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = pw_backend.PipeWireBackend()
+    route = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.test",
+        index=1,
+        route_device=7,
+        profile=0,
+        priority=200,
+        direction="output",
+        name="analog-output-speaker",
+        description="Speakers",
+        availability="yes",
+    )
+    sink = pw_backend.PipeWireNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=pw_backend.AUDIO_SINK,
+        node_name="alsa_output.test",
+        node_description="Test Sink",
+        application_name=None,
+        node_dont_move=False,
+        device_id=72,
+        card_profile_device=6,
+    )
+    backend._device_active_output_routes = {72: {7: route}}
+    backend._Pwg = SimpleNamespace()
+    monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
+
+    assert backend.output_preset_keys_for_sink_name("alsa_output.test") == (
+        "pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=7",
+        "alsa_output.test",
+    )
 
 
 def test_move_named_output_stream_to_target_uses_matching_stream() -> None:
@@ -792,7 +1108,7 @@ def test_set_stream_target_writes_node_and_object_metadata() -> None:
     metadata = FakeMetadata()
     syncs: list[str] = []
     backend._default_metadata = lambda: metadata
-    backend._sync_core = lambda: syncs.append("sync")
+    backend._sync_metadata = lambda: syncs.append("sync")
 
     backend.set_stream_target(126, 39, "67")
 
@@ -842,7 +1158,7 @@ def test_restore_stream_target_writes_saved_metadata() -> None:
     metadata = FakeMetadata()
     syncs: list[str] = []
     backend._default_metadata = lambda: metadata
-    backend._sync_core = lambda: syncs.append("sync")
+    backend._sync_metadata = lambda: syncs.append("sync")
 
     backend.restore_stream_target(
         126,
@@ -948,7 +1264,7 @@ def test_refresh_defaults_falls_back_to_cache_on_undecodable_metadata(monkeypatc
         raise UnicodeDecodeError("utf-8", b"\xb1", 0, 1, "invalid start byte")
 
     monkeypatch.setattr(backend, "_read_defaults", raise_decode_error)
-    monkeypatch.setattr(backend, "_sync_core", lambda: syncs.append(True))
+    monkeypatch.setattr(backend, "_sync_metadata", lambda: syncs.append(True))
 
     assert backend.refresh_defaults().default_audio_sink == "cached.default"
     assert syncs == [True]

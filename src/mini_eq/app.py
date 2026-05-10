@@ -41,6 +41,9 @@ class MiniEqApplication(Adw.Application):
         self.dbus_control: MiniEqDbusControl | None = None
         self.signal_source_ids: list[int] = []
         self.window_present_source_id = 0
+        self.window_starting = False
+        self.window_start_hold = False
+        self.pending_present_when_ready = False
         self.background_mode = load_background_mode() or bool(getattr(args, "background", False))
         self.start_at_login = load_start_at_login()
         self.start_active_at_login = load_start_active_at_login() and self.start_at_login
@@ -94,13 +97,15 @@ class MiniEqApplication(Adw.Application):
             self.window.schedule_startup_ready()
             return
 
+        if self.window_starting:
+            self.pending_present_when_ready = self.pending_present_when_ready or present
+            return
+
         controller: SystemWideEqController | None = None
         initial_curve_label: str | None = None
 
         try:
             controller = SystemWideEqController(self.args.output_sink)
-            controller.start()
-
             if self.args.import_apo:
                 controller.import_apo_preset(self.args.import_apo)
                 initial_curve_label = imported_apo_curve_label(self.args.import_apo)
@@ -110,14 +115,52 @@ class MiniEqApplication(Adw.Application):
             raise SystemExit(str(exc)) from exc
 
         self.controller = controller
-        self.window = MiniEqWindow(self, self.controller, self.args.auto_route, initial_curve_label=initial_curve_label)
-        self.window.set_icon_name(APP_ICON_NAME)
-        self.window.present_when_ready = present
-        self.window.set_visible(False)
-        self.window.schedule_startup_ready()
-        if not present:
-            self.update_background_status()
-            self.emit_control_state_changed()
+        self.window_starting = True
+        self.window_start_hold = True
+        self.pending_present_when_ready = present
+        self.hold()
+
+        def release_start_hold() -> None:
+            if not self.window_start_hold:
+                return
+
+            self.window_start_hold = False
+            self.release()
+
+        def on_ready() -> None:
+            if self.controller is not controller:
+                return
+
+            try:
+                self.window_starting = False
+                present_when_ready = self.pending_present_when_ready
+                self.pending_present_when_ready = False
+                self.window = MiniEqWindow(
+                    self, self.controller, self.args.auto_route, initial_curve_label=initial_curve_label
+                )
+                self.window.set_icon_name(APP_ICON_NAME)
+                self.window.present_when_ready = present_when_ready
+                self.window.set_visible(False)
+                self.window.schedule_startup_ready()
+                if not present_when_ready:
+                    self.update_background_status()
+                    self.emit_control_state_changed()
+            finally:
+                release_start_hold()
+
+        def on_error(exc: Exception) -> None:
+            self.window_starting = False
+            self.pending_present_when_ready = False
+            try:
+                controller.shutdown()
+            finally:
+                if self.controller is controller:
+                    self.controller = None
+            print(str(exc), file=sys.stderr)
+            release_start_hold()
+            self.quit()
+
+        controller.start(on_ready=on_ready, on_error=on_error)
 
     def present_main_window(self) -> None:
         self.ensure_window(present=True)
@@ -220,34 +263,50 @@ def run_headless(args: Namespace) -> int:
         duration_ms = 0
 
     controller: SystemWideEqController | None = None
+    exit_code = 0
+    loop = GLib.MainLoop()
+    signal_source_ids = install_unix_signal_handlers(loop.quit)
 
     try:
         controller = SystemWideEqController(args.output_sink)
-        controller.start()
 
         if args.import_apo:
             controller.import_apo_preset(args.import_apo)
 
-        if args.auto_route:
-            controller.route_system_audio(True)
-
-        loop = GLib.MainLoop()
-        signal_source_ids = install_unix_signal_handlers(loop.quit)
-
         if duration_ms > 0:
             GLib.timeout_add(duration_ms, lambda: (loop.quit(), False)[1])
 
+        def on_ready() -> None:
+            nonlocal exit_code
+
+            try:
+                if args.auto_route:
+                    controller.route_system_audio(True)
+            except Exception as exc:
+                exit_code = 1
+                print(str(exc), file=sys.stderr)
+                loop.quit()
+
+        def on_error(exc: Exception) -> None:
+            nonlocal exit_code
+
+            exit_code = 1
+            print(str(exc), file=sys.stderr)
+            loop.quit()
+
+        controller.start(on_ready=on_ready, on_error=on_error)
+
         try:
-            loop.run()
+            if exit_code == 0:
+                loop.run()
         except KeyboardInterrupt:
             pass
-        finally:
-            signal_source_ids.clear()
     finally:
+        signal_source_ids.clear()
         if controller is not None:
             controller.shutdown()
 
-    return 0
+    return exit_code
 
 
 def install_unix_signal_handlers(callback) -> list[int]:

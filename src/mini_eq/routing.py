@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -65,6 +64,8 @@ class SystemWideEqController:
         self._output_preset_target: PipeWireOutputPresetTarget | None = None
         self.filter_output_name = f"{self.virtual_sink_name}{FILTER_OUTPUT_SUFFIX}"
         self.engine_module = None
+        self.engine_start_watch = None
+        self.engine_start_pending = False
         self.filter_node_id: int | None = None
         self.output_event_source_id = 0
         self.output_object_added_handler_id = 0
@@ -99,8 +100,9 @@ class SystemWideEqController:
         if getattr(self, "shutting_down", False):
             return
 
-        if self.status_callback is not None:
-            self.status_callback(message)
+        status_callback = getattr(self, "status_callback", None)
+        if status_callback is not None:
+            status_callback(message)
 
         print(message, file=sys.stderr)
 
@@ -239,7 +241,17 @@ class SystemWideEqController:
                     analyzer.set_enabled(False)
                     self.restore_engine_after_analyzer_failure()
                     return False
-                self.start_engine()
+
+                def on_ready() -> None:
+                    if self.routed and self.stream_router is not None:
+                        self.stream_router.route_output_streams()
+
+                def on_error(exc: Exception) -> None:
+                    analyzer.set_enabled(False)
+                    self.emit_status(f"filter-chain restart after analyzer enable failed: {exc}")
+                    self.restore_engine_after_analyzer_failure()
+
+                self.start_engine(on_ready=on_ready, on_error=on_error)
             except Exception:
                 analyzer.set_enabled(False)
                 try:
@@ -247,9 +259,6 @@ class SystemWideEqController:
                 except Exception as restore_exc:
                     self.emit_status(f"filter-chain restore after analyzer failure failed: {restore_exc}")
                 raise
-
-            if self.routed and self.stream_router is not None:
-                self.stream_router.route_output_streams()
 
             return started
 
@@ -499,40 +508,6 @@ class SystemWideEqController:
     def build_default_bands(self) -> list[EqBand]:
         return default_eq_bands()
 
-    def wait_for_virtual_sink(self, timeout_seconds: float = 3.0) -> None:
-        deadline = time.monotonic() + timeout_seconds
-
-        while time.monotonic() < deadline:
-            try:
-                self.output_backend.sync()
-            except Exception:
-                pass
-
-            if self.get_sink(self.virtual_sink_name) is not None:
-                return
-
-            time.sleep(0.05)
-
-        raise RuntimeError(f"virtual sink did not appear: {self.virtual_sink_name}")
-
-    def wait_for_filter_node(self, timeout_seconds: float = 3.0) -> None:
-        deadline = time.monotonic() + timeout_seconds
-
-        while time.monotonic() < deadline:
-            node_id = self.find_filter_node_id()
-
-            if node_id is not None:
-                self.filter_node_id = node_id
-                return
-
-            time.sleep(0.05)
-
-        raise RuntimeError(f"filter-chain did not create {self.virtual_sink_name}")
-
-    def find_filter_node_id(self) -> int | None:
-        sink = self.get_sink(self.virtual_sink_name)
-        return sink.bound_id if sink is not None else None
-
     def active_sample_rate(self) -> float:
         for sink_name in (self.virtual_sink_name, self.output_sink):
             rate = node_sample_rate(self.get_sink(sink_name))
@@ -551,25 +526,70 @@ class SystemWideEqController:
             output_sink=self.output_sink,
         )
 
-    def start_engine(self) -> None:
-        if self.engine_module is not None:
+    def cancel_pending_engine_start(self) -> None:
+        watch = getattr(self, "engine_start_watch", None)
+        self.engine_start_watch = None
+        self.engine_start_pending = False
+        if watch is not None:
+            watch.cancel()
+
+    def start_engine(
+        self,
+        *,
+        on_ready: Callable[[], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
+        if self.running:
+            if on_ready is not None:
+                on_ready()
+            return
+
+        if getattr(self, "engine_start_pending", False):
             return
 
         self.engine_module = self.output_backend.load_filter_chain_module(self.build_filter_chain_module_args())
+        self.engine_start_pending = True
 
-        try:
-            self.wait_for_virtual_sink()
-            self.wait_for_filter_node()
-            self.running = True
-            self.emit_status(f"filter-chain PipeWire EQ ready: {self.virtual_sink_name} -> {self.output_sink}")
-        except Exception:
+        def fail(exc: Exception) -> None:
+            self.engine_start_watch = None
+            self.engine_start_pending = False
             self.engine_module = None
             self.filter_node_id = None
             try:
                 self.output_backend.sync()
             except Exception:
                 pass
-            raise
+            if on_error is not None:
+                on_error(exc)
+            else:
+                self.emit_status(str(exc))
+
+        def on_sink_ready(sink: PipeWireNode | None) -> None:
+            self.engine_start_watch = None
+            self.engine_start_pending = False
+
+            if getattr(self, "shutting_down", False) or self.engine_module is None:
+                return
+
+            if sink is None:
+                fail(RuntimeError(f"filter-chain did not create {self.virtual_sink_name}"))
+                return
+
+            self.filter_node_id = sink.bound_id
+            self.running = True
+            self.emit_status(f"filter-chain PipeWire EQ ready: {self.virtual_sink_name} -> {self.output_sink}")
+            self.apply_state_to_engine()
+            if on_ready is not None:
+                on_ready()
+
+        try:
+            self.engine_start_watch = self.output_backend.watch_for_audio_sink(
+                self.virtual_sink_name,
+                on_sink_ready,
+                timeout_ms=3000,
+            )
+        except Exception as exc:
+            fail(exc)
 
     def retarget_filter_output(self) -> bool:
         if not self.running or self.filter_node_id is None:
@@ -585,15 +605,18 @@ class SystemWideEqController:
             return False
 
     def restore_engine_after_analyzer_failure(self) -> None:
-        if self.running or self.engine_module is not None:
+        if self.running or getattr(self, "engine_module", None) is not None:
             return
 
-        self.start_engine()
-        if self.routed and self.stream_router is not None:
-            self.stream_router.route_output_streams()
+        def on_ready() -> None:
+            if self.routed and self.stream_router is not None:
+                self.stream_router.route_output_streams()
+
+        self.start_engine(on_ready=on_ready, on_error=lambda exc: self.emit_status(str(exc)))
 
     def stop_engine(self, announce: bool = True) -> None:
-        module = self.engine_module
+        self.cancel_pending_engine_start()
+        module = getattr(self, "engine_module", None)
         if module is None:
             self.filter_node_id = None
             self.running = False
@@ -630,10 +653,18 @@ class SystemWideEqController:
                 stream_router.emit_warning(exc)
 
         self.stop_engine(announce=False)
-        self.start_engine()
 
-        if stream_router is not None:
-            stream_router.start_monitoring(require_initial_route=True)
+        def on_ready() -> None:
+            if stream_router is not None:
+                stream_router.start_monitoring(require_initial_route=True)
+
+        def on_error(exc: Exception) -> None:
+            if stream_router is not None:
+                stream_router.emit_warning(exc)
+            else:
+                self.emit_status(str(exc))
+
+        self.start_engine(on_ready=on_ready, on_error=on_error)
 
     def set_filter_controls(self, controls: dict[str, float]) -> None:
         if self.filter_node_id is None or not self.running:
@@ -666,18 +697,56 @@ class SystemWideEqController:
         controls = builtin_biquad_control_values(self.bands, self.preamp_db, self.eq_enabled, self.active_sample_rate())
         self.set_filter_controls(controls)
 
-    def start(self) -> None:
+    def start(
+        self,
+        *,
+        on_ready: Callable[[], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
         try:
             self.refresh_followed_output_sink()
             self.prepare_output_analyzer()
-            self.start_engine()
-            self.start_output_event_monitoring()
-        except Exception:
+        except Exception as exc:
             if self.stream_router is not None:
                 self.stream_router.stop_monitoring()
             self.stop_engine()
             self.stop_output_event_monitoring()
+            if on_error is not None:
+                on_error(exc)
+                return
             raise
+
+        def on_engine_ready() -> None:
+            try:
+                self.start_output_event_monitoring()
+            except Exception as exc:
+                if self.stream_router is not None:
+                    self.stream_router.stop_monitoring()
+                self.stop_engine()
+                self.stop_output_event_monitoring()
+                if on_error is not None:
+                    on_error(exc)
+                    return
+                raise
+            if on_ready is not None:
+                on_ready()
+
+        def on_engine_error(exc: Exception) -> None:
+            if self.stream_router is not None:
+                self.stream_router.stop_monitoring()
+            self.stop_engine()
+            self.stop_output_event_monitoring()
+            if on_error is not None:
+                on_error(exc)
+            else:
+                self.emit_status(str(exc))
+
+        try:
+            self.start_engine(on_ready=on_engine_ready, on_error=on_engine_error)
+        except Exception as exc:
+            on_engine_error(exc)
+            if on_error is None:
+                raise
 
     def shutdown(self) -> None:
         self.shutting_down = True

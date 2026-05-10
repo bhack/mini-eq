@@ -33,11 +33,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.7.2/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.7.3/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.7.2/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.7.3/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -45,6 +45,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.7.3" date="2026-05-11">
+      <description>
+        <ul>
+          <li>Require pipewire-gobject 0.3.6 and use its synchronous PipeWire registry, metadata, node, and device APIs for startup and routing state.</li>
+          <li>Replace Mini EQ's PipeWire startup and routing sleep loops with bounded sync or registry-event waits for route params, virtual sink creation, and stream routing.</li>
+          <li>Avoid a headless startup hang when system-wide EQ fails synchronously before the GLib main loop starts.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.2" date="2026-05-10">
       <description>
         <ul>

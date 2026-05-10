@@ -506,9 +506,11 @@ def test_switch_output_sink_falls_back_to_restart_when_filter_retarget_fails() -
         calls.append(("stop", announce))
         controller.running = False
 
-    def start_engine() -> None:
+    def start_engine(*, on_ready=None, on_error=None) -> None:
         calls.append("start")
         controller.running = True
+        if on_ready is not None:
+            on_ready()
 
     controller.output_backend = FakeBackend([make_node(1, "speakers"), make_node(2, "hdmi")])
     controller.output_sink = "speakers"
@@ -561,9 +563,11 @@ def test_enabling_analyzer_while_engine_runs_opens_stream_before_restarting_engi
         calls.append(f"stop:{announce}")
         controller.running = False
 
-    def start_engine() -> None:
+    def start_engine(*, on_ready=None, on_error=None) -> None:
         calls.append("start")
         controller.running = True
+        if on_ready is not None:
+            on_ready()
 
     controller.stop_engine = stop_engine
     controller.start_engine = start_engine
@@ -689,13 +693,15 @@ def test_enabling_unprepared_analyzer_restores_engine_if_restart_fails() -> None
 
     start_attempts = 0
 
-    def start_engine() -> None:
+    def start_engine(*, on_ready=None, on_error=None) -> None:
         nonlocal start_attempts
         start_attempts += 1
         calls.append("start")
         if start_attempts == 1:
             raise RuntimeError("virtual sink did not appear")
         controller.running = True
+        if on_ready is not None:
+            on_ready()
 
     controller.stop_engine = stop_engine
     controller.start_engine = start_engine
@@ -735,9 +741,11 @@ def test_enabling_unprepared_analyzer_restores_engine_when_analyzer_is_unavailab
         calls.append(f"stop:{announce}")
         controller.running = False
 
-    def start_engine() -> None:
+    def start_engine(*, on_ready=None, on_error=None) -> None:
         calls.append("start")
         controller.running = True
+        if on_ready is not None:
+            on_ready()
 
     controller.stop_engine = stop_engine
     controller.start_engine = start_engine
@@ -849,7 +857,7 @@ def test_start_prepares_analyzer_before_filter_chain_engine() -> None:
 
     controller.refresh_followed_output_sink = lambda: calls.append("refresh")
     controller.prepare_output_analyzer = lambda: calls.append("prepare") or True
-    controller.start_engine = lambda: calls.append("engine")
+    controller.start_engine = lambda *, on_ready=None, on_error=None: (calls.append("engine"), on_ready and on_ready())
     controller.start_output_event_monitoring = lambda: calls.append("monitor")
     controller.stream_router = None
     controller.stop_engine = lambda: calls.append("stop-engine")
@@ -1093,6 +1101,104 @@ def test_route_system_audio_can_disable_when_engine_is_not_ready() -> None:
     assert controller.routed is False
 
 
+def test_start_engine_waits_for_filter_chain_node_from_registry() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    module = object()
+    calls: list[str] = []
+
+    class FakeWatch:
+        def cancel(self) -> None:
+            calls.append("cancel")
+
+    class FakeBackend:
+        def __init__(self) -> None:
+            self.callback = None
+
+        def load_filter_chain_module(self, arguments: str):
+            calls.append(f"load:{arguments}")
+            return module
+
+        def watch_for_audio_sink(self, sink_name: str, callback, *, timeout_ms: int):
+            calls.append(f"wait:{sink_name}:{timeout_ms}")
+            self.callback = callback
+            return FakeWatch()
+
+    backend = FakeBackend()
+    controller.engine_module = None
+    controller.engine_start_pending = False
+    controller.engine_start_watch = None
+    controller.filter_node_id = None
+    controller.running = False
+    controller.output_backend = backend
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.output_sink = "speakers"
+    controller.build_filter_chain_module_args = lambda: "module args"
+    controller.emit_status = lambda message: calls.append(f"status:{message}")
+    controller.apply_state_to_engine = lambda: calls.append("apply")
+
+    routing.SystemWideEqController.start_engine(controller)
+    assert backend.callback is not None
+    backend.callback(make_node(42, "mini_eq_sink"))
+
+    assert calls == [
+        "load:module args",
+        "wait:mini_eq_sink:3000",
+        "status:filter-chain PipeWire EQ ready: mini_eq_sink -> speakers",
+        "apply",
+    ]
+    assert controller.engine_module is module
+    assert controller.filter_node_id == 42
+    assert controller.running is True
+
+
+def test_start_engine_clears_module_when_filter_chain_node_times_out() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    module = object()
+    calls: list[str] = []
+
+    class FakeWatch:
+        def cancel(self) -> None:
+            calls.append("cancel")
+
+    class FakeBackend:
+        def __init__(self) -> None:
+            self.callback = None
+
+        def load_filter_chain_module(self, arguments: str):
+            calls.append(f"load:{arguments}")
+            return module
+
+        def watch_for_audio_sink(self, sink_name: str, callback, *, timeout_ms: int):
+            calls.append(f"wait:{sink_name}:{timeout_ms}")
+            self.callback = callback
+            return FakeWatch()
+
+        def sync(self) -> None:
+            calls.append("sync")
+
+    backend = FakeBackend()
+    controller.engine_module = None
+    controller.engine_start_pending = False
+    controller.engine_start_watch = None
+    controller.filter_node_id = None
+    controller.running = False
+    controller.output_backend = backend
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.output_sink = "speakers"
+    controller.build_filter_chain_module_args = lambda: "module args"
+    errors: list[str] = []
+
+    routing.SystemWideEqController.start_engine(controller, on_error=lambda exc: errors.append(str(exc)))
+    assert backend.callback is not None
+    backend.callback(None)
+
+    assert calls == ["load:module args", "wait:mini_eq_sink:3000", "sync"]
+    assert errors == ["filter-chain did not create mini_eq_sink"]
+    assert controller.engine_module is None
+    assert controller.filter_node_id is None
+    assert controller.running is False
+
+
 def test_stop_engine_unloads_filter_chain_module_before_clearing_state() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     module = object()
@@ -1141,7 +1247,10 @@ def test_restart_engine_pauses_stream_router_monitoring_during_restart() -> None
 
     controller.stream_router = FakeRouter()
     controller.stop_engine = lambda *, announce=True: calls.append(f"stop-engine:{announce}")
-    controller.start_engine = lambda: calls.append("start-engine")
+    controller.start_engine = lambda *, on_ready=None, on_error=None: (
+        calls.append("start-engine"),
+        on_ready and on_ready(),
+    )
 
     routing.SystemWideEqController.restart_engine(controller)
 
@@ -1176,7 +1285,10 @@ def test_restart_engine_continues_when_routed_stream_restore_fails() -> None:
 
     controller.stream_router = FakeRouter()
     controller.stop_engine = lambda *, announce=True: calls.append(f"stop-engine:{announce}")
-    controller.start_engine = lambda: calls.append("start-engine")
+    controller.start_engine = lambda *, on_ready=None, on_error=None: (
+        calls.append("start-engine"),
+        on_ready and on_ready(),
+    )
 
     routing.SystemWideEqController.restart_engine(controller)
 

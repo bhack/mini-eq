@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .pipewire_routes import PipeWireRouteMixin
+from .pipewire_routes import PipeWireOutputRoute, PipeWireRouteMixin
 
 DEFAULT_METADATA_NAME = "default"
 DEFAULT_AUDIO_SINK_KEY = "default.audio.sink"
@@ -69,6 +69,19 @@ class PipeWireStreamTarget:
 
 class PipeWireBackendError(RuntimeError):
     pass
+
+
+class PipeWireNodeWatch:
+    def __init__(self, cancel_callback: Callable[[], None]) -> None:
+        self._cancel_callback = cancel_callback
+
+    def cancel(self) -> None:
+        cancel_callback = self._cancel_callback
+        if cancel_callback is None:
+            return
+
+        self._cancel_callback = None
+        cancel_callback()
 
 
 def build_props_controls_param(Pwg, GLib, controls: dict[str, float]):
@@ -147,6 +160,7 @@ class PipeWireBackend(PipeWireRouteMixin):
         self._loaded_modules: list[Any] = []
         self._cached_defaults = PipeWireDefaults(None, None)
         self._device_route_refreshing_bound_ids: set[int] = set()
+        self._device_active_output_routes: dict[int, dict[int, PipeWireOutputRoute]] = {}
 
     def __enter__(self) -> PipeWireBackend:
         self.connect()
@@ -177,7 +191,7 @@ class PipeWireBackend(PipeWireRouteMixin):
         if not self._metadata.start():
             raise PipeWireBackendError("failed to start PipeWire default metadata discovery")
 
-        self._wait_for_initial_state()
+        self._sync_initial_state()
         self._connected = True
 
     def close(self) -> None:
@@ -240,6 +254,7 @@ class PipeWireBackend(PipeWireRouteMixin):
         self._registry = None
         self._metadata = None
         self._cached_defaults = PipeWireDefaults(None, None)
+        self._device_active_output_routes.clear()
 
     def list_nodes(self) -> list[PipeWireNode]:
         self._ensure_connected()
@@ -261,6 +276,126 @@ class PipeWireBackend(PipeWireRouteMixin):
 
     def node_from_proxy(self, node) -> PipeWireNode:
         return self._node_from_global(node)
+
+    def watch_for_node(
+        self,
+        predicate: Callable[[PipeWireNode], bool],
+        callback: Callable[[PipeWireNode | None], None],
+        timeout_ms: int | None = None,
+    ) -> PipeWireNodeWatch:
+        self._ensure_connected()
+
+        if self._GLib is None or self._GObject is None or self._registry is None:
+            raise PipeWireBackendError("PipeWire registry is not connected")
+
+        deadline_ms = max(int(self.timeout_ms if timeout_ms is None else timeout_ms), 1)
+        state = {
+            "done": False,
+            "scheduled": False,
+            "handler_id": 0,
+            "timeout_id": 0,
+            "idle_id": 0,
+        }
+
+        def maybe_match(global_) -> PipeWireNode | None:
+            try:
+                node = self._node_from_global(global_)
+            except UnicodeDecodeError:
+                return None
+            except Exception:
+                return None
+
+            return node if predicate(node) else None
+
+        def cleanup(*, remove_idle: bool) -> None:
+            handler_id = int(state["handler_id"])
+            state["handler_id"] = 0
+            if handler_id > 0:
+                try:
+                    self._registry.disconnect(handler_id)
+                except Exception:
+                    pass
+
+            timeout_id = int(state["timeout_id"])
+            state["timeout_id"] = 0
+            if timeout_id > 0:
+                try:
+                    self._GLib.source_remove(timeout_id)
+                except Exception:
+                    pass
+
+            idle_id = int(state["idle_id"])
+            if remove_idle and idle_id > 0:
+                state["idle_id"] = 0
+                try:
+                    self._GLib.source_remove(idle_id)
+                except Exception:
+                    pass
+
+        def complete(node: PipeWireNode | None) -> bool:
+            if state["done"] or state["scheduled"]:
+                return False
+
+            state["done"] = True
+            cleanup(remove_idle=False)
+            callback(node)
+            return False
+
+        def complete_from_idle(node: PipeWireNode) -> bool:
+            state["idle_id"] = 0
+            if state["done"]:
+                return False
+
+            state["done"] = True
+            callback(node)
+            return False
+
+        def schedule_complete(node: PipeWireNode) -> None:
+            if state["done"] or state["scheduled"]:
+                return
+
+            state["scheduled"] = True
+            cleanup(remove_idle=False)
+            state["idle_id"] = self._GLib.idle_add(lambda: complete_from_idle(node))
+
+        def on_global_added(_registry, global_) -> None:
+            node = maybe_match(global_)
+            if node is not None:
+                complete(node)
+
+        def on_timeout() -> bool:
+            state["timeout_id"] = 0
+            return complete(None)
+
+        def cancel() -> None:
+            if state["done"]:
+                return
+
+            state["done"] = True
+            cleanup(remove_idle=True)
+
+        state["handler_id"] = self._GObject.Object.connect(self._registry, "global-added", on_global_added)
+        watch = PipeWireNodeWatch(cancel)
+        for global_ in self._iterate_model(self._registry.dup_globals_by_interface(PIPEWIRE_NODE_INTERFACE)):
+            node = maybe_match(global_)
+            if node is not None:
+                schedule_complete(node)
+                return watch
+
+        state["timeout_id"] = self._GLib.timeout_add(deadline_ms, on_timeout)
+        return watch
+
+    def watch_for_audio_sink(
+        self,
+        sink_name: str,
+        callback: Callable[[PipeWireNode | None], None],
+        timeout_ms: int | None = None,
+    ) -> PipeWireNodeWatch:
+        return self.watch_for_node(
+            lambda node: node.is_audio_sink and node.node_name == sink_name,
+            callback,
+            timeout_ms=timeout_ms,
+        )
 
     def connect_object_added(self, callback) -> int:
         self._ensure_connected()
@@ -329,7 +464,8 @@ class PipeWireBackend(PipeWireRouteMixin):
             if param_id != route_param_id or int(device_bound_id) in self._device_route_refreshing_bound_ids:
                 return
 
-            callback()
+            if self._remember_device_route_param(device_bound_id, param):
+                callback()
 
         handler_id = self._GObject.Object.connect(device, "param", on_device_param)
         self._device_signal_objects[handler_id] = device
@@ -363,7 +499,8 @@ class PipeWireBackend(PipeWireRouteMixin):
 
     def sync(self) -> None:
         self._ensure_connected()
-        self._sync_core()
+        self._sync_registry()
+        self._sync_metadata()
 
     def defaults(self) -> PipeWireDefaults:
         if self._has_cached_defaults():
@@ -377,7 +514,7 @@ class PipeWireBackend(PipeWireRouteMixin):
             return self._cached_defaults
         except UnicodeDecodeError:
             try:
-                self._sync_core()
+                self._sync_metadata()
                 self._cached_defaults = self._read_defaults()
                 return self._cached_defaults
             except UnicodeDecodeError as retry_exc:
@@ -453,7 +590,7 @@ class PipeWireBackend(PipeWireRouteMixin):
         for key, value in ((TARGET_NODE_KEY, str(target_bound_id)), (TARGET_OBJECT_KEY, target_serial)):
             if not metadata.set(stream_bound_id, key, SPA_ID_TYPE, value):
                 raise PipeWireBackendError(f"failed to set stream target metadata: {stream_bound_id}")
-        self._sync_core()
+        self._sync_metadata()
 
     def restore_stream_target(self, stream_bound_id: int, target: PipeWireStreamTarget) -> None:
         metadata = self._default_metadata()
@@ -463,7 +600,7 @@ class PipeWireBackend(PipeWireRouteMixin):
         ):
             if not metadata.set(stream_bound_id, key, type_name, value):
                 raise PipeWireBackendError(f"failed to restore stream target metadata: {stream_bound_id}")
-        self._sync_core()
+        self._sync_metadata()
 
     def output_stream_by_bound_id(self, bound_id: int) -> PipeWireNode | None:
         for stream in self.list_output_streams():
@@ -575,6 +712,7 @@ class PipeWireBackend(PipeWireRouteMixin):
             return None
         if not node.start():
             raise PipeWireBackendError(f"failed to bind node: {bound_id}")
+        self._sync_proxy(node, "node")
 
         self._node_proxies[int(bound_id)] = node
         return node
@@ -593,6 +731,7 @@ class PipeWireBackend(PipeWireRouteMixin):
             return None
         if not device.start():
             raise PipeWireBackendError(f"failed to bind device: {bound_id}")
+        self._sync_proxy(device, "device")
 
         self._device_proxies[int(bound_id)] = device
         return device
@@ -682,36 +821,58 @@ class PipeWireBackend(PipeWireRouteMixin):
         if not self._connected:
             self.connect()
 
-    def _wait_for_initial_state(self) -> None:
-        deadline = time.monotonic() + (self.timeout_ms / 1000.0)
-        context = self._GLib.MainContext.default()
-
-        while time.monotonic() < deadline:
-            while context.pending():
-                context.iteration(False)
-
-            registry_ready = self._registry.get_globals().get_n_items() > 0
-            metadata_ready = self._metadata.get_bound()
-            if registry_ready and metadata_ready:
-                return
-
-            time.sleep(0.01)
+    def _sync_initial_state(self) -> None:
+        self._sync_registry()
+        self._sync_metadata()
 
         missing = []
         if self._registry.get_globals().get_n_items() <= 0:
             missing.append("registry")
         if not self._metadata.get_bound():
             missing.append("metadata")
-        raise PipeWireBackendError(f"PipeWire initialization timed out waiting for: {', '.join(missing)}")
-
-    def _sync_core(self) -> None:
-        if self._GLib is None:
+        if not missing:
             return
 
-        deadline = time.monotonic() + min(self.timeout_ms / 1000.0, 0.05)
-        context = self._GLib.MainContext.default()
-        while time.monotonic() < deadline and context.pending():
-            context.iteration(False)
+        raise PipeWireBackendError(f"PipeWire initialization did not report: {', '.join(missing)}")
+
+    def _sync_registry(self) -> None:
+        if self._registry is None:
+            return
+
+        try:
+            synced = self._registry.sync(max(int(self.timeout_ms), 1))
+        except Exception as exc:
+            raise PipeWireBackendError(f"PipeWire registry sync failed: {exc}") from exc
+        if synced is False:
+            raise PipeWireBackendError("PipeWire registry sync failed")
+
+    def _sync_metadata(self) -> None:
+        if self._metadata is None:
+            return
+
+        try:
+            synced = self._metadata.sync(max(int(self.timeout_ms), 1))
+        except Exception as exc:
+            raise PipeWireBackendError(f"PipeWire metadata sync failed: {exc}") from exc
+        if synced is False:
+            raise PipeWireBackendError("PipeWire metadata sync failed")
+
+    def _sync_proxy(self, proxy, label: str) -> None:
+        try:
+            synced = proxy.sync(max(int(self.timeout_ms), 1))
+        except Exception as exc:
+            raise PipeWireBackendError(f"PipeWire {label} sync failed: {exc}") from exc
+        if synced is False:
+            raise PipeWireBackendError(f"PipeWire {label} sync failed")
+
+    def _sync_core(self) -> None:
+        if self._core is not None:
+            try:
+                synced = self._core.sync(max(int(self.timeout_ms), 1))
+            except Exception as exc:
+                raise PipeWireBackendError(f"PipeWire core sync failed: {exc}") from exc
+            if synced is False:
+                raise PipeWireBackendError("PipeWire core sync failed")
 
     @staticmethod
     def _import_pipewire_gobject():
