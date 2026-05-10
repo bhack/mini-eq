@@ -217,6 +217,7 @@ def test_dbus_control_state_contains_shell_summary() -> None:
         "output_sink": "alsa_output.test",
         "output_preset_name": "Headphones",
         "output_preset_auto_applied": False,
+        "analyzer_enabled": False,
         "background_mode": True,
         "start_at_login": False,
         "start_active_at_login": False,

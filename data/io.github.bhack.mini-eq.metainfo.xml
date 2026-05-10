@@ -51,6 +51,7 @@
           <li>Require pipewire-gobject 0.3.6 and use its synchronous PipeWire registry, metadata, node, and device APIs for startup and routing state.</li>
           <li>Replace Mini EQ's PipeWire startup and routing sleep loops with bounded sync or registry-event waits for route params, virtual sink creation, and stream routing.</li>
           <li>Avoid a headless startup hang when system-wide EQ fails synchronously before the GLib main loop starts.</li>
+          <li>Hide the GNOME Shell extension's mini analyzer while monitoring is turned off.</li>
         </ul>
       </description>
     </release>

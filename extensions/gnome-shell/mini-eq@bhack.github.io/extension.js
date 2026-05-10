@@ -69,6 +69,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._running = false;
         this._routed = false;
         this._eqEnabled = false;
+        this._analyzerEnabled = false;
         this._capabilities = new Set();
         this.visible = false;
 
@@ -83,7 +84,8 @@ class MiniEqIndicator extends PanelMenu.Button {
             y_align: Clutter.ActorAlign.CENTER,
         });
         box.add_child(this._icon);
-        box.add_child(this._buildPanelAnalyzer());
+        this._panelAnalyzer = this._buildPanelAnalyzer();
+        box.add_child(this._panelAnalyzer);
         this.add_child(box);
 
         this._statusItem = new PopupMenu.PopupMenuItem(_('Mini EQ is not running'));
@@ -336,6 +338,9 @@ class MiniEqIndicator extends PanelMenu.Button {
         const running = Boolean(unpackValue(state.running));
         const eqEnabled = Boolean(unpackValue(state.eq_enabled));
         const routed = Boolean(unpackValue(state.routed));
+        const analyzerEnabled = 'analyzer_enabled' in state
+            ? Boolean(unpackValue(state.analyzer_enabled))
+            : true;
         const presetName = unpackValue(state.preset_name) || _('Current State');
         const outputPresetName = unpackValue(state.output_preset_name) || '';
         const capabilities = unpackValue(state.capabilities) || [];
@@ -345,8 +350,9 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._running = running;
         this._routed = routed;
         this._eqEnabled = eqEnabled;
+        this._analyzerEnabled = analyzerEnabled;
         this.visible = running;
-        this._syncPanelStateStyle(running, routed, eqEnabled);
+        this._syncPanelStateStyle(running, routed, eqEnabled, analyzerEnabled);
         this._updating = true;
         try {
             this._routingItem.setToggleState(routed);
@@ -355,7 +361,7 @@ class MiniEqIndicator extends PanelMenu.Button {
             this._updating = false;
         }
 
-        if (!running || !routed || !eqEnabled)
+        if (!running || !routed || !eqEnabled || !analyzerEnabled)
             this._setAnalyzerLevels([]);
 
         this._routingItem.setSensitive(running);
@@ -371,9 +377,10 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._running = false;
         this._routed = false;
         this._eqEnabled = false;
+        this._analyzerEnabled = false;
         this._capabilities = new Set();
         this.visible = false;
-        this._syncPanelStateStyle(false, false, false);
+        this._syncPanelStateStyle(false, false, false, false);
         this._updating = true;
         try {
             this._routingItem.setToggleState(false);
@@ -413,10 +420,12 @@ class MiniEqIndicator extends PanelMenu.Button {
         if (this._disposed)
             return;
 
-        this._setAnalyzerLevels(this._running && this._routed && this._eqEnabled ? levels : []);
+        this._setAnalyzerLevels(this._running && this._routed && this._eqEnabled && this._analyzerEnabled ? levels : []);
     }
 
-    _syncPanelStateStyle(running, routed, eqEnabled) {
+    _syncPanelStateStyle(running, routed, eqEnabled, analyzerEnabled) {
+        this._panelAnalyzer.visible = running && analyzerEnabled;
+
         if (!running) {
             this._icon.opacity = 0;
             this._panelAnalyzerDimColor = PANEL_ANALYZER_STANDBY_COLOR;

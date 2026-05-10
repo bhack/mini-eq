@@ -9,6 +9,8 @@
   routing.
 - Avoid a headless startup hang when system-wide EQ fails synchronously before
   the GLib main loop starts.
+- Hide the GNOME Shell extension's mini analyzer while monitoring is turned
+  off, keeping the panel item available without showing stale meter bars.
 
 ## 0.7.2 - 2026-05-10
 

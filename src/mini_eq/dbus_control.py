@@ -170,6 +170,7 @@ class MiniEqDbusControl:
                 "b",
                 bool(window and getattr(window, "output_preset_auto_applied", False)),
             ),
+            "analyzer_enabled": GLib.Variant("b", bool(window and getattr(window, "analyzer_enabled", False))),
             "background_mode": GLib.Variant("b", bool(getattr(self.app, "background_mode", False))),
             "start_at_login": GLib.Variant("b", bool(getattr(self.app, "start_at_login", False))),
             "start_active_at_login": GLib.Variant(

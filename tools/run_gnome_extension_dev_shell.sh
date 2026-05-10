@@ -15,11 +15,12 @@ mode="fake"
 
 usage() {
     cat >&2 <<EOF
-Usage: $0 [--fake-control|--no-fake-control|--real-session-install]
+Usage: $0 [--fake-control|--fake-control-monitor-off|--no-fake-control|--real-session-install]
 
-  --fake-control          Start isolated devkit Shell with fake Mini EQ D-Bus control service. Default.
-  --no-fake-control       Start isolated devkit Shell without a control service; tests disconnected UI.
-  --real-session-install  Install/reload the extension in the real GNOME session for real app integration.
+  --fake-control              Start isolated devkit Shell with fake Mini EQ D-Bus control service. Default.
+  --fake-control-monitor-off  Start fake control service with analyzer monitoring disabled.
+  --no-fake-control           Start isolated devkit Shell without a control service; tests disconnected UI.
+  --real-session-install      Install/reload the extension in the real GNOME session for real app integration.
 EOF
 }
 
@@ -27,6 +28,9 @@ while (($# > 0)); do
     case "$1" in
         --fake-control)
             mode="fake"
+            ;;
+        --fake-control-monitor-off)
+            mode="fake-monitor-off"
             ;;
         --no-fake-control)
             mode="no-fake"
@@ -56,7 +60,7 @@ if [[ ! -x "$pack_extension" ]]; then
     exit 1
 fi
 
-if [[ "$mode" == "fake" && ! -x "$fake_control" ]]; then
+if [[ "$mode" != "no-fake" && "$mode" != "real-session" && ! -x "$fake_control" ]]; then
     echo "Fake control service not found or not executable: $fake_control" >&2
     exit 1
 fi
@@ -126,7 +130,9 @@ echo >&2
 echo "When the nested Shell starts, look for a virtual monitor/devkit surface." >&2
 echo "The top bar inside that nested Shell should show a 'Mini EQ' item." >&2
 if [[ "$mode" == "fake" ]]; then
-    echo "A fake Mini EQ D-Bus service is started inside the nested session." >&2
+    echo "A fake Mini EQ D-Bus service is started inside the nested session with monitoring enabled." >&2
+elif [[ "$mode" == "fake-monitor-off" ]]; then
+    echo "A fake Mini EQ D-Bus service is started inside the nested session with monitoring disabled." >&2
 else
     echo "No Mini EQ D-Bus service is started; controls should show disconnected/disabled state." >&2
 fi
@@ -149,12 +155,20 @@ run_in_dev_bus() {
         }
         trap cleanup EXIT INT TERM
 
-        "$1" &
+        fake_control="$1"
+        fake_mode="$2"
+        shift 2
+
+        fake_args=()
+        if [[ "$fake_mode" == "fake-monitor-off" ]]; then
+            fake_args+=(--monitor-off)
+        fi
+
+        "$fake_control" "${fake_args[@]}" &
         fake_pid=$!
         sleep 0.5
-        shift
         "$@"
-    ' bash "$fake_control" "${shell_command[@]}"
+    ' bash "$fake_control" "$mode" "${shell_command[@]}"
 }
 
 if gnome-shell --help 2>&1 | grep -q -- '--devkit'; then

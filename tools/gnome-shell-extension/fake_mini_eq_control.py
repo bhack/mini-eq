@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import math
 import signal
 import warnings
@@ -93,12 +94,13 @@ def display_level(level: float) -> float:
 
 
 class FakeMiniEqControl:
-    def __init__(self) -> None:
+    def __init__(self, *, analyzer_enabled: bool = True) -> None:
         self.eq_enabled = True
         self.routed = True
         self.preset_name = "Studio Reference"
         self.output_preset_name = "Demo Output Link"
         self.presets = ["Studio Reference", "Flat", "Voice Focus"]
+        self.analyzer_enabled = analyzer_enabled
         self.analyzer_levels = [0.0] * 10
         self.animation_step = 0
         self.loop = GLib.MainLoop()
@@ -120,6 +122,7 @@ class FakeMiniEqControl:
             "output_sink": GLib.Variant("s", "Demo Output"),
             "output_preset_name": GLib.Variant("s", self.output_preset_name),
             "output_preset_auto_applied": GLib.Variant("b", True),
+            "analyzer_enabled": GLib.Variant("b", self.analyzer_enabled),
             "background_mode": GLib.Variant("b", True),
             "start_at_login": GLib.Variant("b", False),
             "window_visible": GLib.Variant("b", False),
@@ -142,7 +145,9 @@ class FakeMiniEqControl:
             return
 
         levels = (
-            [display_level(level) for level in self.analyzer_levels] if self.eq_enabled and self.routed else [0.0] * 10
+            [display_level(level) for level in self.analyzer_levels]
+            if self.eq_enabled and self.routed and self.analyzer_enabled
+            else [0.0] * 10
         )
         self.connection.emit_signal(
             None,
@@ -238,5 +243,25 @@ class FakeMiniEqControl:
                 Gio.bus_unown_name(self.owner_id)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Fake Mini EQ D-Bus service for GNOME Shell extension development.")
+    monitor_group = parser.add_mutually_exclusive_group()
+    monitor_group.add_argument(
+        "--monitor-on",
+        dest="analyzer_enabled",
+        action="store_true",
+        default=True,
+        help="report analyzer monitoring as enabled; this is the default",
+    )
+    monitor_group.add_argument(
+        "--monitor-off",
+        dest="analyzer_enabled",
+        action="store_false",
+        help="report analyzer monitoring as disabled",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    FakeMiniEqControl().run()
+    args = parse_args()
+    FakeMiniEqControl(analyzer_enabled=args.analyzer_enabled).run()
