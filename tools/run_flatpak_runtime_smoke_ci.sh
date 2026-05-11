@@ -153,9 +153,8 @@ ci_sink_id=""
 default_set=false
 for _ in $(seq 1 200); do
   ci_sink_id="$(
-    pw-dump 2>/dev/null \
-      | jq -r '.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink") | .id' \
-      | head -n 1
+    { pw-dump 2>/dev/null || true; } \
+      | jq -r 'first(.[] | select(.type=="PipeWire:Interface:Node" and .info.props["node.name"]=="ci_null_sink") | .id) // empty' 2>/dev/null
   )"
   if [[ -n "$ci_sink_id" ]] && wpctl set-default "$ci_sink_id" >/dev/null 2>&1; then
     default_set=true
