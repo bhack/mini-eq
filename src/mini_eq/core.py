@@ -262,6 +262,23 @@ def ensure_preset_storage_dir() -> Path:
     return storage_dir
 
 
+def require_absolute_directory(path: Path, description: str) -> Path:
+    if not path.is_absolute():
+        raise ValueError(f"{description} directory must be absolute")
+    return path
+
+
+def child_file_path(directory: Path, file_name: str, description: str) -> Path:
+    if not file_name or Path(file_name).name != file_name:
+        raise ValueError(f"{description} filename is invalid")
+
+    directory = require_absolute_directory(directory, description)
+    path = directory / file_name
+    if path.resolve(strict=False).parent != directory.resolve(strict=False):
+        raise ValueError(f"{description} path must stay inside {directory}")
+    return path
+
+
 def user_config_dir() -> Path:
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
     if xdg_config_home and Path(xdg_config_home).is_absolute():
@@ -274,16 +291,20 @@ def app_config_dir() -> Path:
     return user_config_dir() / "mini-eq"
 
 
+def app_config_file_path(file_name: str) -> Path:
+    return child_file_path(app_config_dir(), file_name, "app config file")
+
+
 def default_preset_storage_dir() -> Path:
     return app_config_dir() / "output"
 
 
 def preset_storage_dir() -> Path:
-    return PRESET_STORAGE_DIR or default_preset_storage_dir()
+    return require_absolute_directory(PRESET_STORAGE_DIR or default_preset_storage_dir(), "preset storage")
 
 
 def output_preset_links_path() -> Path:
-    return OUTPUT_PRESET_LINKS_PATH or app_config_dir() / OUTPUT_PRESET_LINKS_FILE
+    return OUTPUT_PRESET_LINKS_PATH or app_config_file_path(OUTPUT_PRESET_LINKS_FILE)
 
 
 def sanitize_preset_name(name: str) -> str:
@@ -304,7 +325,7 @@ def preset_path_for_name(name: str) -> Path:
     if not preset_name:
         raise ValueError("preset name is empty")
 
-    return ensure_preset_storage_dir() / f"{preset_name}{PRESET_FILE_SUFFIX}"
+    return child_file_path(ensure_preset_storage_dir(), f"{preset_name}{PRESET_FILE_SUFFIX}", "preset file")
 
 
 def delete_preset_file(name: str) -> None:

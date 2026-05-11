@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Final
 
-from .core import app_config_dir
+from .core import app_config_file_path
 
 SETTINGS_FILE_NAME: Final = "settings.json"
 SETTINGS_VERSION_KEY: Final = "version"
@@ -26,7 +26,7 @@ APPEARANCE_VALUES: Final = frozenset(("system", "light", "dark"))
 
 
 def settings_path() -> Path:
-    return app_config_dir() / SETTINGS_FILE_NAME
+    return app_config_file_path(SETTINGS_FILE_NAME)
 
 
 def settings_payload_version(payload: dict[str, object]) -> int | None:

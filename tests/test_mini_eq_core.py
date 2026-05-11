@@ -44,6 +44,20 @@ def test_default_preset_storage_uses_standalone_config_namespace(
     assert core.output_preset_links_path() == config_dir / "mini-eq" / "output-presets.json"
 
 
+def test_app_config_file_path_rejects_nested_file_names(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+    with pytest.raises(ValueError, match="filename is invalid"):
+        core.app_config_file_path("../settings.json")
+
+
+def test_preset_storage_dir_rejects_relative_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", Path("relative-presets"))
+
+    with pytest.raises(ValueError, match="must be absolute"):
+        core.preset_storage_dir()
+
+
 def test_user_config_dir_ignores_relative_xdg_config_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home_dir = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home_dir))
