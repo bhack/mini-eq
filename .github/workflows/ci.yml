@@ -531,6 +531,7 @@ jobs:
             python3-pyatspi \
             python3-setuptools \
             python3-venv \
+            patchelf \
             wireplumber
 
       - name: Build source environment and run live UI smoke

@@ -49,7 +49,7 @@ def test_release_workflow_blocks_publish_on_release_preflight() -> None:
     release_yml = workflow_text("release.yml")
 
     assert "preflight:" in release_yml
-    assert "docker/run-release-preflight.sh" in release_yml
+    assert "tools/run_release_preflight_container.sh" in release_yml
     assert "preflight" in release_yml.partition("build:")[2].partition("runs-on:")[0]
 
 
@@ -61,3 +61,14 @@ def test_ci_scope_treats_release_workflow_and_release_gate_tools_as_tested_chang
     assert "tools/release_runtime_gate.py" in ci_yml
     assert "live_ui_runtime_smoke" in ci_yml
     assert "tools/run_live_ui_runtime_smoke_ci.sh" in ci_yml
+
+
+def test_live_ui_runtime_smoke_uses_host_gir_build_environment() -> None:
+    release_yml = workflow_text("release.yml")
+    ci_yml = workflow_text("ci.yml")
+    script = (ROOT / "tools/run_live_ui_runtime_smoke_ci.sh").read_text(encoding="utf-8")
+
+    assert "patchelf" in release_yml
+    assert "patchelf" in ci_yml
+    assert "pipewire-gobject" in script
+    assert "--no-build-isolation" in script
