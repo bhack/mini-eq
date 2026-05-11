@@ -67,6 +67,15 @@ class PipeWireStreamTarget:
     target_object_type: str | None
 
 
+@dataclass(frozen=True)
+class PipeWireLink:
+    bound_id: int
+    output_node_id: int
+    input_node_id: int
+    passive: bool
+    feedback: bool
+
+
 class PipeWireBackendError(RuntimeError):
     pass
 
@@ -155,6 +164,7 @@ class PipeWireBackend(PipeWireRouteMixin):
         self._metadata_signal_objects: dict[int, Any] = {}
         self._node_signal_objects: dict[int, Any] = {}
         self._device_signal_objects: dict[int, Any] = {}
+        self._device_related_signal_handler_ids: dict[int, list[int]] = {}
         self._node_proxies: dict[int, Any] = {}
         self._device_proxies: dict[int, Any] = {}
         self._loaded_modules: list[Any] = []
@@ -275,7 +285,12 @@ class PipeWireBackend(PipeWireRouteMixin):
         return [node for node in self.list_nodes() if node.is_output_stream]
 
     def node_from_proxy(self, node) -> PipeWireNode:
+        if hasattr(node, "is_node") and not node.is_node():
+            raise PipeWireBackendError("PipeWire global is not a node")
         return self._node_from_global(node)
+
+    def link_from_proxy(self, link) -> PipeWireLink:
+        return self._link_from_global(link)
 
     def watch_for_node(
         self,
@@ -475,8 +490,19 @@ class PipeWireBackend(PipeWireRouteMixin):
             self._device_active_output_routes.pop(int(device_bound_id), None)
             callback()
 
+        def on_device_param_infos_changed(_device, _pspec) -> None:
+            if int(device_bound_id) in self._device_route_refreshing_bound_ids:
+                return
+
+            self._device_active_output_routes.pop(int(device_bound_id), None)
+            callback()
+
         handler_id = self._GObject.Object.connect(device, "param", on_device_param)
+        related_handler_ids = [
+            self._GObject.Object.connect(device, "notify::param-infos", on_device_param_infos_changed)
+        ]
         self._device_signal_objects[handler_id] = device
+        self._device_related_signal_handler_ids[handler_id] = related_handler_ids
 
         try:
             device.subscribe_params(self._GLib.Variant("au", subscribed_param_ids))
@@ -491,6 +517,7 @@ class PipeWireBackend(PipeWireRouteMixin):
             return
 
         device = self._device_signal_objects.pop(handler_id, None)
+        related_handler_ids = self._device_related_signal_handler_ids.pop(handler_id, [])
         if device is None:
             return
 
@@ -499,6 +526,12 @@ class PipeWireBackend(PipeWireRouteMixin):
                 device.subscribe_params(self._GLib.Variant("au", []))
         except Exception:
             pass
+
+        for related_handler_id in related_handler_ids:
+            try:
+                device.disconnect(related_handler_id)
+            except Exception:
+                pass
 
         try:
             device.disconnect(handler_id)
@@ -704,6 +737,19 @@ class PipeWireBackend(PipeWireRouteMixin):
             device_id=device_id,
             card_profile_device=parse_positive_int(self._pw_property(global_, "card.profile.device", properties)),
             properties=properties,
+        )
+
+    def _link_from_global(self, global_) -> PipeWireLink:
+        link_info = self._Pwg.LinkInfo.new_from_global(global_)
+        if link_info is None:
+            raise PipeWireBackendError("PipeWire global is not a link")
+
+        return PipeWireLink(
+            bound_id=int(link_info.get_id()),
+            output_node_id=parse_positive_int(link_info.dup_output_node_id()),
+            input_node_id=parse_positive_int(link_info.dup_input_node_id()),
+            passive=bool(link_info.get_passive()),
+            feedback=bool(link_info.get_feedback()),
         )
 
     def _node_proxy_by_bound_id(self, bound_id: int):

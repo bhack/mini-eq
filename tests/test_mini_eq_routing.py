@@ -156,6 +156,46 @@ def test_resolve_default_output_sink_name_falls_back_to_first_real_sink_when_met
     assert routing.SystemWideEqController.resolve_default_output_sink_name(controller) == "speakers"
 
 
+def test_stream_router_reapplies_current_curve_after_pipewire_link_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.stream_router = None
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.filter_output_name = "mini_eq_sink_output"
+    controller.output_sink = "speakers"
+    controller.output_backend = object()
+    calls: list[object] = []
+
+    class FakeStreamRouter:
+        def __init__(
+            self,
+            virtual_sink_name: str,
+            filter_output_name: str,
+            status_callback,
+            output_backend,
+            *,
+            route_applied_callback,
+        ) -> None:
+            calls.append((virtual_sink_name, filter_output_name, status_callback, output_backend))
+            self.route_applied_callback = route_applied_callback
+            self.output_sink_names: list[str] = []
+
+        def set_output_sink_name(self, sink_name: str) -> None:
+            self.output_sink_names.append(sink_name)
+
+    controller.emit_status = lambda message: calls.append(f"status:{message}")
+    controller.apply_state_to_engine = lambda: calls.append("apply")
+    monkeypatch.setattr(routing, "PipeWireStreamRouter", FakeStreamRouter)
+
+    stream_router = routing.SystemWideEqController.ensure_stream_router(controller)
+    stream_router.route_applied_callback()
+
+    assert calls == [
+        ("mini_eq_sink", "mini_eq_sink_output", controller.emit_status, controller.output_backend),
+        "apply",
+    ]
+    assert stream_router.output_sink_names == ["speakers"]
+
+
 def test_refresh_followed_output_sink_refreshes_metadata_and_skips_virtual_defaults() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     backend = FakeDefaultOutputBackend(

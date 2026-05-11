@@ -199,6 +199,7 @@ class SystemWideEqController:
                 self.filter_output_name,
                 self.emit_status,
                 self.output_backend,
+                route_applied_callback=self.apply_state_to_engine,
             )
 
         self.stream_router.set_output_sink_name(self.output_sink)

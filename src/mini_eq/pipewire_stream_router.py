@@ -10,6 +10,7 @@ from .pipewire_backend import (
     STREAM_OUTPUT_AUDIO,
     PipeWireBackend,
     PipeWireBackendError,
+    PipeWireLink,
     PipeWireNode,
     PipeWireStreamTarget,
 )
@@ -33,15 +34,18 @@ class PipeWireStreamRouter:
         internal_output_name: str,
         status_callback: Callable[[str], None],
         backend: PipeWireBackend | None = None,
+        route_applied_callback: Callable[[], None] | None = None,
     ) -> None:
         self.virtual_sink_name = virtual_sink_name
         self.internal_output_name = internal_output_name
         self.status_callback = status_callback
         self.backend = backend or PipeWireBackend()
+        self.route_applied_callback = route_applied_callback
         self.owns_backend = backend is None
         self.enabled = False
         self.accept_stream_events = False
         self.event_source_id = 0
+        self.pending_route_applied_callback = False
         self.object_added_handler_id = 0
         self.routed_stream_ids: set[int] = set()
         self.routed_stream_targets: dict[int, PipeWireStreamTarget] = {}
@@ -119,6 +123,17 @@ class PipeWireStreamRouter:
     def _target_points_to_virtual_sink(self, target: PipeWireStreamTarget) -> bool:
         target_values = {value for value in (target.target_node, target.target_object) if value}
         return bool(target_values & self._virtual_sink_target_values())
+
+    def _link_touches_virtual_sink(self, link: PipeWireLink) -> bool:
+        try:
+            virtual_sink = self.backend.audio_sink_by_name(self.virtual_sink_name)
+        except Exception:
+            virtual_sink = None
+
+        if virtual_sink is None:
+            return False
+
+        return virtual_sink.bound_id in {link.output_node_id, link.input_node_id}
 
     def _stream_target_before_route(self, stream_bound_id: int) -> PipeWireStreamTarget:
         target = self.backend.stream_target(stream_bound_id)
@@ -221,13 +236,24 @@ class PipeWireStreamRouter:
 
         return False
 
+    def schedule_refresh(self, *, route_applied: bool = False) -> None:
+        self.pending_route_applied_callback = self.pending_route_applied_callback or route_applied
+        if self.event_source_id == 0:
+            self.event_source_id = GLib.idle_add(self.on_stream_event_idle)
+
     def on_stream_event_idle(self) -> bool:
         self.event_source_id = 0
 
         if not self.accept_stream_events:
+            self.pending_route_applied_callback = False
             return False
 
-        return self.refresh()
+        route_applied = self.pending_route_applied_callback
+        self.pending_route_applied_callback = False
+        self.refresh()
+        if route_applied and self.route_applied_callback is not None:
+            self.route_applied_callback()
+        return False
 
     def handle_object_added(self, _manager, node) -> None:
         if not self.accept_stream_events:
@@ -238,11 +264,18 @@ class PipeWireStreamRouter:
         except Exception:
             stream = None
 
-        if stream is not None and stream.media_class != STREAM_OUTPUT_AUDIO:
+        if stream is not None:
+            if stream.media_class == STREAM_OUTPUT_AUDIO:
+                self.schedule_refresh()
             return
 
-        if self.event_source_id == 0:
-            self.event_source_id = GLib.idle_add(self.on_stream_event_idle)
+        try:
+            link = self.backend.link_from_proxy(node)
+        except Exception:
+            return
+
+        if self._link_touches_virtual_sink(link):
+            self.schedule_refresh(route_applied=True)
 
     def start_monitoring(self, *, require_initial_route: bool = False) -> None:
         self.backend.connect()

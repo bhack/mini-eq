@@ -441,6 +441,44 @@ def test_node_from_global_enriches_device_label_properties() -> None:
     assert node.property_value("device.name") == "alsa_card.pci-0000_00_1f.3"
 
 
+def test_link_from_global_copies_pipewire_link_identity() -> None:
+    backend = pw_backend.PipeWireBackend()
+
+    class FakeLinkInfo:
+        def get_id(self) -> int:
+            return 90
+
+        def dup_output_node_id(self) -> str:
+            return "12"
+
+        def dup_input_node_id(self) -> str:
+            return "34"
+
+        def get_passive(self) -> bool:
+            return True
+
+        def get_feedback(self) -> bool:
+            return False
+
+    class FakeLinkInfoApi:
+        @staticmethod
+        def new_from_global(global_):
+            assert global_ == "global"
+            return FakeLinkInfo()
+
+    backend._Pwg = SimpleNamespace(LinkInfo=FakeLinkInfoApi)
+
+    link = backend._link_from_global("global")
+
+    assert link == pw_backend.PipeWireLink(
+        bound_id=90,
+        output_node_id=12,
+        input_node_id=34,
+        passive=True,
+        feedback=False,
+    )
+
+
 def test_new_core_uses_pipewire_gobject_core_constructor() -> None:
     FakeCore.calls = 0
 
@@ -943,6 +981,7 @@ def test_connect_device_route_changed_subscribes_to_route_event_params(monkeypat
             self.subscriptions: list[FakeVariant] = []
             self.disconnected: list[int] = []
             self.param_callback = None
+            self.param_infos_callback = None
 
         def get_param_infos(self) -> FakeModel:
             return self.param_infos
@@ -956,6 +995,10 @@ def test_connect_device_route_changed_subscribes_to_route_event_params(monkeypat
         def emit_param(self, param_id: int, **kwargs) -> None:
             assert self.param_callback is not None
             self.param_callback(self, FakeParam(param_id, **kwargs))
+
+        def emit_param_infos_changed(self) -> None:
+            assert self.param_infos_callback is not None
+            self.param_infos_callback(self, None)
 
     class FakeRouteInfo:
         def __init__(self, param: FakeParam) -> None:
@@ -991,9 +1034,13 @@ def test_connect_device_route_changed_subscribes_to_route_event_params(monkeypat
     class FakeGObjectObject:
         @staticmethod
         def connect(device: FakeDevice, signal_name: str, callback) -> int:
-            assert signal_name == "param"
-            device.param_callback = callback
-            return 77
+            if signal_name == "param":
+                device.param_callback = callback
+                return 77
+            if signal_name == "notify::param-infos":
+                device.param_infos_callback = callback
+                return 78
+            raise AssertionError(f"unexpected signal: {signal_name}")
 
     backend = pw_backend.PipeWireBackend()
     device = FakeDevice()
@@ -1029,15 +1076,24 @@ def test_connect_device_route_changed_subscribes_to_route_event_params(monkeypat
     assert tuple(backend._device_active_output_routes[72]) == (7,)
     assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 
+    device.emit_param_infos_changed()
+    assert calls == ["route", "route", "route", "route"]
+    assert 72 not in backend._device_active_output_routes
+
+    device.emit_param(13, route_device=7, route_name="analog-output-speaker")
+    assert calls == ["route", "route", "route", "route", "route"]
+    assert tuple(backend._device_active_output_routes[72]) == (7,)
+
     backend._device_route_refreshing_bound_ids.add(72)
     device.emit_param(13, route_device=6, route_name="analog-output-headphones")
-    assert calls == ["route", "route", "route"]
+    device.emit_param_infos_changed()
+    assert calls == ["route", "route", "route", "route", "route"]
     assert tuple(backend._device_active_output_routes[72]) == (7,)
     assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 
     backend.disconnect_device_handler(handler_id)
     assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13, 14]), ("au", [])]
-    assert device.disconnected == [77]
+    assert device.disconnected == [78, 77]
 
 
 def test_output_preset_keys_use_subscribed_active_route_cache(monkeypatch: pytest.MonkeyPatch) -> None:

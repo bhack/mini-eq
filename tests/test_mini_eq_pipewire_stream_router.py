@@ -29,6 +29,16 @@ def no_stream_target() -> pw_backend.PipeWireStreamTarget:
     return pw_backend.PipeWireStreamTarget(None, None, None, None)
 
 
+def make_link(bound_id: int, output_node_id: int, input_node_id: int) -> pw_backend.PipeWireLink:
+    return pw_backend.PipeWireLink(
+        bound_id=bound_id,
+        output_node_id=output_node_id,
+        input_node_id=input_node_id,
+        passive=False,
+        feedback=False,
+    )
+
+
 class FakePipeWireBackend:
     def __init__(
         self,
@@ -91,7 +101,14 @@ class FakePipeWireBackend:
             self.target_nodes[stream_bound_id] = target.target_object or target.target_node or ""
 
     def node_from_proxy(self, node):
+        if isinstance(node, pw_backend.PipeWireLink):
+            raise pw_backend.PipeWireBackendError("not a node")
         return node
+
+    def link_from_proxy(self, link):
+        if not isinstance(link, pw_backend.PipeWireLink):
+            raise pw_backend.PipeWireBackendError("not a link")
+        return link
 
     def connect_object_added(self, _callback) -> int:
         return 42
@@ -413,6 +430,62 @@ def test_pipewire_router_ignores_new_non_output_stream(monkeypatch: pytest.Monke
     router.accept_stream_events = True
     sink = make_node(1, pw_backend.AUDIO_SINK, "speakers")
     router.handle_object_added(None, sink)
+
+    assert router.event_source_id == 0
+    assert scheduled_callbacks == []
+
+
+def test_pipewire_router_reapplies_controls_when_virtual_sink_link_appears(monkeypatch: pytest.MonkeyPatch) -> None:
+    virtual_sink = make_node(11, pw_backend.AUDIO_SINK, "mini_eq_sink")
+    backend = FakePipeWireBackend(
+        [make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
+        sinks=[virtual_sink],
+    )
+    applied: list[str] = []
+    router = pw_router.PipeWireStreamRouter(
+        "mini_eq_sink",
+        "mini_eq_sink_output",
+        lambda _message: None,
+        backend,
+        route_applied_callback=lambda: applied.append("apply"),
+    )
+    scheduled_callbacks: list[object] = []
+
+    monkeypatch.setattr(
+        pw_router.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or 321,
+    )
+
+    router.enabled = True
+    router.accept_stream_events = True
+    router.handle_object_added(None, make_link(92, output_node_id=1, input_node_id=virtual_sink.bound_id))
+
+    assert router.event_source_id == 321
+    assert len(scheduled_callbacks) == 1
+
+    keep_source = scheduled_callbacks[0]()
+
+    assert keep_source is False
+    assert backend.moves == [(1, "mini_eq_sink")]
+    assert applied == ["apply"]
+
+
+def test_pipewire_router_ignores_unrelated_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    virtual_sink = make_node(11, pw_backend.AUDIO_SINK, "mini_eq_sink")
+    backend = FakePipeWireBackend([], sinks=[virtual_sink])
+    router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
+    scheduled_callbacks: list[object] = []
+
+    monkeypatch.setattr(
+        pw_router.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or 321,
+    )
+
+    router.enabled = True
+    router.accept_stream_events = True
+    router.handle_object_added(None, make_link(92, output_node_id=1, input_node_id=2))
 
     assert router.event_source_id == 0
     assert scheduled_callbacks == []
