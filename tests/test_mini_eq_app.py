@@ -173,6 +173,47 @@ def test_run_headless_skips_loop_after_synchronous_start_error(monkeypatch, caps
     assert "startup failed" in capsys.readouterr().err
 
 
+def test_install_unix_signal_handlers_uses_exported_glib_unix_source_api(monkeypatch) -> None:
+    class FakeSource:
+        def __init__(self, signum: int) -> None:
+            self.signum = signum
+            self.priority: int | None = None
+            self.handler = None
+            self.user_data = object()
+            self.context = object()
+
+        def set_priority(self, priority: int) -> None:
+            self.priority = priority
+
+        def set_callback(self, handler, user_data) -> None:
+            self.handler = handler
+            self.user_data = user_data
+
+        def attach(self, context) -> int:
+            self.context = context
+            return len(sources)
+
+    sources: list[FakeSource] = []
+    callback_calls: list[str] = []
+
+    def fake_signal_source_new(signum: int) -> FakeSource:
+        source = FakeSource(signum)
+        sources.append(source)
+        return source
+
+    monkeypatch.setattr(app.GLibUnix, "signal_source_new", fake_signal_source_new)
+
+    source_ids = app.install_unix_signal_handlers(lambda: callback_calls.append("quit"))
+
+    assert source_ids == [1, 2]
+    assert [source.signum for source in sources] == [app.signal.SIGINT, app.signal.SIGTERM]
+    assert [source.priority for source in sources] == [app.GLib.PRIORITY_DEFAULT, app.GLib.PRIORITY_DEFAULT]
+    assert [source.user_data for source in sources] == [None, None]
+    assert [source.context for source in sources] == [None, None]
+    assert sources[0].handler() is False
+    assert callback_calls == ["quit"]
+
+
 def test_close_action_closes_active_window() -> None:
     window = FakeWindow(ui_shutting_down=False)
     application = FakeApplication(window=window)

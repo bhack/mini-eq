@@ -314,9 +314,15 @@ def install_unix_signal_handlers(callback) -> list[int]:
         callback()
         return False
 
+    def add_signal_source(signum: signal.Signals) -> int:
+        source = GLibUnix.signal_source_new(signum)
+        source.set_priority(GLib.PRIORITY_DEFAULT)
+        source.set_callback(on_signal, None)
+        return source.attach(None)
+
     return [
-        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, on_signal, None),
-        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, on_signal, None),
+        add_signal_source(signal.SIGINT),
+        add_signal_source(signal.SIGTERM),
     ]
 
 
