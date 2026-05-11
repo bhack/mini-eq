@@ -11,6 +11,7 @@ import tomllib
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,9 @@ PYPI_JSON_URL = "https://pypi.org/pypi/mini-eq/json"
 PYPI_VERSION_JSON_URL = "https://pypi.org/pypi/mini-eq/{version}/json"
 SDIST_NAME = "mini_eq-{version}.tar.gz"
 WHEEL_NAME = "mini_eq-{version}-py3-none-any.whl"
+RELEASE_VERSION_RE = re.compile(r"^v?([0-9]+\.[0-9]+\.[0-9]+)$")
+GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+ALLOWED_COMMANDS = frozenset(("gh", "git"))
 
 PASS = "PASS"
 PENDING = "PENDING"
@@ -49,8 +53,24 @@ def current_version(root: Path = ROOT) -> str:
         return tomllib.load(pyproject_file)["project"]["version"]
 
 
+def normalized_release_version(version: str) -> str:
+    match = RELEASE_VERSION_RE.fullmatch(version.strip())
+    if match is None:
+        raise ValueError("release version must use X.Y.Z or vX.Y.Z")
+    return match.group(1)
+
+
+def validate_github_repo(repo: str) -> str:
+    normalized = repo.strip()
+    if GITHUB_REPO_RE.fullmatch(normalized) is None:
+        raise ValueError("GitHub repository must use owner/name")
+    if any(part.startswith("-") for part in normalized.split("/", 1)):
+        raise ValueError("GitHub repository must use owner/name")
+    return normalized
+
+
 def release_info(version: str) -> ReleaseInfo:
-    normalized = version.removeprefix("v")
+    normalized = normalized_release_version(version)
     return ReleaseInfo(
         version=normalized,
         tag=f"v{normalized}",
@@ -82,8 +102,13 @@ def appstream_screenshot_urls(root: Path) -> list[str]:
     return urls
 
 
-def run(command: list[str], *, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
+def run(command: Sequence[str], *, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
+    if not command:
+        raise ValueError("command must not be empty")
+    if command[0] not in ALLOWED_COMMANDS:
+        raise ValueError(f"unsupported command: {command[0]}")
+
+    return subprocess.run([*command], cwd=cwd, capture_output=True, text=True, check=False)
 
 
 def fetch_url(url: str, *, method: str = "GET") -> bytes:
@@ -381,7 +406,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     root = args.root.resolve()
-    info = release_info(args.version or current_version(root))
+    try:
+        info = release_info(args.version or current_version(root))
+        repo = validate_github_repo(args.repo)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
     checks = [
         *local_metadata_checks(root, info),
@@ -394,14 +423,14 @@ def main() -> int:
     else:
         github_checks, github_shas = github_release_checks(
             info,
-            args.repo,
+            repo,
             download_assets=not args.no_downloads,
         )
         checks.extend(github_checks)
         checks.extend(pypi_checks(info, github_shas))
 
     if args.flathub_manifest is not None:
-        checks.extend(flathub_checks(args.flathub_manifest, info, args.repo, github_shas))
+        checks.extend(flathub_checks(args.flathub_manifest, info, repo, github_shas))
 
     print(f"Mini EQ release status for {info.tag}\n")
     print_checks(checks)

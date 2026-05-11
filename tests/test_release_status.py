@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tools import release_status
 
 
@@ -42,6 +44,29 @@ def test_local_metadata_checks_reject_stale_screenshot_urls(tmp_path: Path) -> N
     checks = release_status.local_metadata_checks(tmp_path, release_status.release_info("0.7.3"))
 
     assert any(check.name == "AppStream screenshots" and check.status == release_status.FAIL for check in checks)
+
+
+def test_release_info_accepts_optional_v_prefix() -> None:
+    info = release_status.release_info("v0.7.3")
+
+    assert info.version == "0.7.3"
+    assert info.tag == "v0.7.3"
+
+
+@pytest.mark.parametrize("version", ["0.7", "0.7.3.1", "--help", "0.7.3;gh"])
+def test_release_info_rejects_non_semver_versions(version: str) -> None:
+    with pytest.raises(ValueError, match="release version"):
+        release_status.release_info(version)
+
+
+def test_validate_github_repo_rejects_option_like_values() -> None:
+    with pytest.raises(ValueError, match="owner/name"):
+        release_status.validate_github_repo("--repo/other")
+
+
+def test_run_rejects_unsupported_commands() -> None:
+    with pytest.raises(ValueError, match="unsupported command"):
+        release_status.run(["python3", "-c", "print('no')"])
 
 
 def test_flathub_archive_source_reads_mini_eq_release_source(tmp_path: Path) -> None:

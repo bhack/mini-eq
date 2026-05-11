@@ -69,3 +69,11 @@ def test_live_ui_runtime_smoke_uses_host_gir_build_environment() -> None:
     assert "--no-build-isolation" in script
     assert "pip install -e ." in script
     assert ".[dev]" not in script
+
+
+def test_flatpak_runtime_smoke_tolerates_pipewire_startup_race() -> None:
+    script = (ROOT / "tools/run_flatpak_runtime_smoke_ci.sh").read_text(encoding="utf-8")
+
+    assert "{ pw-dump 2>/dev/null || true; }" in script
+    assert "first(.[] | select(" in script
+    assert "| head -n 1" not in script
