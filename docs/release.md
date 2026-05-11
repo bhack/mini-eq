@@ -16,7 +16,9 @@ Run the narrowest gate that covers the release risk:
   verification, then Flathub stable PR.
 - **When PipeWire, routing, analyzer, Flatpak permissions, runtime dependencies,
   or shutdown changed:** local Flatpak install, Flatpak runtime smoke, and
-  interactive real-music testing before merge or release.
+  interactive real-music testing before merge or release. Public release
+  workflow dispatches also run the isolated Flatpak routing smoke as a blocking
+  job when runtime-sensitive files changed since the previous release tag.
 - **When background mode, Start at Login, hidden-window lifecycle, or Shell
   control changed:** one clean-permission Flatpak portal smoke in a real GNOME
   session.
@@ -201,7 +203,10 @@ MINI_EQ_RUN_LIVE_UI=1 python3 -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 
 There is an optional hosted Flatpak runtime smoke path in the `CI` workflow.
 Use it as extra signal or for smoke-harness work; keep the local runtime smoke
-as the release check when app/runtime routing behavior changed.
+as the release check when app/runtime routing behavior changed. The `Release`
+workflow also runs release preflight as a blocking job and has its own blocking
+copy of the Flatpak routing smoke gate for public TestPyPI, PyPI, and GitHub
+release dispatches.
 
 ## Package Channels
 

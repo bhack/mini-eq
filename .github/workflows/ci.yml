@@ -121,7 +121,7 @@ jobs:
 
           while IFS= read -r path; do
             case "$path" in
-              .github/workflows/ci.yml)
+              .github/workflows/*.yml)
                 test=true
                 tooling=true
                 pwg=true
@@ -131,7 +131,7 @@ jobs:
               README.md|pyproject.toml|MANIFEST.in|src/*|tests/*|data/*|extensions/*)
                 test=true
                 ;;
-              tools/check_gnome_shell_extension.py|tools/pack_gnome_shell_extension.sh|tools/prepare_release.py|tools/release_status.py)
+              tools/check_gnome_shell_extension.py|tools/pack_gnome_shell_extension.sh|tools/prepare_release.py|tools/release_gates.py|tools/release_preflight.py|tools/release_runtime_gate.py|tools/release_status.py)
                 test=true
                 ;;
             esac
@@ -149,13 +149,13 @@ jobs:
             esac
 
             case "$path" in
-              .github/workflows/ci.yml|tools/check_pipewire_gobject.py|src/mini_eq/pipewire_backend.py|src/mini_eq/analyzer.py)
+              .github/workflows/*.yml|tools/check_pipewire_gobject.py|tools/release_gates.py|tools/release_runtime_gate.py|src/mini_eq/pipewire_backend.py|src/mini_eq/analyzer.py)
                 pwg=true
                 ;;
             esac
 
             case "$path" in
-              .github/workflows/ci.yml|io.github.bhack.mini-eq.yaml|python3-dependencies.yaml|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_pipewire_gobject.py)
+              .github/workflows/*.yml|io.github.bhack.mini-eq.yaml|python3-dependencies.yaml|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_pipewire_gobject.py|tools/release_gates.py|tools/release_runtime_gate.py)
                 flatpak=true
                 ;;
             esac

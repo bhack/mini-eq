@@ -94,6 +94,10 @@ export MINI_EQ_FLATPAK_EXPECT_VERSION="$expect_version"
 export MINI_EQ_FLATHUB_URL="$flathub_url"
 export MINI_EQ_FLATPAK_BUILDER_REF="$builder_ref"
 
+if [[ "$runtime_dir" != "/run/user/$(id -u)" ]]; then
+  export MINI_EQ_FLATPAK_RUN_ARGS="--filesystem=$runtime_dir/pipewire-0:ro --env=PIPEWIRE_RUNTIME_DIR=$runtime_dir ${MINI_EQ_FLATPAK_RUN_ARGS:-}"
+fi
+
 dbus-run-session -- bash <<'SH'
 set -euo pipefail
 

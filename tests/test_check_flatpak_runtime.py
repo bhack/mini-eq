@@ -21,3 +21,19 @@ def test_flatpak_runtime_smoke_accepts_flathub_test_refs(app_ref: str) -> None:
         app_ref,
         "--check-deps",
     ]
+
+
+def test_flatpak_runtime_smoke_includes_extra_flatpak_run_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "MINI_EQ_FLATPAK_RUN_ARGS",
+        "--filesystem=/tmp/mini-eq-runtime/pipewire-0:ro --env=PIPEWIRE_RUNTIME_DIR=/tmp/mini-eq-runtime",
+    )
+
+    assert check_flatpak_runtime.flatpak_run_command("io.github.bhack.mini-eq//master", "--check-deps") == [
+        "flatpak",
+        "run",
+        "--filesystem=/tmp/mini-eq-runtime/pipewire-0:ro",
+        "--env=PIPEWIRE_RUNTIME_DIR=/tmp/mini-eq-runtime",
+        "io.github.bhack.mini-eq//master",
+        "--check-deps",
+    ]

@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -81,27 +83,32 @@ def pipewire_node_target(value: str) -> str:
     raise argparse.ArgumentTypeError(f"invalid PipeWire node target: {value}")
 
 
+def flatpak_run_extra_args() -> list[str]:
+    return shlex.split(os.environ.get("MINI_EQ_FLATPAK_RUN_ARGS", ""))
+
+
 def flatpak_run_command(app_ref: str, *app_args: str) -> list[str]:
+    extra_args = flatpak_run_extra_args()
     if app_ref == APP_ID:
-        return ["flatpak", "run", APP_ID, *app_args]
+        return ["flatpak", "run", *extra_args, APP_ID, *app_args]
     if app_ref == DEFAULT_APP_REF:
-        return ["flatpak", "run", DEFAULT_APP_REF, *app_args]
+        return ["flatpak", "run", *extra_args, DEFAULT_APP_REF, *app_args]
     if app_ref == STABLE_APP_REF:
-        return ["flatpak", "run", STABLE_APP_REF, *app_args]
+        return ["flatpak", "run", *extra_args, STABLE_APP_REF, *app_args]
     if app_ref == TEST_APP_REF:
-        return ["flatpak", "run", TEST_APP_REF, *app_args]
+        return ["flatpak", "run", *extra_args, TEST_APP_REF, *app_args]
     if app_ref == FULL_AARCH64_MASTER_REF:
-        return ["flatpak", "run", FULL_AARCH64_MASTER_REF, *app_args]
+        return ["flatpak", "run", *extra_args, FULL_AARCH64_MASTER_REF, *app_args]
     if app_ref == FULL_AARCH64_STABLE_REF:
-        return ["flatpak", "run", FULL_AARCH64_STABLE_REF, *app_args]
+        return ["flatpak", "run", *extra_args, FULL_AARCH64_STABLE_REF, *app_args]
     if app_ref == FULL_AARCH64_TEST_REF:
-        return ["flatpak", "run", FULL_AARCH64_TEST_REF, *app_args]
+        return ["flatpak", "run", *extra_args, FULL_AARCH64_TEST_REF, *app_args]
     if app_ref == FULL_X86_64_MASTER_REF:
-        return ["flatpak", "run", FULL_X86_64_MASTER_REF, *app_args]
+        return ["flatpak", "run", *extra_args, FULL_X86_64_MASTER_REF, *app_args]
     if app_ref == FULL_X86_64_STABLE_REF:
-        return ["flatpak", "run", FULL_X86_64_STABLE_REF, *app_args]
+        return ["flatpak", "run", *extra_args, FULL_X86_64_STABLE_REF, *app_args]
     if app_ref == FULL_X86_64_TEST_REF:
-        return ["flatpak", "run", FULL_X86_64_TEST_REF, *app_args]
+        return ["flatpak", "run", *extra_args, FULL_X86_64_TEST_REF, *app_args]
     raise RuntimeError(f"unsupported Flatpak app ref: {app_ref}")
 
 

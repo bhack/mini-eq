@@ -12,6 +12,11 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+try:
+    from tools.release_gates import FLATPAK_RUNTIME_REVIEW_PATHS
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from release_gates import FLATPAK_RUNTIME_REVIEW_PATHS
+
 ROOT = Path(__file__).resolve().parents[1]
 LEAK_PATTERN = (
     r"(/home/|/Users/|secret|token|api[_-]?key|github_pat|"
@@ -45,24 +50,6 @@ BACKGROUND_PORTAL_REVIEW_PATHS = (
     Path("src/mini_eq/window.py"),
     Path("src/mini_eq/window_preferences.py"),
     Path("extensions/gnome-shell/mini-eq@bhack.github.io/extension.js"),
-)
-FLATPAK_RUNTIME_REVIEW_PATHS = (
-    Path(".github/workflows/ci.yml"),
-    Path("io.github.bhack.mini-eq.yaml"),
-    Path("python3-dependencies.yaml"),
-    Path("pyproject.toml"),
-    Path("src/mini_eq/analyzer.py"),
-    Path("src/mini_eq/cli.py"),
-    Path("src/mini_eq/deps.py"),
-    Path("src/mini_eq/filter_chain.py"),
-    Path("src/mini_eq/routing.py"),
-    Path("src/mini_eq/window.py"),
-    Path("src/mini_eq/pipewire_backend.py"),
-    Path("src/mini_eq/pipewire_stream_router.py"),
-    Path("tools/check_flatpak_runtime.py"),
-    Path("tools/check_live_ui_runtime.py"),
-    Path("tools/run_flatpak_runtime_smoke_ci.sh"),
-    Path("tests/test_mini_eq_live_ui_runtime.py"),
 )
 PIPEWIRE_GOBJECT_BUILD_TOOLS = ("g-ir-compiler", "g-ir-scanner", "pkg-config")
 PIPEWIRE_GOBJECT_PKG_CONFIG_MODULES = ("glib-2.0", "gio-2.0", "gobject-2.0", "libpipewire-0.3")
@@ -192,7 +179,10 @@ def run_flatpak_runtime_smoke_notice() -> None:
     print(f"\nFlatpak runtime smoke may be needed; runtime integration changed since {base_tag}:")
     for path in changes:
         print(f"  {path}")
-    print("Run the installed Flatpak runtime smoke and interactive audio check before releasing this change.")
+    print(
+        "Run the installed Flatpak runtime smoke and interactive audio check before releasing this change. "
+        "The Release workflow also blocks public publish dispatches on the isolated Flatpak routing smoke."
+    )
 
 
 def run_leak_scan() -> None:
