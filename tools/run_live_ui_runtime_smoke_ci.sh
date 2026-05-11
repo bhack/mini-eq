@@ -29,7 +29,7 @@ PY
 )"
 "$venv/bin/python" -m pip install "meson-python>=0.18" "meson>=1.2" ninja packaging
 "$venv/bin/python" -m pip install --no-build-isolation "$pwg_requirement"
-"$venv/bin/python" -m pip install -e '.[dev]'
+"$venv/bin/python" -m pip install -e .
 "$venv/bin/python" tools/check_live_ui_runtime.py \
   --timeout "$timeout" \
   --cycles "$cycles" \

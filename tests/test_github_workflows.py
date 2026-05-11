@@ -32,17 +32,14 @@ def test_release_workflow_blocks_publish_on_runtime_gate() -> None:
     assert "runtime-gate" in release_yml.partition("build:")[2].partition("runs-on:")[0]
 
 
-def test_release_workflow_blocks_publish_on_live_ui_gate() -> None:
+def test_release_workflow_does_not_block_publish_on_native_live_ui_gate() -> None:
     release_yml = workflow_text("release.yml")
 
-    assert "force_live_ui_runtime_smoke" in release_yml
-    assert "--scope live-ui" in release_yml
-    assert "live-ui-risk:" in release_yml
-    assert "live-ui-runtime-smoke:" in release_yml
-    assert "live-ui-gate:" in release_yml
-    assert "tools/run_live_ui_runtime_smoke_ci.sh" in release_yml
-    assert "needs['live-ui-runtime-smoke'].result != 'success'" in release_yml
-    assert "live-ui-gate" in release_yml.partition("build:")[2].partition("runs-on:")[0]
+    assert "force_live_ui_runtime_smoke" not in release_yml
+    assert "--scope live-ui" not in release_yml
+    assert "live-ui-runtime-smoke:" not in release_yml
+    assert "live-ui-gate:" not in release_yml
+    assert "tools/run_live_ui_runtime_smoke_ci.sh" not in release_yml
 
 
 def test_release_workflow_blocks_publish_on_release_preflight() -> None:
@@ -64,11 +61,11 @@ def test_ci_scope_treats_release_workflow_and_release_gate_tools_as_tested_chang
 
 
 def test_live_ui_runtime_smoke_uses_host_gir_build_environment() -> None:
-    release_yml = workflow_text("release.yml")
     ci_yml = workflow_text("ci.yml")
     script = (ROOT / "tools/run_live_ui_runtime_smoke_ci.sh").read_text(encoding="utf-8")
 
-    assert "patchelf" in release_yml
     assert "patchelf" in ci_yml
     assert "pipewire-gobject" in script
     assert "--no-build-isolation" in script
+    assert "pip install -e ." in script
+    assert ".[dev]" not in script

@@ -32,8 +32,8 @@ PWG_REQUIRED_SYMBOLS = (
 )
 PYGOBJECT_HINT = "Ubuntu/Debian: python3-gi; Fedora: python3-gobject; Arch: python-gobject"
 PYCAIRO_HINT = "Ubuntu/Debian: python3-cairo; Fedora: python3-cairo; Arch: python-cairo"
-GTK_HINT = "Ubuntu/Debian: gir1.2-gtk-4.0; Fedora: gtk4; Arch: gtk4. Requires GTK 4.12+."
-ADW_HINT = "Ubuntu/Debian: gir1.2-adw-1; Fedora: libadwaita; Arch: libadwaita. Requires Libadwaita 1.7+."
+GTK_HINT = "Ubuntu/Debian: gir1.2-gtk-4.0; Fedora: gtk4; Arch: gtk4. Prefer the Flatpak on older GTK stacks."
+ADW_HINT = "Ubuntu/Debian: gir1.2-adw-1; Fedora: libadwaita; Arch: libadwaita. Prefer the Flatpak on older stacks."
 PWG_HINT = (
     "Install pipewire-gobject from PyPI or your distribution. "
     "It also needs system libpipewire-0.3, GLib, GObject, GIO, and PyGObject."
@@ -375,7 +375,7 @@ def collect_dependency_checks() -> list[DependencyCheck]:
         check_python_version(),
         check_python_import("gi", "PyGObject", True, PYGOBJECT_HINT),
         check_python_import("cairo", "pycairo", True, PYCAIRO_HINT),
-        check_gi_repository_attribute("Gtk", "4.0", "Button.set_can_shrink", "GTK 4.12+ GI namespace", True, GTK_HINT),
+        check_gi_repository_attribute("Gtk", "4.0", "Button.set_can_shrink", "GTK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Gdk", "4.0", "GDK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Gsk", "4.0", "GSK 4 GI namespace", True, GTK_HINT),
         check_gi_repository("Graphene", "1.0", "Graphene GI namespace", True, GTK_HINT),

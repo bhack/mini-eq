@@ -51,8 +51,8 @@ flatpak install flathub io.github.bhack.mini-eq
 flatpak run io.github.bhack.mini-eq
 ```
 
-PyPI and source installs are available for development or for systems with the
-required GTK, Libadwaita, PyGObject, PipeWire, WirePlumber, and native
+PyPI and source installs are available for development or for systems with a
+recent GTK/Libadwaita stack plus PyGObject, PipeWire, WirePlumber, and native
 pipewire-gobject build/runtime packages already installed:
 
 ```bash
@@ -77,8 +77,8 @@ https://extensions.gnome.org/extension/9803/mini-eq-controls/
 
 Runtime data is stored under `~/.config/mini-eq`.
 
-`pip install mini-eq` installs only the Python package. The system packages
-listed in
+`pip install mini-eq` installs only the Python package. The recent desktop and
+audio system packages listed in
 [Development](https://github.com/bhack/mini-eq/blob/main/docs/development.md)
 are still required for the app to connect to GTK, PipeWire, and the host
 WirePlumber-managed session.

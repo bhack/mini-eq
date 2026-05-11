@@ -200,8 +200,9 @@ def run_live_ui_runtime_smoke_notice() -> None:
     for path in changes:
         print(f"  {path}")
     print(
-        "Run the live GTK/AT-SPI/PipeWire smoke before releasing this change. "
-        "The Release workflow also blocks public publish dispatches on this smoke."
+        "Run the live GTK/AT-SPI/PipeWire smoke on a supported recent GNOME/GTK stack before "
+        "releasing this change. The Release workflow does not treat the hosted native Ubuntu GTK "
+        "stack as the blocking UI runtime."
     )
 
 

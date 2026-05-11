@@ -88,8 +88,9 @@ MINI_EQ_RUN_LIVE_UI=1 .venv/bin/python -m pytest tests/test_mini_eq_live_ui_runt
 ```
 
 The live UI smoke is opt-in locally because it needs nested GNOME Shell,
-AT-SPI, PipeWire, and WirePlumber, but it is a blocking `Release` workflow gate
-for app-sensitive publish dispatches.
+AT-SPI, PipeWire, and WirePlumber. Treat it as a maintainer confidence check on
+a supported recent GNOME/GTK stack; the blocking public release runtime gate is
+the Flatpak routing smoke.
 
 For manual GNOME Shell extension testing against an installed Flatpak build,
 run the nested devkit smoke. It loads the extension from this checkout and

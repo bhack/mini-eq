@@ -6,12 +6,15 @@ commands. The README stays focused on using Mini EQ.
 ## System Dependencies
 
 Mini EQ depends on system desktop/audio packages that Python packaging cannot
-fully install: GTK 4.12+ and Libadwaita 1.7+ GI bindings, PyGObject, PipeWire,
-WirePlumber as the session manager, and the native libraries required by
-pipewire-gobject. Install PyGObject from your distro, such as `python3-gi` or
-`python3-gobject`, rather than adding a PyPI PyGObject dependency to Mini EQ.
+fully install: a recent GTK/Libadwaita GI stack comparable to the supported
+GNOME Flatpak runtime, PyGObject, PipeWire, WirePlumber as the session manager,
+and the native libraries required by pipewire-gobject. Install PyGObject from
+your distro, such as `python3-gi` or `python3-gobject`, rather than adding a
+PyPI PyGObject dependency to Mini EQ.
 
 If your distro ships older GTK or Libadwaita builds, prefer the Flatpak build.
+The current UI is validated against the GNOME Flatpak runtime; native distro
+installs are best for development on a recent GNOME stack.
 
 Package names vary by distro release. If pip builds pipewire-gobject from its
 source distribution, install the GLib, GObject-Introspection, and PipeWire
@@ -151,8 +154,9 @@ MINI_EQ_RUN_LIVE_UI=1 python3 -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 
 These integration smokes are intentionally separate from the default pytest
 suite because they require nested GNOME Shell, AT-SPI services, PipeWire, and
-WirePlumber. The release workflow promotes the live UI smoke to a blocking gate
-for app-sensitive publish dispatches.
+WirePlumber. Use the live UI smoke as a maintainer confidence check on a
+supported recent GNOME/GTK stack; the public release workflow does not treat
+the hosted Ubuntu native GTK stack as the blocking UI runtime.
 
 ## Local Flatpak Build
 
