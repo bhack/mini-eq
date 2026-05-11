@@ -487,8 +487,13 @@ class SystemWideEqController:
             if enabled and not self.routed:
                 stream_router.enable()
                 self.routed = True
+                self.apply_state_to_engine()
                 if announce:
                     self.emit_status(f"system audio routed to {self.virtual_sink_name}")
+                return
+
+            if enabled and self.routed:
+                self.apply_state_to_engine()
                 return
 
             if not enabled and self.routed:

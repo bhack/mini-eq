@@ -1007,6 +1007,7 @@ def test_route_system_audio_enables_eq_before_routing() -> None:
     controller.refresh_followed_output_sink = lambda: calls.append("refresh")
     controller.set_eq_enabled = set_eq_enabled
     controller.ensure_stream_router = lambda: calls.append("router") or FakeRouter()
+    controller.apply_state_to_engine = lambda: calls.append("apply")
     controller.emit_status = lambda message: calls.append(f"status:{message}")
 
     routing.SystemWideEqController.route_system_audio(controller, True)
@@ -1016,9 +1017,41 @@ def test_route_system_audio_enables_eq_before_routing() -> None:
         "eq:True",
         "router",
         "enable",
+        "apply",
         "status:system audio routed to mini_eq_sink",
     ]
     assert controller.eq_enabled is True
+    assert controller.routed is True
+
+
+def test_route_system_audio_reapplies_current_curve_after_routing() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.shutting_down = False
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.routed = False
+    controller.eq_enabled = True
+    controller.virtual_sink_name = "mini_eq_sink"
+    calls: list[str] = []
+
+    class FakeRouter:
+        def enable(self) -> None:
+            calls.append("enable")
+
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.ensure_stream_router = lambda: calls.append("router") or FakeRouter()
+    controller.apply_state_to_engine = lambda: calls.append("apply")
+    controller.emit_status = lambda message: calls.append(f"status:{message}")
+
+    routing.SystemWideEqController.route_system_audio(controller, True)
+
+    assert calls == [
+        "refresh",
+        "router",
+        "enable",
+        "apply",
+        "status:system audio routed to mini_eq_sink",
+    ]
     assert controller.routed is True
 
 

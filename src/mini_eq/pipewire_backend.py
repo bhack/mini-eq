@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .pipewire_routes import PipeWireOutputRoute, PipeWireRouteMixin
+from .pipewire_routes import DEVICE_ROUTE_PARAM_NAME, PipeWireOutputRoute, PipeWireRouteMixin
 
 DEFAULT_METADATA_NAME = "default"
 DEFAULT_AUDIO_SINK_KEY = "default.audio.sink"
@@ -451,9 +451,12 @@ class PipeWireBackend(PipeWireRouteMixin):
         if device is None:
             return 0
 
-        route_param_id = self._device_route_param_id(device)
-        if route_param_id is None:
+        route_param_ids = self._device_route_event_param_ids(device)
+        if not route_param_ids:
             return 0
+        route_param_id = route_param_ids.get(DEVICE_ROUTE_PARAM_NAME)
+        route_event_param_ids = set(route_param_ids.values())
+        subscribed_param_ids = list(dict.fromkeys(route_param_ids.values()))
 
         def on_device_param(_device, param) -> None:
             try:
@@ -461,17 +464,22 @@ class PipeWireBackend(PipeWireRouteMixin):
             except Exception:
                 return
 
-            if param_id != route_param_id or int(device_bound_id) in self._device_route_refreshing_bound_ids:
+            if param_id not in route_event_param_ids or int(device_bound_id) in self._device_route_refreshing_bound_ids:
                 return
 
-            if self._remember_device_route_param(device_bound_id, param):
-                callback()
+            if route_param_id is not None and param_id == route_param_id:
+                if self._remember_device_route_param(device_bound_id, param):
+                    callback()
+                return
+
+            self._device_active_output_routes.pop(int(device_bound_id), None)
+            callback()
 
         handler_id = self._GObject.Object.connect(device, "param", on_device_param)
         self._device_signal_objects[handler_id] = device
 
         try:
-            device.subscribe_params(self._GLib.Variant("au", [route_param_id]))
+            device.subscribe_params(self._GLib.Variant("au", subscribed_param_ids))
         except Exception:
             self.disconnect_device_handler(handler_id)
             return 0

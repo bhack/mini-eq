@@ -6,6 +6,8 @@ from urllib.parse import quote
 OUTPUT_PRESET_ROUTE_KEY_PREFIX = "pipewire-route:v1:"
 OUTPUT_ROUTE_DIRECTION = "output"
 DEVICE_ROUTE_PARAM_NAME = "Route"
+DEVICE_ENUM_ROUTE_PARAM_NAME = "EnumRoute"
+DEVICE_ROUTE_EVENT_PARAM_NAMES = (DEVICE_ROUTE_PARAM_NAME, DEVICE_ENUM_ROUTE_PARAM_NAME)
 DEVICE_LABEL_PROPERTY_KEYS = ("device.description", "device.nick", "device.name")
 
 
@@ -261,6 +263,13 @@ class PipeWireRouteMixin:
             route_param_id = self._device_param_id_by_name(device, DEVICE_ROUTE_PARAM_NAME)
         return route_param_id
 
+    def _device_route_event_param_ids(self, device) -> dict[str, int]:
+        route_param_ids = self._device_param_ids_by_name(device, DEVICE_ROUTE_EVENT_PARAM_NAMES)
+        if DEVICE_ROUTE_PARAM_NAME not in route_param_ids:
+            self._sync_proxy(device, "device")
+            route_param_ids = self._device_param_ids_by_name(device, DEVICE_ROUTE_EVENT_PARAM_NAMES)
+        return route_param_ids
+
     def _device_param_id_by_name(self, device, name: str) -> int | None:
         for param_info in self._iterate_model(device.get_param_infos()):
             try:
@@ -273,6 +282,21 @@ class PipeWireRouteMixin:
                 return param_id
 
         return None
+
+    def _device_param_ids_by_name(self, device, names: tuple[str, ...]) -> dict[str, int]:
+        wanted_names = set(names)
+        param_ids: dict[str, int] = {}
+        for param_info in self._iterate_model(device.get_param_infos()):
+            try:
+                param_name = param_info.dup_name()
+                param_id = int(param_info.get_id())
+            except Exception:
+                continue
+
+            if param_name in wanted_names:
+                param_ids[param_name] = param_id
+
+        return param_ids
 
     def _output_route_from_info(
         self,

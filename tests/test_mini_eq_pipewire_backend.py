@@ -898,7 +898,7 @@ def test_enumerate_device_routes_uses_request_scoped_params(monkeypatch: pytest.
     assert [route.name for route in routes] == ["analog-output-headphones"]
 
 
-def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_connect_device_route_changed_subscribes_to_route_event_params(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeParam:
         def __init__(
             self,
@@ -917,11 +917,15 @@ def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pyt
             return self.param_id
 
     class FakeParamInfo:
+        def __init__(self, param_id: int, name: str) -> None:
+            self.param_id = param_id
+            self.name = name
+
         def get_id(self) -> int:
-            return 13
+            return self.param_id
 
         def dup_name(self) -> str:
-            return "Route"
+            return self.name
 
     class FakeModel:
         def __init__(self, items: list[object]) -> None:
@@ -935,7 +939,7 @@ def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pyt
 
     class FakeDevice:
         def __init__(self) -> None:
-            self.param_infos = FakeModel([FakeParamInfo()])
+            self.param_infos = FakeModel([FakeParamInfo(13, "Route"), FakeParamInfo(14, "EnumRoute")])
             self.subscriptions: list[FakeVariant] = []
             self.disconnected: list[int] = []
             self.param_callback = None
@@ -1004,7 +1008,7 @@ def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pyt
     handler_id = backend.connect_device_route_changed(72, lambda: calls.append("route"))
 
     assert handler_id == 77
-    assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13])]
+    assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13, 14])]
 
     device.emit_param(12)
     assert calls == []
@@ -1016,19 +1020,23 @@ def test_connect_device_route_changed_subscribes_to_route_param(monkeypatch: pyt
     assert calls == ["route"]
     assert backend._device_active_output_routes[72][6].name == "analog-output-headphones"
 
-    device.emit_param(13, route_device=7, route_name="analog-output-speaker")
+    device.emit_param(14, route_device=7, route_name="analog-output-speaker")
     assert calls == ["route", "route"]
+    assert 72 not in backend._device_active_output_routes
+
+    device.emit_param(13, route_device=7, route_name="analog-output-speaker")
+    assert calls == ["route", "route", "route"]
     assert tuple(backend._device_active_output_routes[72]) == (7,)
     assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 
     backend._device_route_refreshing_bound_ids.add(72)
     device.emit_param(13, route_device=6, route_name="analog-output-headphones")
-    assert calls == ["route", "route"]
+    assert calls == ["route", "route", "route"]
     assert tuple(backend._device_active_output_routes[72]) == (7,)
     assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 
     backend.disconnect_device_handler(handler_id)
-    assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13]), ("au", [])]
+    assert [(variant.signature, variant.value) for variant in device.subscriptions] == [("au", [13, 14]), ("au", [])]
     assert device.disconnected == [77]
 
 
