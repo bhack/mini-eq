@@ -32,6 +32,19 @@ def test_release_workflow_blocks_publish_on_runtime_gate() -> None:
     assert "runtime-gate" in release_yml.partition("build:")[2].partition("runs-on:")[0]
 
 
+def test_release_workflow_blocks_publish_on_live_ui_gate() -> None:
+    release_yml = workflow_text("release.yml")
+
+    assert "force_live_ui_runtime_smoke" in release_yml
+    assert "--scope live-ui" in release_yml
+    assert "live-ui-risk:" in release_yml
+    assert "live-ui-runtime-smoke:" in release_yml
+    assert "live-ui-gate:" in release_yml
+    assert "tools/run_live_ui_runtime_smoke_ci.sh" in release_yml
+    assert "needs['live-ui-runtime-smoke'].result != 'success'" in release_yml
+    assert "live-ui-gate" in release_yml.partition("build:")[2].partition("runs-on:")[0]
+
+
 def test_release_workflow_blocks_publish_on_release_preflight() -> None:
     release_yml = workflow_text("release.yml")
 
@@ -46,3 +59,5 @@ def test_ci_scope_treats_release_workflow_and_release_gate_tools_as_tested_chang
     assert ".github/workflows/*.yml)" in ci_yml
     assert "tools/release_gates.py" in ci_yml
     assert "tools/release_runtime_gate.py" in ci_yml
+    assert "live_ui_runtime_smoke" in ci_yml
+    assert "tools/run_live_ui_runtime_smoke_ci.sh" in ci_yml

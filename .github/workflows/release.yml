@@ -47,6 +47,11 @@ on:
         required: true
         type: boolean
         default: false
+      force_live_ui_runtime_smoke:
+        description: Run the live GTK/AT-SPI/PipeWire smoke even when app-sensitive files did not change.
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -139,9 +144,52 @@ jobs:
           fi
 
           python3 tools/release_runtime_gate.py \
+            --scope flatpak \
             --tag "$TAG_NAME" \
             --release-requested "$release_requested" \
             --force "$FORCE_FLATPAK_RUNTIME_SMOKE" \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-summary "$GITHUB_STEP_SUMMARY"
+
+  live-ui-risk:
+    name: Detect live UI smoke gate
+    needs: validate-inputs
+    runs-on: ubuntu-24.04
+
+    outputs:
+      required: ${{ steps.detect.outputs.required }}
+      base_tag: ${{ steps.detect.outputs.base_tag }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target }}
+          fetch-depth: 0
+
+      - name: Detect app and UI runtime-sensitive changes
+        id: detect
+        env:
+          CREATE_GITHUB_RELEASE: ${{ inputs.create_github_release }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORCE_LIVE_UI_RUNTIME_SMOKE: ${{ inputs.force_live_ui_runtime_smoke }}
+          PUBLISH_PYPI: ${{ inputs.publish_pypi }}
+          PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          release_requested=false
+          if { [ "$CREATE_GITHUB_RELEASE" = "true" ] || [ "$PUBLISH_TESTPYPI" = "true" ] || [ "$PUBLISH_PYPI" = "true" ]; } \
+            && [ "$DRY_RUN" = "false" ]; then
+            release_requested=true
+          fi
+
+          python3 tools/release_runtime_gate.py \
+            --scope live-ui \
+            --tag "$TAG_NAME" \
+            --release-requested "$release_requested" \
+            --force "$FORCE_LIVE_UI_RUNTIME_SMOKE" \
             --github-output "$GITHUB_OUTPUT" \
             --github-summary "$GITHUB_STEP_SUMMARY"
 
@@ -172,6 +220,57 @@ jobs:
       - name: Build and run Flatpak routing runtime smoke
         run: tools/run_flatpak_runtime_smoke_ci.sh
 
+  live-ui-runtime-smoke:
+    name: Live UI runtime smoke
+    needs: live-ui-risk
+    if: ${{ needs['live-ui-risk'].outputs.required == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target }}
+
+      - name: Install live UI runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            appstream \
+            at-spi2-core \
+            build-essential \
+            dbus-user-session \
+            desktop-file-utils \
+            gir1.2-adw-1 \
+            gir1.2-gtk-4.0 \
+            git \
+            gnome-shell \
+            gobject-introspection \
+            libebur128-1 \
+            libgirepository1.0-dev \
+            libglib2.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-modules \
+            meson \
+            ninja-build \
+            pipewire \
+            pipewire-bin \
+            pkg-config \
+            python3 \
+            python3-cairo \
+            python3-dev \
+            python3-gi \
+            python3-numpy \
+            python3-pip \
+            python3-pyatspi \
+            python3-setuptools \
+            python3-venv \
+            wireplumber
+
+      - name: Build source environment and run live UI smoke
+        run: tools/run_live_ui_runtime_smoke_ci.sh
+
   runtime-gate:
     name: Require runtime smoke gate
     needs:
@@ -197,6 +296,33 @@ jobs:
             echo "Required Flatpak routing runtime smoke passed."
           else
             echo "Flatpak routing runtime smoke was not required for this dispatch."
+          fi
+
+  live-ui-gate:
+    name: Require live UI smoke gate
+    needs:
+      - live-ui-risk
+      - live-ui-runtime-smoke
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Require live-ui-risk job
+        if: ${{ needs['live-ui-risk'].result != 'success' }}
+        run: exit 1
+
+      - name: Require live UI smoke
+        if: ${{ needs['live-ui-risk'].outputs.required == 'true' && needs['live-ui-runtime-smoke'].result != 'success' }}
+        run: |
+          echo "::error::Live GTK/AT-SPI/PipeWire runtime smoke is required for this release and did not pass."
+          exit 1
+
+      - name: Confirm live UI gate
+        run: |
+          if [ "${{ needs['live-ui-risk'].outputs.required }}" = "true" ]; then
+            echo "Required live UI runtime smoke passed."
+          else
+            echo "Live UI runtime smoke was not required for this dispatch."
           fi
 
   preflight:
@@ -252,6 +378,7 @@ jobs:
     needs:
       - validate-inputs
       - runtime-gate
+      - live-ui-gate
       - preflight
     runs-on: ubuntu-24.04
 

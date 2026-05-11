@@ -118,3 +118,61 @@ def test_flatpak_runtime_gate_force_overrides_dry_run_dispatch(tmp_path: Path) -
 
     assert gate.required is True
     assert gate.reason == "forced by dispatch input"
+
+
+def test_live_ui_runtime_gate_requires_smoke_for_app_changes(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    write_file(tmp_path, "src/mini_eq/window.py", "old\n")
+    commit(tmp_path, "base")
+    git(tmp_path, "tag", "v0.7.3")
+    write_file(tmp_path, "src/mini_eq/window.py", "new\n")
+    commit(tmp_path, "ui change")
+
+    gate = release_runtime_gate.live_ui_runtime_gate(
+        tmp_path,
+        current_tag="v0.7.4",
+        release_requested=True,
+        force=False,
+    )
+
+    assert gate.required is True
+    assert gate.base_tag == "v0.7.3"
+    assert gate.changes == ("src/mini_eq/window.py",)
+    assert gate.reason == "app or UI runtime-sensitive changes"
+
+
+def test_live_ui_runtime_gate_skips_docs_only_changes(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    write_file(tmp_path, "README.md", "old\n")
+    commit(tmp_path, "base")
+    git(tmp_path, "tag", "v0.7.3")
+    write_file(tmp_path, "README.md", "new\n")
+    commit(tmp_path, "docs change")
+
+    gate = release_runtime_gate.live_ui_runtime_gate(
+        tmp_path,
+        current_tag="v0.7.4",
+        release_requested=True,
+        force=False,
+    )
+
+    assert gate.required is False
+    assert gate.base_tag == "v0.7.3"
+    assert gate.changes == ()
+
+
+def test_live_ui_runtime_gate_can_be_forced(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    write_file(tmp_path, "README.md", "old\n")
+    commit(tmp_path, "base")
+    git(tmp_path, "tag", "v0.7.3")
+
+    gate = release_runtime_gate.live_ui_runtime_gate(
+        tmp_path,
+        current_tag="v0.7.4",
+        release_requested=False,
+        force=True,
+    )
+
+    assert gate.required is True
+    assert gate.reason == "forced by dispatch input"

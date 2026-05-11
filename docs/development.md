@@ -149,6 +149,11 @@ python3 tools/check_live_ui_runtime.py --timeout 35 --cycles 1
 MINI_EQ_RUN_LIVE_UI=1 python3 -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 ```
 
+These integration smokes are intentionally separate from the default pytest
+suite because they require nested GNOME Shell, AT-SPI services, PipeWire, and
+WirePlumber. The release workflow promotes the live UI smoke to a blocking gate
+for app-sensitive publish dispatches.
+
 ## Local Flatpak Build
 
 The Flatpak manifest uses the GNOME runtime. It does not ship a full PipeWire

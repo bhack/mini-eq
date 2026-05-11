@@ -14,6 +14,10 @@ Run the narrowest gate that covers the release risk:
 - **Always:** version metadata, release preflight, GitHub release dry run or
   release workflow, TestPyPI install validation, PyPI publish, post-publish
   verification, then Flathub stable PR.
+- **When application code, UI code, or runtime-sensitive packaging changed:**
+  live GTK/AT-SPI/PipeWire smoke. Public release workflow dispatches run this
+  as a blocking job for app-sensitive changes before building publishable
+  artifacts.
 - **When PipeWire, routing, analyzer, Flatpak permissions, runtime dependencies,
   or shutdown changed:** local Flatpak install, Flatpak runtime smoke, and
   interactive real-music testing before merge or release. Public release
@@ -72,6 +76,22 @@ checked state, sensitivity, and critical status labels. They should not depend
 on widget internals when a unit test can cover the state transition directly.
 When in doubt, add a small state-level unit test first, then one AT-SPI smoke
 assertion for the visible contract.
+
+The automated release gates are confidence checks, not a proof that every user
+graph behaves correctly. Treat their claims narrowly:
+
+- Unit and seam tests verify deterministic model, routing, metadata, and UI
+  state transitions.
+- The release preflight verifies source cleanliness, package build/install,
+  dependency importability, metadata, and the full default pytest suite.
+- The Flatpak routing smoke verifies the installed Flatpak can route and
+  restore a synthetic stream in an isolated PipeWire/WirePlumber graph.
+- The live UI smoke verifies the real GTK app can be driven through AT-SPI
+  while PipeWire routing, output following, monitor capture, preset reset, and
+  shutdown are exercised.
+- Manual real-session audio testing is still required for changes that depend
+  on host devices, real music playback, WirePlumber policy, or analyzer
+  behavior users can perceive.
 
 ## Prepare Version
 
@@ -192,21 +212,26 @@ run the app interactively with real music before release. Exercise
 enable/disable, output switching, preset changes, analyzer display, shutdown,
 and stream restoration against the actual desktop audio graph.
 
-Before the manual real-music pass, run the opt-in live UI smoke. It starts a
-private PipeWire/WirePlumber graph, synthetic playback, nested headless GNOME
-Shell, the real Mini EQ GTK process, and AT-SPI UI controls:
+Before the manual real-music pass, run the live UI smoke. It starts a private
+PipeWire/WirePlumber graph, synthetic playback, nested headless GNOME Shell,
+the real Mini EQ GTK process, and AT-SPI UI controls:
 
 ```bash
 python3 tools/check_live_ui_runtime.py --timeout 35 --cycles 1
 MINI_EQ_RUN_LIVE_UI=1 python3 -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 ```
 
+The `Release` workflow runs this live UI smoke as a blocking job for app and UI
+runtime-sensitive publish dispatches. The pytest wrapper remains opt-in for
+local development so ordinary unit test runs stay fast and do not require
+nested GNOME Shell or AT-SPI services.
+
 There is an optional hosted Flatpak runtime smoke path in the `CI` workflow.
 Use it as extra signal or for smoke-harness work; keep the local runtime smoke
 as the release check when app/runtime routing behavior changed. The `Release`
 workflow also runs release preflight as a blocking job and has its own blocking
-copy of the Flatpak routing smoke gate for public TestPyPI, PyPI, and GitHub
-release dispatches.
+copy of the Flatpak routing smoke and live UI smoke gates for public TestPyPI,
+PyPI, and GitHub release dispatches.
 
 ## Package Channels
 

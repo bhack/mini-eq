@@ -13,9 +13,9 @@ import tomllib
 from pathlib import Path
 
 try:
-    from tools.release_gates import FLATPAK_RUNTIME_REVIEW_PATHS
+    from tools.release_gates import FLATPAK_RUNTIME_REVIEW_PATHS, LIVE_UI_RUNTIME_REVIEW_PATHS
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from release_gates import FLATPAK_RUNTIME_REVIEW_PATHS
+    from release_gates import FLATPAK_RUNTIME_REVIEW_PATHS, LIVE_UI_RUNTIME_REVIEW_PATHS
 
 ROOT = Path(__file__).resolve().parents[1]
 LEAK_PATTERN = (
@@ -182,6 +182,26 @@ def run_flatpak_runtime_smoke_notice() -> None:
     print(
         "Run the installed Flatpak runtime smoke and interactive audio check before releasing this change. "
         "The Release workflow also blocks public publish dispatches on the isolated Flatpak routing smoke."
+    )
+
+
+def run_live_ui_runtime_smoke_notice() -> None:
+    base_tag = extension_comparison_base_tag()
+    if base_tag is None:
+        print("\nLive UI runtime smoke notice skipped; no release tag found.")
+        return
+
+    changes = changed_paths_for_review(base_tag, LIVE_UI_RUNTIME_REVIEW_PATHS)
+    if not changes:
+        print(f"\nLive UI runtime smoke not indicated; app and UI runtime integration unchanged since {base_tag}.")
+        return
+
+    print(f"\nLive UI runtime smoke may be needed; app or UI runtime integration changed since {base_tag}:")
+    for path in changes:
+        print(f"  {path}")
+    print(
+        "Run the live GTK/AT-SPI/PipeWire smoke before releasing this change. "
+        "The Release workflow also blocks public publish dispatches on this smoke."
     )
 
 
@@ -353,6 +373,7 @@ def main() -> int:
     run([python, ROOT / "tools/check_gnome_shell_extension.py"])
     run_gnome_shell_extension_upload_notice()
     run_flatpak_runtime_smoke_notice()
+    run_live_ui_runtime_smoke_notice()
     run_background_portal_smoke_notice()
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])

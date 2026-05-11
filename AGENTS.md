@@ -87,6 +87,10 @@ PipeWire/WirePlumber graph with synthetic playback and AT-SPI UI driving:
 MINI_EQ_RUN_LIVE_UI=1 .venv/bin/python -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 ```
 
+The live UI smoke is opt-in locally because it needs nested GNOME Shell,
+AT-SPI, PipeWire, and WirePlumber, but it is a blocking `Release` workflow gate
+for app-sensitive publish dispatches.
+
 For manual GNOME Shell extension testing against an installed Flatpak build,
 run the nested devkit smoke. It loads the extension from this checkout and
 launches the installed Flatpak app in the same isolated nested display and
