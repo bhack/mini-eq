@@ -87,6 +87,15 @@ PipeWire/WirePlumber graph with synthetic playback and AT-SPI UI driving:
 MINI_EQ_RUN_LIVE_UI=1 .venv/bin/python -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 ```
 
+For manual GNOME Shell extension testing against an installed Flatpak build,
+run the nested devkit smoke. It loads the extension from this checkout and
+launches the installed Flatpak app in the same isolated nested display and
+session bus:
+
+```bash
+tools/run_nested_flathub_extension_smoke.sh --replace-running
+```
+
 When creating a fresh venv for pip/package validation, follow
 `docs/development.md` so pipewire-gobject is built in a plain wheel-build venv
 before being installed into a `--system-site-packages` Mini EQ venv.
