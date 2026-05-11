@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.4 - 2026-05-11
+
+- Run filter-chain readiness callbacks from the GLib main context when PipeWire
+  reports the virtual sink asynchronously, avoiding thread-loop sync failures
+  during system-wide EQ startup.
+
 ## 0.7.3 - 2026-05-11
 
 - Require pipewire-gobject 0.3.6 and use its synchronous PipeWire registry,

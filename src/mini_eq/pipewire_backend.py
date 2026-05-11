@@ -361,7 +361,7 @@ class PipeWireBackend(PipeWireRouteMixin):
         def on_global_added(_registry, global_) -> None:
             node = maybe_match(global_)
             if node is not None:
-                complete(node)
+                schedule_complete(node)
 
         def on_timeout() -> bool:
             state["timeout_id"] = 0

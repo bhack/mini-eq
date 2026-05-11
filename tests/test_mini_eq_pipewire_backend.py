@@ -496,6 +496,8 @@ def test_watch_for_audio_sink_resolves_from_global_added_signal() -> None:
     backend.watch_for_audio_sink("mini_eq_sink", nodes.append, timeout_ms=1234)
     registry.emit_global_added(make_node_global(42, "mini_eq_sink"))
 
+    assert nodes == []
+    glib.run_idle()
     assert nodes[0] is not None
     assert nodes[0].bound_id == 42
     assert glib.timeout_ms == 1234
