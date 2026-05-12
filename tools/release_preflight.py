@@ -90,6 +90,19 @@ def require_tools(*tools: str) -> None:
         raise SystemExit(f"Missing required release tool(s): {', '.join(missing)}")
 
 
+def bounded_int_env(name: str, default: int, *, minimum: int, maximum: int) -> str:
+    value = os.environ.get(name, str(default)).strip()
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise SystemExit(f"{name} must be an integer between {minimum} and {maximum}") from None
+
+    if not minimum <= parsed <= maximum:
+        raise SystemExit(f"{name} must be an integer between {minimum} and {maximum}")
+
+    return str(parsed)
+
+
 def allowed_leak_match(line: str) -> bool:
     return any(allowed in line for allowed in ALLOWED_LEAK_MATCHES)
 
@@ -424,9 +437,14 @@ def run_build_checks(python: Path) -> None:
 
 
 def run_headless_pipewire_runtime_smoke(python: Path) -> None:
-    timeout = os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", "35")
-    cycles = os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", "2")
-    audio_duration = os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION", "90")
+    timeout = bounded_int_env("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", 35, minimum=1, maximum=600)
+    cycles = bounded_int_env("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", 2, minimum=1, maximum=20)
+    audio_duration = bounded_int_env(
+        "MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION",
+        90,
+        minimum=1,
+        maximum=3600,
+    )
     run(
         [
             python,

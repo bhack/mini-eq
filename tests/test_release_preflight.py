@@ -88,6 +88,23 @@ def test_release_preflight_runs_headless_pipewire_runtime_smoke(monkeypatch) -> 
     ]
 
 
+def test_release_preflight_rejects_invalid_headless_pipewire_runtime_env(monkeypatch) -> None:
+    def fail_run(_command, **_kwargs) -> None:
+        raise AssertionError("Headless runtime smoke should not run with invalid environment")
+
+    monkeypatch.setenv("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", "2; touch unexpected")
+    monkeypatch.setattr(release_preflight, "run", fail_run)
+
+    try:
+        release_preflight.run_headless_pipewire_runtime_smoke(Path("/python"))
+    except SystemExit as error:
+        message = str(error)
+        assert "MINI_EQ_HEADLESS_PIPEWIRE_CYCLES" in message
+        assert "integer between 1 and 20" in message
+    else:
+        raise AssertionError("Expected invalid headless runtime smoke environment to fail")
+
+
 def test_flatpak_pipewire_gobject_pin_accepts_matching_floor(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\ndependencies = ["pipewire-gobject>=0.3.7,<0.4"]\n',
