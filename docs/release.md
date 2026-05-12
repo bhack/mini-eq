@@ -29,6 +29,10 @@ Run the narrowest gate that covers the release risk:
   session.
 - **When preset, output, startup, routing, monitor, or inspector UI behavior
   changed:** run the workflow usability gate below before release.
+- **When UI responsiveness, graph drawing, filter parameter updates, analyzer,
+  routing callbacks, or PipeWire event handling changed:** run the performance
+  regression check in `docs/performance.md` and keep the benchmark output with
+  the release notes or PR investigation.
 - **When the GNOME Shell extension source changed:** run the extension checker,
   build the review zip, test the supported Shell versions, and upload after the
   app release is ready.
@@ -224,6 +228,13 @@ For PipeWire routing, analyzer capture, or filter-chain runtime changes, also
 run the app interactively with real music before release. Exercise
 enable/disable, output switching, preset changes, analyzer display, shutdown,
 and stream restoration against the actual desktop audio graph.
+
+Run the deterministic performance check when a release touches UI
+responsiveness, graph drawing, filter parameter updates, analyzer work, routing
+callbacks, or PipeWire event handling. Use `docs/performance.md` for the exact
+commands and budget policy. Keep this as a maintainer confidence gate unless
+the benchmark runs on a known stable machine; generic CI timing is too noisy
+for strict GTK performance budgets.
 
 Before the manual real-music pass for app or UI behavior changes, run the live
 UI smoke on a supported recent GNOME/GTK stack. It starts a private

@@ -32,6 +32,25 @@ PYTHONPATH=src .venv/bin/python tools/benchmark_fader_drag.py \
   --max-p95-ms graph-response-surface-redraw=30.0
 ```
 
+For release candidates that changed UI responsiveness, graph drawing, filter
+parameter updates, analyzer work, routing callbacks, or PipeWire event
+handling, run a deterministic benchmark before publishing:
+
+```bash
+PYTHONPATH=src .venv/bin/python tools/benchmark_fader_drag.py \
+  --iterations 300 \
+  --warmup 50 \
+  --json \
+  --max-p95-ms current-drag-update=10.0 \
+  --max-p95-ms graph-response-surface-redraw=30.0 \
+  > /tmp/mini-eq-release-benchmark.json
+```
+
+Archive or summarize the JSON output in the release or PR notes when it was
+part of the decision to ship. If this benchmark fails, rerun it without
+`--json` to inspect the terminal table before changing budgets; the intended
+fix is usually the performance regression, not looser thresholds.
+
 For backend parameter-update work, include the local control and SPA pod build
 costs:
 
