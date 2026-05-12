@@ -169,14 +169,16 @@ class SystemWideEqController:
         self._output_preset_target = target
         return target
 
-    def default_output_sink_candidates(self, *, refresh: bool = False) -> tuple[str, ...]:
-        defaults = self.output_backend.refresh_defaults() if refresh else self.output_backend.defaults()
+    def default_output_sink_candidates(self, *, refresh: bool = False, snapshot: bool = False) -> tuple[str, ...]:
+        defaults = (
+            self.output_backend.refresh_defaults(snapshot=snapshot) if refresh else self.output_backend.defaults()
+        )
         return tuple(
             sink_name for sink_name in (defaults.configured_audio_sink, defaults.default_audio_sink) if sink_name
         )
 
-    def get_default_output_sink_name(self, *, refresh: bool = False) -> str:
-        candidates = self.default_output_sink_candidates(refresh=refresh)
+    def get_default_output_sink_name(self, *, refresh: bool = False, snapshot: bool = False) -> str:
+        candidates = self.default_output_sink_candidates(refresh=refresh, snapshot=snapshot)
 
         for sink_name in candidates:
             if self.is_valid_output_sink(sink_name) and self.get_sink(sink_name) is not None:
@@ -231,6 +233,7 @@ class SystemWideEqController:
         return analyzer.prepare()
 
     def set_analyzer_enabled(self, enabled: bool) -> bool:
+        self.refresh_followed_output_sink(snapshot=True)
         analyzer = self.ensure_output_analyzer()
 
         if not enabled:
@@ -304,15 +307,15 @@ class SystemWideEqController:
     def follow_system_default_output(self) -> None:
         previous_output_sink = getattr(self, "output_sink", None)
         self.follow_default_output = True
-        self.refresh_followed_output_sink()
+        self.refresh_followed_output_sink(snapshot=True)
         if getattr(self, "output_sink", None) != previous_output_sink:
             self.schedule_output_event_refresh()
 
-    def refresh_followed_output_sink(self) -> bool:
-        if not self.follow_default_output:
+    def refresh_followed_output_sink(self, *, snapshot: bool = False) -> bool:
+        if not getattr(self, "follow_default_output", False):
             return False
 
-        for default_sink in self.default_output_sink_candidates(refresh=True):
+        for default_sink in self.default_output_sink_candidates(refresh=True, snapshot=snapshot):
             if not self.is_valid_output_sink(default_sink) or self.get_sink(default_sink) is None:
                 continue
             try:
@@ -334,7 +337,7 @@ class SystemWideEqController:
                 self.emit_status(f"default output follow warning: {exc}")
             return True
 
-        return self.refresh_followed_output_sink()
+        return self.refresh_followed_output_sink(snapshot=True)
 
     def schedule_output_event_refresh(self) -> None:
         if not getattr(self, "accept_output_events", False):
@@ -424,7 +427,7 @@ class SystemWideEqController:
         if pending_followed_output_sink is not None:
             self.refresh_followed_output_sink_from_event(pending_followed_output_sink)
         else:
-            self.refresh_followed_output_sink()
+            self.refresh_followed_output_sink(snapshot=True)
         self.refresh_output_route_param_monitor()
 
         if self.outputs_changed_callback is not None:
@@ -451,7 +454,7 @@ class SystemWideEqController:
             )
 
         self.invalidate_output_preset_target()
-        self.refresh_followed_output_sink()
+        self.refresh_followed_output_sink(snapshot=True)
         self.refresh_output_route_param_monitor()
 
         if self.outputs_changed_callback is not None:

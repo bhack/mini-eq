@@ -53,12 +53,14 @@ class FakeDefaultOutputBackend(FakeOutputBackend):
         self.cached_defaults = cached_defaults
         self.refreshed_defaults = refreshed_defaults
         self.refresh_count = 0
+        self.snapshot_values: list[bool] = []
 
     def defaults(self) -> pw_backend.PipeWireDefaults:
         return self.cached_defaults
 
-    def refresh_defaults(self) -> pw_backend.PipeWireDefaults:
+    def refresh_defaults(self, *, snapshot: bool = False) -> pw_backend.PipeWireDefaults:
         self.refresh_count += 1
+        self.snapshot_values.append(snapshot)
         return self.refreshed_defaults
 
 
@@ -211,7 +213,33 @@ def test_refresh_followed_output_sink_refreshes_metadata_and_skips_virtual_defau
 
     assert routing.SystemWideEqController.refresh_followed_output_sink(controller) is True
     assert backend.refresh_count == 1
+    assert backend.snapshot_values == [False]
     assert calls == [("speakers", False)]
+
+
+def test_output_event_idle_refreshes_followed_sink_from_metadata_snapshot() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    backend = FakeDefaultOutputBackend(
+        [make_node(1, "hdmi")],
+        cached_defaults=pw_backend.PipeWireDefaults("speakers", None),
+        refreshed_defaults=pw_backend.PipeWireDefaults("hdmi", None),
+    )
+    controller.accept_output_events = True
+    controller.output_event_source_id = 123
+    controller.pending_followed_output_sink = None
+    controller.follow_default_output = True
+    controller.output_backend = backend
+    controller._output_preset_target_sink = "speakers"
+    controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("speakers", None, ("speakers",))
+    calls: list[object] = []
+    controller.switch_output_sink = lambda sink_name, explicit: calls.append(("switch", sink_name, explicit))
+    controller.refresh_output_route_param_monitor = lambda: calls.append("route-monitor")
+    controller.outputs_changed_callback = lambda: calls.append("outputs")
+
+    assert routing.SystemWideEqController.on_output_event_idle(controller) is False
+
+    assert backend.snapshot_values == [True]
+    assert calls == [("switch", "hdmi", False), "route-monitor", "outputs"]
 
 
 def test_output_metadata_change_schedules_one_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -296,7 +324,7 @@ def test_output_event_idle_uses_pending_followed_sink_before_metadata_refresh() 
     controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("speakers", None, ("speakers",))
     calls: list[object] = []
     controller.switch_output_sink = lambda sink_name, explicit: calls.append(("switch", sink_name, explicit))
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.refresh_output_route_param_monitor = lambda: calls.append("route-monitor")
     controller.outputs_changed_callback = lambda: calls.append("outputs")
 
@@ -340,7 +368,7 @@ def test_output_event_idle_invalidates_output_preset_target_cache() -> None:
     controller._output_preset_target_sink = "speakers"
     controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("speakers", None, ("speakers",))
     calls: list[str] = []
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.outputs_changed_callback = lambda: calls.append("outputs")
 
     assert routing.SystemWideEqController.on_output_event_idle(controller) is False
@@ -431,7 +459,7 @@ def test_output_route_param_change_refreshes_same_sink_route_target(
     controller.output_route_param_handler_id = 0
     controller.output_route_param_device_id = 0
     controller.follow_default_output = False
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.outputs_changed_callback = lambda: calls.append("outputs")
 
     monkeypatch.setattr(routing.GLib, "idle_add", lambda callback: calls.append(("idle", callback)) or 321)
@@ -492,7 +520,7 @@ def test_follow_system_default_output_enables_follow_mode_and_refreshes() -> Non
     controller.follow_default_output = False
     calls: list[str] = []
 
-    def fake_refresh() -> bool:
+    def fake_refresh(**_kwargs) -> bool:
         calls.append("refresh")
         return True
 
@@ -512,7 +540,7 @@ def test_follow_system_default_output_schedules_refresh_when_output_changes(monk
     controller.output_event_source_id = 0
     scheduled_callbacks: list[object] = []
 
-    def fake_refresh() -> bool:
+    def fake_refresh(**_kwargs) -> bool:
         controller.output_sink = "hdmi"
         return True
 
@@ -956,7 +984,7 @@ def test_start_prepares_analyzer_before_filter_chain_engine() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     calls: list[str] = []
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.prepare_output_analyzer = lambda: calls.append("prepare") or True
     controller.start_engine = lambda *, on_ready=None, on_error=None: (calls.append("engine"), on_ready and on_ready())
     controller.start_output_event_monitoring = lambda: calls.append("monitor")
@@ -1030,7 +1058,7 @@ def test_shutdown_restores_routed_streams_without_refreshing_followed_output() -
     controller.stream_router = FakeStreamRouter()
     controller.output_analyzer = None
     controller.output_backend = FakeBackend()
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.stop_output_event_monitoring = lambda: calls.append("stop-monitor")
     controller.engine_module = object()
     controller.filter_node_id = 42
@@ -1059,7 +1087,7 @@ def test_route_system_audio_does_not_enable_during_shutdown() -> None:
     controller.routed = False
     calls: list[str] = []
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.ensure_stream_router = lambda: calls.append("router")
 
     routing.SystemWideEqController.route_system_audio(controller, True)
@@ -1077,7 +1105,7 @@ def test_route_system_audio_requires_ready_engine_before_enabling() -> None:
     controller.eq_enabled = True
     calls: list[str] = []
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.ensure_stream_router = lambda: calls.append("router")
 
     with pytest.raises(RuntimeError, match="filter-chain PipeWire EQ is not ready"):
@@ -1105,7 +1133,7 @@ def test_route_system_audio_enables_eq_before_routing() -> None:
         calls.append(f"eq:{enabled}")
         controller.eq_enabled = enabled
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.set_eq_enabled = set_eq_enabled
     controller.ensure_stream_router = lambda: calls.append("router") or FakeRouter()
     controller.apply_state_to_engine = lambda: calls.append("apply")
@@ -1139,7 +1167,7 @@ def test_route_system_audio_reapplies_current_curve_after_routing() -> None:
         def enable(self) -> None:
             calls.append("enable")
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.ensure_stream_router = lambda: calls.append("router") or FakeRouter()
     controller.apply_state_to_engine = lambda: calls.append("apply")
     controller.emit_status = lambda message: calls.append(f"status:{message}")
@@ -1174,7 +1202,7 @@ def test_route_system_audio_restores_eq_when_route_enable_fails() -> None:
         calls.append(f"eq:{enabled}")
         controller.eq_enabled = enabled
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.set_eq_enabled = set_eq_enabled
     controller.ensure_stream_router = lambda: calls.append("router") or FailingRouter()
 
@@ -1201,7 +1229,7 @@ def test_route_system_audio_restores_eq_when_engine_enable_fails() -> None:
         if enabled:
             raise RuntimeError("control update failed")
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.set_eq_enabled = set_eq_enabled
     controller.ensure_stream_router = lambda: calls.append("router")
 
@@ -1225,7 +1253,7 @@ def test_route_system_audio_can_disable_when_engine_is_not_ready() -> None:
         def disable(self, announce: bool = True) -> None:
             calls.append(f"disable:{announce}")
 
-    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.ensure_stream_router = lambda: calls.append("router") or FakeRouter()
     controller.emit_status = lambda message: calls.append(f"status:{message}")
 

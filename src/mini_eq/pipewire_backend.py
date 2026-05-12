@@ -614,7 +614,14 @@ class PipeWireBackend(PipeWireRouteMixin):
 
         return self.refresh_defaults()
 
-    def refresh_defaults(self) -> PipeWireDefaults:
+    def refresh_defaults(self, *, snapshot: bool = False) -> PipeWireDefaults:
+        snapshot_error: Exception | None = None
+        if snapshot:
+            try:
+                self._resnapshot_metadata()
+            except Exception as exc:
+                snapshot_error = exc
+
         try:
             self._cached_defaults = self._read_defaults()
             return self._cached_defaults
@@ -636,6 +643,10 @@ class PipeWireBackend(PipeWireRouteMixin):
         except Exception:
             if self._has_cached_defaults():
                 return self._cached_defaults
+            if snapshot_error is not None:
+                raise PipeWireBackendError(f"failed to refresh PipeWire metadata snapshot: {snapshot_error}") from (
+                    snapshot_error
+                )
             raise
 
     def remember_default_metadata_change(self, key: str, value: str | None) -> bool:
@@ -659,6 +670,22 @@ class PipeWireBackend(PipeWireRouteMixin):
 
     def _has_cached_defaults(self) -> bool:
         return bool(self._cached_defaults.default_audio_sink or self._cached_defaults.configured_audio_sink)
+
+    def _resnapshot_metadata(self) -> None:
+        if self._metadata is None:
+            return
+
+        try:
+            # Rebinding asks PipeWire for the current metadata properties. This
+            # covers clients that missed property events while the metadata
+            # resource was pending, without polling or sleeping.
+            self._metadata.stop()
+            if not self._metadata.start():
+                raise PipeWireBackendError("failed to restart PipeWire default metadata discovery")
+            self._sync_metadata()
+            self._cached_defaults = PipeWireDefaults(None, None)
+        except Exception as exc:
+            raise PipeWireBackendError(f"failed to refresh PipeWire metadata snapshot: {exc}") from exc
 
     def move_stream_to_target(self, stream_bound_id: int, target_node_name: str) -> None:
         stream = self.output_stream_by_bound_id(stream_bound_id)

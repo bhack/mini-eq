@@ -149,6 +149,38 @@ def wait_for_controller_ready(controller, timeout_seconds: float) -> None:
     dispatch_until("Mini EQ controller ready and routed", ready, timeout_seconds)
 
 
+def describe_controller_default_follow_state(controller) -> str:
+    try:
+        cached_defaults = controller.output_backend.defaults()
+    except Exception as exc:
+        cached_defaults = f"error:{exc}"
+    try:
+        refreshed_defaults = controller.output_backend.refresh_defaults()
+    except Exception as exc:
+        refreshed_defaults = f"error:{exc}"
+    try:
+        sinks = controller.list_output_sink_names()
+    except Exception as exc:
+        sinks = f"error:{exc}"
+    try:
+        alt_seen = controller.get_sink(live.ALT_SINK_NAME) is not None
+    except Exception as exc:
+        alt_seen = f"error:{exc}"
+
+    return (
+        f"output_sink={getattr(controller, 'output_sink', None)!r}, "
+        f"follow_default_output={getattr(controller, 'follow_default_output', None)!r}, "
+        f"pending_followed_output_sink={getattr(controller, 'pending_followed_output_sink', None)!r}, "
+        f"output_event_source_id={getattr(controller, 'output_event_source_id', None)!r}, "
+        f"cached_defaults={cached_defaults!r}, "
+        f"refreshed_defaults={refreshed_defaults!r}, "
+        f"configured_metadata={live.configured_default_sink_name()!r}, "
+        f"default_metadata={live.default_sink_name()!r}, "
+        f"alt_seen_by_backend={alt_seen!r}, "
+        f"output_sinks={sinks!r}"
+    )
+
+
 def run_controller_flow(*, tmp_dir: Path, timeout_seconds: float, cycles: int, audio_duration: float) -> None:
     ensure_source_path()
 
@@ -207,11 +239,19 @@ def run_controller_flow(*, tmp_dir: Path, timeout_seconds: float, cycles: int, a
         )
         alt_serial = live.object_serial(alt_sink)
         live.set_configured_default_sink_name(live.ALT_SINK_NAME, timeout_seconds)
-        dispatch_until(
-            f"Mini EQ controller followed {live.ALT_SINK_NAME}",
-            lambda: controller.output_sink == live.ALT_SINK_NAME,
-            timeout_seconds,
-        )
+        try:
+            dispatch_until(
+                f"Mini EQ controller followed {live.ALT_SINK_NAME}",
+                lambda: controller.output_sink == live.ALT_SINK_NAME,
+                timeout_seconds,
+            )
+        except RuntimeError:
+            print(
+                "Controller default-follow state after alt default move: "
+                f"{describe_controller_default_follow_state(controller)}",
+                flush=True,
+            )
+            raise
         dispatch_until(
             f"{filter_output_name} target.object metadata to point at {alt_serial}",
             lambda: node_targets_serial(filter_output_name, alt_serial),

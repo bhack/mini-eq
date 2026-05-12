@@ -1439,6 +1439,34 @@ def test_refresh_defaults_falls_back_to_cache_on_undecodable_metadata(monkeypatc
     assert syncs == [True]
 
 
+def test_refresh_defaults_can_resnapshot_metadata_before_read(monkeypatch) -> None:
+    backend = pw_backend.PipeWireBackend()
+    calls: list[str] = []
+
+    class FakeMetadata:
+        def stop(self) -> None:
+            calls.append("stop")
+
+        def start(self) -> bool:
+            calls.append("start")
+            return True
+
+    backend._metadata = FakeMetadata()
+    backend._cached_defaults = pw_backend.PipeWireDefaults("stale.default", "stale.configured")
+    monkeypatch.setattr(backend, "_sync_metadata", lambda: calls.append("sync"))
+    monkeypatch.setattr(
+        backend,
+        "_read_defaults",
+        lambda: calls.append("read") or pw_backend.PipeWireDefaults("fresh.default", "fresh.configured"),
+    )
+
+    assert backend.refresh_defaults(snapshot=True) == pw_backend.PipeWireDefaults(
+        "fresh.default",
+        "fresh.configured",
+    )
+    assert calls == ["stop", "start", "sync", "read"]
+
+
 def test_remember_default_metadata_change_updates_cache() -> None:
     backend = pw_backend.PipeWireBackend()
 
