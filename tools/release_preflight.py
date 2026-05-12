@@ -68,9 +68,13 @@ def format_command(command: list[str | Path]) -> str:
     return " ".join(shlex.quote(str(part)) for part in command)
 
 
-def run(command: list[str | Path], *, cwd: Path = ROOT) -> None:
+def run(command: list[str | Path], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
     print(f"\n$ {format_command(command)}", flush=True)
-    subprocess.run([str(part) for part in command], cwd=cwd, check=True)
+    command_env = None
+    if env is not None:
+        command_env = os.environ.copy()
+        command_env.update(env)
+    subprocess.run([str(part) for part in command], cwd=cwd, check=True, env=command_env)
 
 
 def git_stdout(*args: str | Path) -> str:
@@ -88,6 +92,14 @@ def require_tools(*tools: str) -> None:
     missing = [tool for tool in tools if shutil.which(tool) is None]
     if missing:
         raise SystemExit(f"Missing required release tool(s): {', '.join(missing)}")
+
+
+def source_tree_python_env() -> dict[str, str]:
+    src_path = str(ROOT / "src")
+    pythonpath = os.environ.get("PYTHONPATH")
+    if pythonpath:
+        src_path = os.pathsep.join((src_path, pythonpath))
+    return {"PYTHONPATH": src_path}
 
 
 def bounded_int_env(name: str, default: int, *, minimum: int, maximum: int) -> str:
@@ -474,7 +486,7 @@ def main() -> int:
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])
     run([python, "-m", "pytest", "-q"])
-    run([python, "-m", "mini_eq", "--check-deps"])
+    run([python, "-m", "mini_eq", "--check-deps"], env=source_tree_python_env())
     run_headless_pipewire_runtime_smoke(python)
     run(["appstreamcli", "validate", "--no-net", ROOT / "data/io.github.bhack.mini-eq.metainfo.xml"])
     run(["desktop-file-validate", ROOT / "data/io.github.bhack.mini-eq.desktop"])

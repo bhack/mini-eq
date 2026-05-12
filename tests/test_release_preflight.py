@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -62,6 +63,14 @@ def test_pipewire_gobject_build_environment_error_lists_missing_tools(monkeypatc
         assert "definitely-missing-pwg-tool" in message
     else:
         raise AssertionError("Expected missing pipewire-gobject build tool to fail")
+
+
+def test_release_preflight_source_tree_python_env_prepends_src(monkeypatch) -> None:
+    monkeypatch.setenv("PYTHONPATH", "/already-there")
+
+    env = release_preflight.source_tree_python_env()
+
+    assert env["PYTHONPATH"].split(os.pathsep) == [str(release_preflight.ROOT / "src"), "/already-there"]
 
 
 def test_release_preflight_runs_headless_pipewire_runtime_smoke(monkeypatch) -> None:
