@@ -7,6 +7,7 @@ from gi.repository import GLib
 from .core import OUTPUT_CLIENT_NAME, VIRTUAL_SINK_BASE
 from .glib_utils import destroy_glib_source
 from .pipewire_backend import (
+    LINK_STATE_ACTIVE,
     STREAM_OUTPUT_AUDIO,
     PipeWireBackend,
     PipeWireBackendError,
@@ -47,6 +48,8 @@ class PipeWireStreamRouter:
         self.event_source_id = 0
         self.pending_route_applied_callback = False
         self.object_added_handler_id = 0
+        self.object_removed_handler_id = 0
+        self.link_state_handler_ids: dict[int, int] = {}
         self.routed_stream_ids: set[int] = set()
         self.routed_stream_targets: dict[int, PipeWireStreamTarget] = {}
         self.output_sink_name: str | None = None
@@ -124,16 +127,54 @@ class PipeWireStreamRouter:
         target_values = {value for value in (target.target_node, target.target_object) if value}
         return bool(target_values & self._virtual_sink_target_values())
 
-    def _link_touches_virtual_sink(self, link: PipeWireLink) -> bool:
+    def _processing_path_node_ids(self) -> set[int]:
+        node_ids: set[int] = set()
+        for node_name in (self.virtual_sink_name, self.internal_output_name):
+            try:
+                node = self.backend.node_by_name(node_name)
+            except Exception:
+                node = None
+
+            if node is not None:
+                node_ids.add(node.bound_id)
+
+        return node_ids
+
+    def _link_touches_processing_path(self, link: PipeWireLink) -> bool:
+        return bool(self._processing_path_node_ids() & {link.output_node_id, link.input_node_id})
+
+    def handle_link_state_changed(self, state: str | None) -> None:
+        if state == LINK_STATE_ACTIVE:
+            self.schedule_refresh(route_applied=True)
+
+    def track_processing_link_state(self, link: PipeWireLink) -> None:
+        if link.bound_id in self.link_state_handler_ids:
+            return
+
         try:
-            virtual_sink = self.backend.audio_sink_by_name(self.virtual_sink_name)
-        except Exception:
-            virtual_sink = None
+            handler_id = self.backend.connect_link_state_changed(link.bound_id, self.handle_link_state_changed)
+        except Exception as exc:
+            self.emit_warning(exc)
+            return
 
-        if virtual_sink is None:
-            return False
+        if handler_id > 0:
+            self.link_state_handler_ids[link.bound_id] = handler_id
 
-        return virtual_sink.bound_id in {link.output_node_id, link.input_node_id}
+    def untrack_processing_link_state(self, link: PipeWireLink) -> None:
+        handler_id = self.link_state_handler_ids.pop(link.bound_id, 0)
+        if handler_id > 0:
+            self.backend.disconnect_link_handler(handler_id)
+
+    def track_existing_processing_link_states(self) -> None:
+        try:
+            links = self.backend.list_links()
+        except Exception as exc:
+            self.emit_warning(exc)
+            return
+
+        for link in links:
+            if self._link_touches_processing_path(link):
+                self.track_processing_link_state(link)
 
     def _stream_target_before_route(self, stream_bound_id: int) -> PipeWireStreamTarget:
         target = self.backend.stream_target(stream_bound_id)
@@ -274,8 +315,22 @@ class PipeWireStreamRouter:
         except Exception:
             return
 
-        if self._link_touches_virtual_sink(link):
+        if self._link_touches_processing_path(link):
+            self.track_processing_link_state(link)
             self.schedule_refresh(route_applied=True)
+
+    def handle_object_removed(self, _manager, node) -> None:
+        try:
+            link = self.backend.link_from_proxy(node)
+        except Exception:
+            return
+
+        self.untrack_processing_link_state(link)
+
+    def untrack_processing_link_states(self) -> None:
+        for handler_id in list(self.link_state_handler_ids.values()):
+            self.backend.disconnect_link_handler(handler_id)
+        self.link_state_handler_ids.clear()
 
     def start_monitoring(self, *, require_initial_route: bool = False) -> None:
         self.backend.connect()
@@ -283,8 +338,12 @@ class PipeWireStreamRouter:
 
         if self.object_added_handler_id == 0:
             self.object_added_handler_id = self.backend.connect_object_added(self.handle_object_added)
+        if self.object_removed_handler_id == 0:
+            self.object_removed_handler_id = self.backend.connect_object_removed(self.handle_object_removed)
 
+        self.track_existing_processing_link_states()
         self.refresh(raise_errors=require_initial_route)
+        self.track_existing_processing_link_states()
 
     def stop_monitoring(self) -> None:
         self.accept_stream_events = False
@@ -296,6 +355,11 @@ class PipeWireStreamRouter:
         if self.object_added_handler_id > 0:
             self.backend.disconnect_node_manager_handler(self.object_added_handler_id)
             self.object_added_handler_id = 0
+        if self.object_removed_handler_id > 0:
+            self.backend.disconnect_node_manager_handler(self.object_removed_handler_id)
+            self.object_removed_handler_id = 0
+
+        self.untrack_processing_link_states()
 
     def enable(self) -> None:
         self.enabled = True

@@ -117,6 +117,10 @@ def node_items() -> list[dict[str, Any]]:
     return [item for item in read_pw_dump() if item.get("type") == "PipeWire:Interface:Node"]
 
 
+def link_items() -> list[dict[str, Any]]:
+    return [item for item in read_pw_dump() if item.get("type") == "PipeWire:Interface:Link"]
+
+
 def node_by_name(node_name: str) -> dict[str, Any] | None:
     for node in node_items():
         if item_props(node).get("node.name") == node_name:
@@ -129,6 +133,25 @@ def node_id(node: dict[str, Any]) -> int:
     if not isinstance(value, int):
         raise RuntimeError(f"PipeWire node has no integer id: {item_props(node).get('node.name')}")
     return value
+
+
+def link_endpoint_ids(link: dict[str, Any]) -> set[int]:
+    endpoints: set[int] = set()
+    props = item_props(link)
+    for key in ("link.output.node", "link.input.node"):
+        try:
+            endpoints.add(int(props.get(key)))
+        except (TypeError, ValueError):
+            pass
+    return endpoints
+
+
+def link_state(link: dict[str, Any]) -> str | None:
+    info_state = link.get("info", {}).get("state")
+    if isinstance(info_state, str):
+        return info_state
+    prop_state = item_props(link).get("link.state")
+    return str(prop_state) if prop_state is not None else None
 
 
 def object_serial(node: dict[str, Any]) -> str:
@@ -750,6 +773,50 @@ def wait_for_route_to_virtual(smoke_id: int, virtual_serial: str, timeout_second
     )
 
 
+def wait_for_route_to_current_virtual(smoke_id: int, timeout_seconds: float) -> str:
+    def current_virtual_serial_if_routed() -> str | None:
+        virtual_sink = node_by_name(VIRTUAL_SINK_NAME)
+        if virtual_sink is None:
+            return None
+
+        serial = object_serial(virtual_sink)
+        if metadata_targets().get(smoke_id) == (serial, "Spa:Id"):
+            return serial
+        return None
+
+    return wait_for(
+        "smoke stream routed to current Mini EQ virtual sink",
+        current_virtual_serial_if_routed,
+        timeout_seconds,
+    )
+
+
+def processing_path_has_active_links() -> bool:
+    virtual_sink = node_by_name(VIRTUAL_SINK_NAME)
+    filter_output = node_by_name(FILTER_OUTPUT_NAME)
+    if virtual_sink is None or filter_output is None:
+        return False
+
+    required_ids = {node_id(virtual_sink): False, node_id(filter_output): False}
+    for link in link_items():
+        if link_state(link) != "active":
+            continue
+        endpoints = link_endpoint_ids(link)
+        for required_id in tuple(required_ids):
+            if required_id in endpoints:
+                required_ids[required_id] = True
+
+    return all(required_ids.values())
+
+
+def wait_for_processing_path_active(timeout_seconds: float) -> None:
+    wait_for(
+        "Mini EQ processing path links to become active",
+        processing_path_has_active_links,
+        timeout_seconds,
+    )
+
+
 def wait_for_route_away_from_virtual(smoke_id: int, virtual_serial: str, timeout_seconds: float) -> None:
     wait_for(
         "smoke stream restored away from Mini EQ virtual sink",
@@ -1074,6 +1141,7 @@ def run_ui_flow(
         virtual_sink = wait_for_sink(VIRTUAL_SINK_NAME, timeout_seconds)
         virtual_serial = object_serial(virtual_sink)
         wait_for_route_to_virtual(smoke_id, virtual_serial, timeout_seconds)
+        wait_for_processing_path_active(timeout_seconds)
         wait_for_control_output_sink(PRIMARY_SINK_NAME, timeout_seconds)
 
         for cycle in range(cycles):
@@ -1093,6 +1161,7 @@ def run_ui_flow(
                 timeout_seconds,
             )
             wait_for_route_to_virtual(smoke_id, virtual_serial, timeout_seconds)
+            wait_for_processing_path_active(timeout_seconds)
 
         alt_sink = wait_for_sink(ALT_SINK_NAME, timeout_seconds)
         alt_serial = object_serial(alt_sink)
@@ -1100,12 +1169,14 @@ def run_ui_flow(
         wait_for_control_output_sink(ALT_SINK_NAME, timeout_seconds)
         wait_for_node_target_object(FILTER_OUTPUT_NAME, alt_serial, timeout_seconds)
         wait_for_route_to_virtual(smoke_id, virtual_serial, timeout_seconds)
+        wait_for_processing_path_active(timeout_seconds)
 
         primary_serial = object_serial(wait_for_sink(PRIMARY_SINK_NAME, timeout_seconds))
         set_configured_default_sink_name(PRIMARY_SINK_NAME, timeout_seconds)
         wait_for_control_output_sink(PRIMARY_SINK_NAME, timeout_seconds)
         wait_for_node_target_object(FILTER_OUTPUT_NAME, primary_serial, timeout_seconds)
         wait_for_route_to_virtual(smoke_id, virtual_serial, timeout_seconds)
+        wait_for_processing_path_active(timeout_seconds)
 
         if driver.checked(monitor_switch):
             driver.toggle_switch(monitor_switch)
@@ -1114,6 +1185,31 @@ def run_ui_flow(
                 lambda: driver.visible_switch_with_state(frame, name="Monitor", expected_checked=False),
                 timeout_seconds,
             )
+
+        for cycle in range(cycles):
+            print(f"## monitor toggle cycle {cycle + 1}/{cycles}", flush=True)
+            driver.toggle_switch(monitor_switch)
+            monitor_switch = driver.wait_for_accessible(
+                "Monitor switch to turn on",
+                lambda: driver.visible_switch_with_state(frame, name="Monitor", expected_checked=True),
+                timeout_seconds,
+            )
+            wait_for(
+                "Mini EQ monitor PipeWire stream",
+                lambda: node_by_name(ANALYZER_NODE_NAME),
+                timeout_seconds,
+            )
+            virtual_serial = wait_for_route_to_current_virtual(smoke_id, timeout_seconds)
+            wait_for_processing_path_active(timeout_seconds)
+
+            driver.toggle_switch(monitor_switch)
+            monitor_switch = driver.wait_for_accessible(
+                "Monitor switch to turn off after monitor cycle",
+                lambda: driver.visible_switch_with_state(frame, name="Monitor", expected_checked=False),
+                timeout_seconds,
+            )
+            virtual_serial = wait_for_route_to_current_virtual(smoke_id, timeout_seconds)
+            wait_for_processing_path_active(timeout_seconds)
 
         driver.toggle_switch(monitor_switch)
         monitor_switch = driver.wait_for_accessible(
@@ -1126,6 +1222,8 @@ def run_ui_flow(
             lambda: node_by_name(ANALYZER_NODE_NAME),
             timeout_seconds,
         )
+        virtual_serial = wait_for_route_to_current_virtual(smoke_id, timeout_seconds)
+        wait_for_processing_path_active(timeout_seconds)
         bad_sources = [
             item_props(node)
             for node in node_items()
@@ -1199,7 +1297,7 @@ def run_ui_flow(
         print(
             "Live UI runtime smoke passed: AT-SPI UI flow, dropdown options, "
             "pipewire-gobject probe, output preset scope, preset menu reset, synthetic stream routing, "
-            "default-output follow, monitor, and shutdown verified."
+            "default-output follow, active processing links, monitor toggle cycles, and shutdown verified."
         )
     finally:
         stop_accessible_event_loop(pyatspi, event_thread)

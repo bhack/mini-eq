@@ -61,6 +61,7 @@ PIPEWIRE_GOBJECT_DEBIAN_BUILD_PACKAGES = (
     "libpipewire-0.3-dev",
     "pkg-config",
 )
+FLATPAK_MANIFEST = ROOT / "io.github.bhack.mini-eq.yaml"
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -97,6 +98,63 @@ def current_release_tag() -> str:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
     return f"v{project['version']}"
+
+
+def pipewire_gobject_requirement(root: Path = ROOT) -> str:
+    with (root / "pyproject.toml").open("rb") as pyproject_file:
+        project = tomllib.load(pyproject_file)["project"]
+
+    for dependency in project["dependencies"]:
+        if dependency.lower().startswith("pipewire-gobject"):
+            return dependency
+    raise SystemExit("pyproject.toml does not declare a pipewire-gobject dependency")
+
+
+def pipewire_gobject_floor_version(root: Path = ROOT) -> str:
+    requirement = pipewire_gobject_requirement(root)
+    match = re.search(r">=\s*([0-9]+\.[0-9]+\.[0-9]+)", requirement)
+    if match is None:
+        raise SystemExit("pipewire-gobject dependency does not declare a minimum version")
+    return match.group(1)
+
+
+def flatpak_pipewire_gobject_tag(manifest: Path = FLATPAK_MANIFEST) -> str:
+    in_pipewire_gobject_module = False
+
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        if re.match(r"\s*-\s+name:\s+", line):
+            in_pipewire_gobject_module = re.match(r"\s*-\s+name:\s+pipewire-gobject\s*$", line) is not None
+            continue
+
+        if not in_pipewire_gobject_module:
+            continue
+
+        tag = re.match(r"\s*tag:\s*([^\s#]+)", line)
+        if tag is not None:
+            return tag.group(1).strip("\"'")
+
+    raise SystemExit(f"{manifest.relative_to(ROOT)} does not pin a pipewire-gobject tag")
+
+
+def check_flatpak_pipewire_gobject_pin(root: Path = ROOT) -> None:
+    floor_version = pipewire_gobject_floor_version(root)
+    manifest = root / "io.github.bhack.mini-eq.yaml"
+    bundled_version = flatpak_pipewire_gobject_tag(manifest)
+
+    if bundled_version == floor_version:
+        return
+
+    raise SystemExit(
+        "\n".join(
+            [
+                "Flatpak pipewire-gobject source is not aligned with Mini EQ's runtime floor.",
+                f"pyproject.toml requires pipewire-gobject>={floor_version}, but "
+                f"{manifest.relative_to(root)} bundles tag {bundled_version}.",
+                f"Publish pipewire-gobject {floor_version} first, then update the Flatpak manifest "
+                "to that published tag and its peeled commit before releasing Mini EQ.",
+            ]
+        )
+    )
 
 
 def git_tag_exists(tag: str) -> bool:
@@ -365,12 +423,31 @@ def run_build_checks(python: Path) -> None:
         run_wheel_smoke_test(python, wheels[0], scratch)
 
 
+def run_headless_pipewire_runtime_smoke(python: Path) -> None:
+    timeout = os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", "35")
+    cycles = os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", "2")
+    audio_duration = os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION", "90")
+    run(
+        [
+            python,
+            ROOT / "tools/check_headless_pipewire_runtime.py",
+            "--timeout",
+            timeout,
+            "--cycles",
+            cycles,
+            "--audio-duration",
+            audio_duration,
+        ]
+    )
+
+
 def main() -> int:
     python = Path(sys.executable)
     require_tools("appstreamcli", "desktop-file-validate", "git", "gnome-extensions")
 
     run(["git", "diff", "--check"])
     run([python, "-m", "pytest", "tests/test_version_metadata.py", "-q"])
+    check_flatpak_pipewire_gobject_pin()
     run([python, ROOT / "tools/check_gnome_shell_extension.py"])
     run_gnome_shell_extension_upload_notice()
     run_flatpak_runtime_smoke_notice()
@@ -380,6 +457,7 @@ def main() -> int:
     run([python, "-m", "ruff", "format", "--check", "."])
     run([python, "-m", "pytest", "-q"])
     run([python, "-m", "mini_eq", "--check-deps"])
+    run_headless_pipewire_runtime_smoke(python)
     run(["appstreamcli", "validate", "--no-net", ROOT / "data/io.github.bhack.mini-eq.metainfo.xml"])
     run(["desktop-file-validate", ROOT / "data/io.github.bhack.mini-eq.desktop"])
     run_build_checks(python)

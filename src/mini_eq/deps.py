@@ -12,8 +12,8 @@ from typing import Literal
 
 Status = Literal["ok", "missing", "warning"]
 
-PWG_REQUIRED_VERSION = "0.3.6"
-PWG_REQUIRED_VERSION_PARTS = (0, 3, 6)
+PWG_REQUIRED_VERSION = "0.3.7"
+PWG_REQUIRED_VERSION_PARTS = (0, 3, 7)
 PWG_REQUIRED_SYMBOLS = (
     "Core.set_pipewire_property",
     "Core.sync",
@@ -23,6 +23,9 @@ PWG_REQUIRED_SYMBOLS = (
     "Device.new",
     "Device.subscribe_params",
     "Device.sync",
+    "Link.get_state",
+    "Link.new",
+    "Link.sync",
     "Metadata.sync",
     "Node.sync",
     "Param.new_props_controls",

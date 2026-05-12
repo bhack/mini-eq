@@ -124,8 +124,8 @@ modules:
     sources:
       - type: git
         url: https://github.com/bhack/pipewire-gobject.git
-        tag: 0.3.6
-        commit: 7e20b29865c0a869695bc730bacb68e2f0853077
+        tag: 0.3.7
+        commit: 1cd6ccc0f5e0d1d62ab8fd42dc9f200a112554f6
 
   - python3-dependencies.yaml
 

@@ -79,18 +79,27 @@ nested headless GNOME Shell session:
 MINI_EQ_RUN_ATSPI=1 .venv/bin/python -m pytest tests/test_mini_eq_atspi_widgets.py -q
 ```
 
-For a deeper live runtime smoke, run the real GTK app in a private
-PipeWire/WirePlumber graph with synthetic playback and AT-SPI UI driving:
+For PipeWire graph behavior without nested GNOME/AT-SPI, run the headless
+controller smoke. It owns synthetic stream routing, default-output moves,
+monitor toggles, and active processing-link assertions:
+
+```bash
+.venv/bin/python tools/check_headless_pipewire_runtime.py --timeout 35 --cycles 2
+```
+
+For a deeper live UI smoke, run the real GTK app in a private PipeWire/WirePlumber
+graph with synthetic playback and AT-SPI UI driving:
 
 ```bash
 .venv/bin/python tools/check_live_ui_runtime.py --timeout 35 --cycles 1
 MINI_EQ_RUN_LIVE_UI=1 .venv/bin/python -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 ```
 
-The live UI smoke is opt-in locally because it needs nested GNOME Shell,
-AT-SPI, PipeWire, and WirePlumber. Treat it as a maintainer confidence check on
-a supported recent GNOME/GTK stack; the blocking public release runtime gate is
-the Flatpak routing smoke.
+The headless PipeWire smoke is the stable native controller/graph gate and is
+part of release preflight. The live UI smoke is opt-in locally because it needs
+nested GNOME Shell, AT-SPI, PipeWire, and WirePlumber. Treat it as a maintainer
+confidence check on a supported recent GNOME/GTK stack; the blocking public
+release runtime gates are release preflight and the Flatpak routing smoke.
 
 For manual GNOME Shell extension testing against an installed Flatpak build,
 run the nested devkit smoke. It loads the extension from this checkout and
@@ -113,8 +122,11 @@ before being installed into a `--system-site-packages` Mini EQ venv.
 - Keep the pipewire-gobject API boundary small, general-purpose, and
   app-facing. Mini EQ may validate new pipewire-gobject API in a real GTK app,
   but do not add Mini EQ-shaped concepts, preset/filter-chain policy, or
-  hardware-selection policy to pipewire-gobject. WirePlumber stays the host
-  session manager, not a bundled GI dependency.
+  hardware-selection policy to pipewire-gobject. When changing public
+  pipewire-gobject API, follow the sibling checkout's `AGENTS.md` bindable API
+  gate: plain C/C99 public scalar types, no public GLib collections, explicit
+  ownership/nullability annotations, and generated GIR/test updates. WirePlumber
+  stays the host session manager, not a bundled GI dependency.
 - Treat the Mini EQ D-Bus control interface as a project-internal app/Shell
   extension contract with version-skew tolerance. Keep `api_version = 1`
   additive only: add state fields, methods, and capabilities when needed, but do

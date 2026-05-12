@@ -44,11 +44,13 @@ class FakePipeWireBackend:
         self,
         streams: list[pw_backend.PipeWireNode],
         sinks: list[pw_backend.PipeWireNode] | None = None,
+        links: list[pw_backend.PipeWireLink] | None = None,
         target_nodes: dict[int, str] | None = None,
         stream_targets: dict[int, pw_backend.PipeWireStreamTarget] | None = None,
     ) -> None:
         self.streams = streams
         self.sinks = sinks or []
+        self.links = links or []
         self.target_nodes = target_nodes or {}
         self.stream_targets = stream_targets or {}
         self.moves: list[tuple[int, str]] = []
@@ -56,6 +58,8 @@ class FakePipeWireBackend:
         self.connected = False
         self.closed = False
         self.disconnected_handlers: list[int] = []
+        self.link_state_handlers: dict[int, object] = {}
+        self.disconnected_link_handlers: list[int] = []
         self.missing_stream_ids: set[int] = set()
         self.move_failures: dict[int, Exception] = {}
 
@@ -68,10 +72,19 @@ class FakePipeWireBackend:
     def list_output_streams(self) -> list[pw_backend.PipeWireNode]:
         return self.streams
 
+    def list_links(self) -> list[pw_backend.PipeWireLink]:
+        return self.links
+
     def audio_sink_by_name(self, node_name: str) -> pw_backend.PipeWireNode | None:
         for sink in self.sinks:
             if sink.node_name == node_name:
                 return sink
+        return None
+
+    def node_by_name(self, node_name: str) -> pw_backend.PipeWireNode | None:
+        for node in [*self.sinks, *self.streams]:
+            if node.node_name == node_name:
+                return node
         return None
 
     def stream_target(self, stream_bound_id: int) -> pw_backend.PipeWireStreamTarget:
@@ -113,8 +126,20 @@ class FakePipeWireBackend:
     def connect_object_added(self, _callback) -> int:
         return 42
 
+    def connect_object_removed(self, _callback) -> int:
+        return 43
+
     def disconnect_node_manager_handler(self, handler_id: int) -> None:
         self.disconnected_handlers.append(handler_id)
+
+    def connect_link_state_changed(self, link_bound_id: int, callback) -> int:
+        handler_id = link_bound_id + 5000
+        self.link_state_handlers[handler_id] = callback
+        return handler_id
+
+    def disconnect_link_handler(self, handler_id: int) -> None:
+        self.disconnected_link_handlers.append(handler_id)
+        self.link_state_handlers.pop(handler_id, None)
 
 
 def test_pipewire_router_moves_only_external_output_streams() -> None:
@@ -218,7 +243,7 @@ def test_pipewire_router_restores_tracked_external_streams() -> None:
 def test_pipewire_router_rewrites_tracked_route_target_without_metadata_readback() -> None:
     backend = FakePipeWireBackend(
         [make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
-        {1: "mini_eq_sink"},
+        target_nodes={1: "mini_eq_sink"},
     )
     router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
     router.routed_stream_ids = {1}
@@ -234,7 +259,7 @@ def test_pipewire_router_rewrites_tracked_route_target_without_metadata_readback
 def test_pipewire_router_routes_without_target_metadata_preflight() -> None:
     backend = FakePipeWireBackend(
         [make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
-        {1: "mini_eq_sink"},
+        target_nodes={1: "mini_eq_sink"},
     )
     router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
 
@@ -316,7 +341,7 @@ def test_pipewire_router_enable_raises_and_stops_monitoring_on_initial_route_err
 
     assert router.enabled is False
     assert router.accept_stream_events is False
-    assert backend.disconnected_handlers == [42]
+    assert backend.disconnected_handlers == [42, 43]
     assert statuses == ["routing warning: metadata permission denied"]
 
 
@@ -346,7 +371,7 @@ def test_pipewire_router_enable_restores_partial_initial_route_failure() -> None
 def test_pipewire_router_falls_back_to_output_sink_when_original_target_is_unknown() -> None:
     backend = FakePipeWireBackend(
         [make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
-        {1: "speakers"},
+        target_nodes={1: "speakers"},
     )
     router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
     router.set_output_sink_name("speakers")
@@ -362,7 +387,7 @@ def test_pipewire_router_falls_back_to_output_sink_when_original_target_is_unkno
 def test_pipewire_router_clears_target_when_stream_had_no_original_target() -> None:
     backend = FakePipeWireBackend(
         [make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
-        {1: "mini_eq_sink"},
+        target_nodes={1: "mini_eq_sink"},
     )
     router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
     router.set_output_sink_name("speakers")
@@ -463,12 +488,87 @@ def test_pipewire_router_reapplies_controls_when_virtual_sink_link_appears(monke
 
     assert router.event_source_id == 321
     assert len(scheduled_callbacks) == 1
+    assert 5092 in backend.link_state_handlers
 
     keep_source = scheduled_callbacks[0]()
 
     assert keep_source is False
     assert backend.moves == [(1, "mini_eq_sink")]
     assert applied == ["apply"]
+
+
+def test_pipewire_router_reapplies_controls_when_processing_link_becomes_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    virtual_sink = make_node(11, pw_backend.AUDIO_SINK, "mini_eq_sink")
+    backend = FakePipeWireBackend(
+        [make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
+        sinks=[virtual_sink],
+    )
+    applied: list[str] = []
+    router = pw_router.PipeWireStreamRouter(
+        "mini_eq_sink",
+        "mini_eq_sink_output",
+        lambda _message: None,
+        backend,
+        route_applied_callback=lambda: applied.append("apply"),
+    )
+    scheduled_callbacks: list[object] = []
+
+    monkeypatch.setattr(
+        pw_router.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or len(scheduled_callbacks),
+    )
+
+    router.enabled = True
+    router.accept_stream_events = True
+    router.handle_object_added(None, make_link(92, output_node_id=1, input_node_id=virtual_sink.bound_id))
+    scheduled_callbacks.pop(0)()
+
+    backend.link_state_handlers[5092]("paused")
+    assert scheduled_callbacks == []
+
+    backend.link_state_handlers[5092]("active")
+    assert len(scheduled_callbacks) == 1
+    scheduled_callbacks.pop(0)()
+
+    assert applied == ["apply", "apply"]
+
+
+def test_pipewire_router_tracks_internal_output_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    internal_output = make_node(90, pw_backend.STREAM_OUTPUT_AUDIO, "mini_eq_sink_output")
+    backend = FakePipeWireBackend([internal_output], sinks=[make_node(22, pw_backend.AUDIO_SINK, "speakers")])
+    router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
+    scheduled_callbacks: list[object] = []
+
+    monkeypatch.setattr(
+        pw_router.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or 321,
+    )
+
+    router.enabled = True
+    router.accept_stream_events = True
+    router.handle_object_added(None, make_link(93, output_node_id=internal_output.bound_id, input_node_id=22))
+
+    assert router.event_source_id == 321
+    assert 5093 in backend.link_state_handlers
+
+
+def test_pipewire_router_tracks_existing_processing_links_when_monitoring_starts() -> None:
+    virtual_sink = make_node(11, pw_backend.AUDIO_SINK, "mini_eq_sink")
+    backend = FakePipeWireBackend(
+        [make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")],
+        sinks=[virtual_sink],
+        links=[make_link(92, output_node_id=1, input_node_id=virtual_sink.bound_id)],
+    )
+    router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
+
+    router.enable()
+
+    assert backend.moves == [(1, "mini_eq_sink")]
+    assert 5092 in backend.link_state_handlers
 
 
 def test_pipewire_router_ignores_unrelated_links(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -502,5 +602,5 @@ def test_pipewire_router_close_does_not_close_shared_backend() -> None:
 
     router.close()
 
-    assert backend.disconnected_handlers == [42]
+    assert backend.disconnected_handlers == [42, 43]
     assert backend.closed is False

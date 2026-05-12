@@ -479,6 +479,109 @@ def test_link_from_global_copies_pipewire_link_identity() -> None:
     )
 
 
+def test_list_links_reads_pipewire_link_globals() -> None:
+    link_global = object()
+    parsed_link = pw_backend.PipeWireLink(
+        bound_id=90,
+        output_node_id=12,
+        input_node_id=34,
+        passive=False,
+        feedback=False,
+    )
+
+    class FakeRegistry:
+        def dup_globals_by_interface(self, interface_type: str) -> FakeModel:
+            assert interface_type == pw_backend.PIPEWIRE_LINK_INTERFACE
+            return FakeModel([link_global])
+
+    backend = pw_backend.PipeWireBackend()
+    backend._ensure_connected = lambda: None
+    backend._registry = FakeRegistry()
+    backend._link_from_global = lambda global_: parsed_link if global_ is link_global else None
+
+    assert backend.list_links() == [parsed_link]
+
+
+def test_connect_link_state_changed_binds_and_dispatches_state() -> None:
+    class FakeLinkGlobal:
+        def is_link(self) -> bool:
+            return True
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.global_ = FakeLinkGlobal()
+
+        def lookup_global(self, bound_id: int) -> FakeLinkGlobal | None:
+            return self.global_ if bound_id == 92 else None
+
+    class FakeLiveLink:
+        def __init__(self) -> None:
+            self.state = "paused"
+            self.running = False
+            self.start_calls = 0
+            self.sync_calls: list[int] = []
+            self.disconnected: list[int] = []
+            self.state_callback = None
+
+        def get_running(self) -> bool:
+            return self.running
+
+        def start(self) -> bool:
+            self.running = True
+            self.start_calls += 1
+            return True
+
+        def sync(self, timeout_ms: int) -> bool:
+            self.sync_calls.append(timeout_ms)
+            return True
+
+        def get_state(self) -> str:
+            return self.state
+
+        def disconnect(self, handler_id: int) -> None:
+            self.disconnected.append(handler_id)
+
+        def emit_state(self, state: str) -> None:
+            assert self.state_callback is not None
+            self.state = state
+            self.state_callback(self, None)
+
+    class FakeLinkApi:
+        created: list[FakeLiveLink] = []
+
+        @classmethod
+        def new(cls, _core, _global) -> FakeLiveLink:
+            link = FakeLiveLink()
+            cls.created.append(link)
+            return link
+
+    class FakeGObjectObject:
+        @staticmethod
+        def connect(link: FakeLiveLink, signal_name: str, callback) -> int:
+            assert signal_name == "notify::state"
+            link.state_callback = callback
+            return 77
+
+    backend = pw_backend.PipeWireBackend(timeout_ms=1234)
+    backend._ensure_connected = lambda: None
+    backend._core = object()
+    backend._registry = FakeRegistry()
+    backend._Pwg = SimpleNamespace(Link=FakeLinkApi)
+    backend._GObject = SimpleNamespace(Object=FakeGObjectObject)
+    states: list[str | None] = []
+
+    handler_id = backend.connect_link_state_changed(92, states.append)
+    link = FakeLinkApi.created[0]
+    link.emit_state("active")
+    backend.disconnect_link_handler(handler_id)
+
+    assert handler_id == 77
+    assert link.start_calls == 1
+    assert link.sync_calls == [1234]
+    assert states == ["paused", "active"]
+    assert link.disconnected == [77]
+
+
 def test_new_core_uses_pipewire_gobject_core_constructor() -> None:
     FakeCore.calls = 0
 

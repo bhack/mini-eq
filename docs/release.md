@@ -84,7 +84,9 @@ graph behaves correctly. Treat their claims narrowly:
 - Unit and seam tests verify deterministic model, routing, metadata, and UI
   state transitions.
 - The release preflight verifies source cleanliness, package build/install,
-  dependency importability, metadata, and the full default pytest suite.
+  dependency importability, metadata, the full default pytest suite, and a
+  headless PipeWire/WirePlumber controller smoke with synthetic stream routing,
+  default-output moves, monitor toggles, and active processing-link assertions.
 - The Flatpak routing smoke verifies the installed Flatpak can route and
   restore a synthetic stream in an isolated PipeWire/WirePlumber graph.
 - The live UI smoke verifies the real GTK app can be driven through AT-SPI
@@ -169,7 +171,8 @@ preflight and post-publish checks.
 
 Prefer the containerized preflight. It keeps host machines clean while testing a
 fresh venv, `pipewire-gobject` sdist build dependencies, package metadata, a
-private PipeWire/WirePlumber session, the leak scan, and release smoke checks:
+private PipeWire/WirePlumber session, the headless controller/graph smoke, the
+leak scan, and release smoke checks:
 
 ```bash
 tools/run_release_preflight_container.sh
@@ -189,8 +192,8 @@ Flathub manifest still has old bundled dependencies or permissions.
 
 The preflight prints change-aware notices for GNOME Shell extension upload,
 Flatpak runtime smoke, and background portal smoke. Treat those notices as
-release gates when they apply; the generic preflight deliberately does not
-mutate the host audio graph.
+release gates when they apply; the generic preflight deliberately uses a private
+PipeWire graph instead of mutating the host audio graph.
 
 ## Runtime Checks
 
@@ -199,6 +202,15 @@ access, Flatpak permissions, runtime dependencies, or shutdown behavior changed:
 
 ```bash
 python3 tools/check_flatpak_runtime.py --app-ref <installed-app-ref>
+```
+
+Run the native headless PipeWire smoke when working on routing, analyzer
+capture, monitor toggles, output following, or `pipewire-gobject` integration.
+The containerized release preflight runs this automatically, but it is useful as
+a focused local loop:
+
+```bash
+python3 tools/check_headless_pipewire_runtime.py --timeout 35 --cycles 2
 ```
 
 For background portal changes, run one clean-permission Flatpak smoke in a real

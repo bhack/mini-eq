@@ -103,6 +103,11 @@ def test_pipewire_gobject_check_requires_current_library_version(monkeypatch) ->
             subscribe_params=object(),
             sync=object(),
         ),
+        Link=SimpleNamespace(
+            get_state=object(),
+            new=object(),
+            sync=object(),
+        ),
         Metadata=SimpleNamespace(sync=object()),
         Node=SimpleNamespace(sync=object()),
         Param=SimpleNamespace(new_props_controls=object()),
@@ -126,12 +131,12 @@ def test_pipewire_gobject_check_requires_current_library_version(monkeypatch) ->
     check = deps.check_pipewire_gobject()
 
     assert not check.ok
-    assert "older than required 0.3.6" in check.detail
+    assert "older than required 0.3.7" in check.detail
 
 
 def test_pipewire_gobject_check_requires_property_override_symbols(monkeypatch) -> None:
     fake_pwg = SimpleNamespace(
-        get_library_version=lambda: "0.3.6",
+        get_library_version=lambda: "0.3.7",
         Core=SimpleNamespace(),
         Device=SimpleNamespace(
             enum_all_params=object(),
@@ -139,6 +144,11 @@ def test_pipewire_gobject_check_requires_property_override_symbols(monkeypatch) 
             enum_params_sync=object(),
             new=object(),
             subscribe_params=object(),
+            sync=object(),
+        ),
+        Link=SimpleNamespace(
+            get_state=object(),
+            new=object(),
             sync=object(),
         ),
         Metadata=SimpleNamespace(sync=object()),

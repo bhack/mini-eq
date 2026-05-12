@@ -87,11 +87,11 @@ Install the Python package after the system packages are present:
 ```bash
 python3 -m venv /tmp/mini-eq-pwg-build
 /tmp/mini-eq-pwg-build/bin/python -m pip install --upgrade pip
-/tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.6,<0.4' -w /tmp/mini-eq-wheelhouse
+/tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.7,<0.4' -w /tmp/mini-eq-wheelhouse
 
 python3 -m venv --system-site-packages ~/.local/share/mini-eq/venv
 ~/.local/share/mini-eq/venv/bin/python -m pip install --upgrade pip
-~/.local/share/mini-eq/venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.6,<0.4'
+~/.local/share/mini-eq/venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.7,<0.4'
 ~/.local/share/mini-eq/venv/bin/python -m pip install mini-eq
 ~/.local/share/mini-eq/venv/bin/mini-eq --check-deps
 ~/.local/share/mini-eq/venv/bin/mini-eq
@@ -144,7 +144,16 @@ For real GTK widget behavior, run the opt-in AT-SPI smoke test:
 MINI_EQ_RUN_ATSPI=1 python3 -m pytest tests/test_mini_eq_atspi_widgets.py -q
 ```
 
-For a deeper live runtime smoke, run the real GTK app in a private
+For PipeWire graph behavior without GTK or AT-SPI, run the headless controller
+smoke. It starts a private PipeWire/WirePlumber graph, synthetic playback,
+Mini EQ's routing controller, and checks route toggles, default-output moves,
+monitor toggles, and active processing links:
+
+```bash
+python3 tools/check_headless_pipewire_runtime.py --timeout 35 --cycles 2
+```
+
+For a deeper live UI smoke, run the real GTK app in a private
 PipeWire/WirePlumber graph with synthetic playback and AT-SPI UI driving:
 
 ```bash
@@ -153,10 +162,12 @@ MINI_EQ_RUN_LIVE_UI=1 python3 -m pytest tests/test_mini_eq_live_ui_runtime.py -q
 ```
 
 These integration smokes are intentionally separate from the default pytest
-suite because they require nested GNOME Shell, AT-SPI services, PipeWire, and
-WirePlumber. Use the live UI smoke as a maintainer confidence check on a
-supported recent GNOME/GTK stack; the public release workflow does not treat
-the hosted Ubuntu native GTK stack as the blocking UI runtime.
+suite because they require PipeWire and WirePlumber; the live UI smoke also
+requires nested GNOME Shell and AT-SPI services. Use the headless smoke for
+stable controller/graph coverage and the live UI smoke as a maintainer
+confidence check on a supported recent GNOME/GTK stack; the public release
+workflow does not treat the hosted Ubuntu native GTK stack as the blocking UI
+runtime.
 
 ## Local Flatpak Build
 

@@ -15,8 +15,10 @@ TARGET_NODE_KEY = "target.node"
 SPA_ID_TYPE = "Spa:Id"
 PIPEWIRE_NODE_INTERFACE = "PipeWire:Interface:Node"
 PIPEWIRE_DEVICE_INTERFACE = "PipeWire:Interface:Device"
+PIPEWIRE_LINK_INTERFACE = "PipeWire:Interface:Link"
 STREAM_OUTPUT_AUDIO = "Stream/Output/Audio"
 AUDIO_SINK = "Audio/Sink"
+LINK_STATE_ACTIVE = "active"
 FILTER_CHAIN_MODULE_NAME = "libpipewire-module-filter-chain"
 PIPEWIRE_APPLICATION_NAME_KEY = "application.name"
 PIPEWIRE_MEDIA_CATEGORY_KEY = "media.category"
@@ -163,9 +165,11 @@ class PipeWireBackend(PipeWireRouteMixin):
         self._metadata: Any = None
         self._metadata_signal_objects: dict[int, Any] = {}
         self._node_signal_objects: dict[int, Any] = {}
+        self._link_signal_objects: dict[int, Any] = {}
         self._device_signal_objects: dict[int, Any] = {}
         self._device_related_signal_handler_ids: dict[int, list[int]] = {}
         self._node_proxies: dict[int, Any] = {}
+        self._link_proxies: dict[int, Any] = {}
         self._device_proxies: dict[int, Any] = {}
         self._loaded_modules: list[Any] = []
         self._cached_defaults = PipeWireDefaults(None, None)
@@ -219,6 +223,13 @@ class PipeWireBackend(PipeWireRouteMixin):
                 pass
         self._node_signal_objects.clear()
 
+        for handler_id, obj in list(self._link_signal_objects.items()):
+            try:
+                obj.disconnect(handler_id)
+            except Exception:
+                pass
+        self._link_signal_objects.clear()
+
         for handler_id in list(self._device_signal_objects):
             self.disconnect_device_handler(handler_id)
 
@@ -228,6 +239,13 @@ class PipeWireBackend(PipeWireRouteMixin):
             except Exception:
                 pass
         self._node_proxies.clear()
+
+        for link in list(self._link_proxies.values()):
+            try:
+                link.stop()
+            except Exception:
+                pass
+        self._link_proxies.clear()
 
         for device in list(self._device_proxies.values()):
             try:
@@ -284,6 +302,18 @@ class PipeWireBackend(PipeWireRouteMixin):
     def list_output_streams(self) -> list[PipeWireNode]:
         return [node for node in self.list_nodes() if node.is_output_stream]
 
+    def list_links(self) -> list[PipeWireLink]:
+        self._ensure_connected()
+        links: list[PipeWireLink] = []
+
+        for global_ in self._iterate_model(self._registry.dup_globals_by_interface(PIPEWIRE_LINK_INTERFACE)):
+            try:
+                links.append(self._link_from_global(global_))
+            except PipeWireBackendError:
+                continue
+
+        return links
+
     def node_from_proxy(self, node) -> PipeWireNode:
         if hasattr(node, "is_node") and not node.is_node():
             raise PipeWireBackendError("PipeWire global is not a node")
@@ -291,6 +321,13 @@ class PipeWireBackend(PipeWireRouteMixin):
 
     def link_from_proxy(self, link) -> PipeWireLink:
         return self._link_from_global(link)
+
+    def node_by_name(self, node_name: str) -> PipeWireNode | None:
+        for node in self.list_nodes():
+            if node.node_name == node_name:
+                return node
+
+        return None
 
     def watch_for_node(
         self,
@@ -434,6 +471,34 @@ class PipeWireBackend(PipeWireRouteMixin):
 
         try:
             obj.disconnect(handler_id)
+        except Exception:
+            pass
+
+    def connect_link_state_changed(self, link_bound_id: int, callback: Callable[[str | None], None]) -> int:
+        self._ensure_connected()
+
+        link = self._link_proxy_by_bound_id(link_bound_id)
+        if link is None:
+            return 0
+
+        def on_state_changed(changed_link, _pspec) -> None:
+            callback(changed_link.get_state())
+
+        handler_id = self._GObject.Object.connect(link, "notify::state", on_state_changed)
+        self._link_signal_objects[handler_id] = link
+        callback(link.get_state())
+        return handler_id
+
+    def disconnect_link_handler(self, handler_id: int) -> None:
+        if handler_id <= 0:
+            return
+
+        link = self._link_signal_objects.pop(handler_id, None)
+        if link is None:
+            return
+
+        try:
+            link.disconnect(handler_id)
         except Exception:
             pass
 
@@ -770,6 +835,25 @@ class PipeWireBackend(PipeWireRouteMixin):
 
         self._node_proxies[int(bound_id)] = node
         return node
+
+    def _link_proxy_by_bound_id(self, bound_id: int):
+        global_ = self._registry.lookup_global(int(bound_id))
+        if global_ is None or not global_.is_link():
+            return None
+
+        link = self._link_proxies.get(int(bound_id))
+        if link is not None and link.get_running():
+            return link
+
+        link = self._Pwg.Link.new(self._core, global_)
+        if link is None:
+            return None
+        if not link.start():
+            raise PipeWireBackendError(f"failed to bind link: {bound_id}")
+        self._sync_proxy(link, "link")
+
+        self._link_proxies[int(bound_id)] = link
+        return link
 
     def _device_proxy_by_bound_id(self, bound_id: int):
         global_ = self._registry.lookup_global(int(bound_id))

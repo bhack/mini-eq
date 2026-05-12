@@ -22,6 +22,7 @@ RUN apt-get update \
       meson \
       ninja-build \
       pipewire \
+      pipewire-bin \
       pkg-config \
       python3 \
       python3-cairo \

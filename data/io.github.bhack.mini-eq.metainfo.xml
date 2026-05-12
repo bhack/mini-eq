@@ -47,7 +47,11 @@
   <releases>
     <release version="0.7.4" date="2026-05-11">
       <description>
-        <p>Run filter-chain readiness callbacks from the GLib main context when PipeWire reports the virtual sink asynchronously, avoiding thread-loop sync failures during system-wide EQ startup.</p>
+        <ul>
+          <li>Run filter-chain readiness callbacks from the GLib main context when PipeWire reports the virtual sink asynchronously.</li>
+          <li>Re-apply active filter controls when PipeWire creates or activates links on the Mini EQ processing path.</li>
+          <li>Refresh port-aware output preset scope when PipeWire reports route parameter serial changes on the active output device.</li>
+        </ul>
       </description>
     </release>
     <release version="0.7.3" date="2026-05-11">
