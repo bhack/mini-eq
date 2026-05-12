@@ -47,6 +47,7 @@ from .pipewire_backend import (
     PipeWireBackend,
     PipeWireNode,
     node_sample_rate,
+    parse_metadata_node_name,
 )
 from .pipewire_routes import PipeWireOutputPresetTarget
 from .pipewire_stream_router import PipeWireStreamRouter
@@ -68,6 +69,7 @@ class SystemWideEqController:
         self.engine_start_pending = False
         self.filter_node_id: int | None = None
         self.output_event_source_id = 0
+        self.pending_followed_output_sink: str | None = None
         self.output_object_added_handler_id = 0
         self.output_object_removed_handler_id = 0
         self.output_metadata_changed_handler_id = 0
@@ -321,6 +323,19 @@ class SystemWideEqController:
 
         return True
 
+    def refresh_followed_output_sink_from_event(self, sink_name: str | None) -> bool:
+        if not self.follow_default_output:
+            return False
+
+        if sink_name and self.is_valid_output_sink(sink_name) and self.get_sink(sink_name) is not None:
+            try:
+                self.switch_output_sink(sink_name, explicit=False)
+            except Exception as exc:
+                self.emit_status(f"default output follow warning: {exc}")
+            return True
+
+        return self.refresh_followed_output_sink()
+
     def schedule_output_event_refresh(self) -> None:
         if not getattr(self, "accept_output_events", False):
             return
@@ -355,6 +370,10 @@ class SystemWideEqController:
     ) -> None:
         if subject == 0 and key in {DEFAULT_AUDIO_SINK_KEY, DEFAULT_CONFIGURED_AUDIO_SINK_KEY}:
             self.output_backend.remember_default_metadata_change(key, _value)
+            if getattr(self, "follow_default_output", False):
+                sink_name = parse_metadata_node_name(_value)
+                if sink_name and self.is_valid_output_sink(sink_name):
+                    self.pending_followed_output_sink = sink_name
             self.schedule_output_event_refresh()
 
     def handle_output_route_param_changed(self) -> None:
@@ -400,7 +419,12 @@ class SystemWideEqController:
             return False
 
         self.invalidate_output_preset_target()
-        self.refresh_followed_output_sink()
+        pending_followed_output_sink = getattr(self, "pending_followed_output_sink", None)
+        self.pending_followed_output_sink = None
+        if pending_followed_output_sink is not None:
+            self.refresh_followed_output_sink_from_event(pending_followed_output_sink)
+        else:
+            self.refresh_followed_output_sink()
         self.refresh_output_route_param_monitor()
 
         if self.outputs_changed_callback is not None:

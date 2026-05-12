@@ -248,6 +248,67 @@ def test_output_metadata_change_schedules_one_refresh(monkeypatch: pytest.Monkey
     assert len(scheduled_callbacks) == 1
 
 
+def test_output_metadata_change_records_followed_sink_for_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[object] = []
+
+    class FakeBackend:
+        def remember_default_metadata_change(self, key: str, value: str | None) -> bool:
+            calls.append(("remember", key, value))
+            return True
+
+    controller.accept_output_events = True
+    controller.follow_default_output = True
+    controller.output_event_source_id = 0
+    controller.pending_followed_output_sink = None
+    controller.output_backend = FakeBackend()
+    scheduled_callbacks: list[object] = []
+
+    monkeypatch.setattr(
+        routing.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or 321,
+    )
+
+    routing.SystemWideEqController.handle_output_metadata_changed(
+        controller,
+        None,
+        0,
+        pw_backend.DEFAULT_CONFIGURED_AUDIO_SINK_KEY,
+        "Spa:String:JSON",
+        '{"name":"hdmi"}',
+    )
+
+    assert calls == [("remember", pw_backend.DEFAULT_CONFIGURED_AUDIO_SINK_KEY, '{"name":"hdmi"}')]
+    assert controller.pending_followed_output_sink == "hdmi"
+    assert controller.output_event_source_id == 321
+    assert len(scheduled_callbacks) == 1
+
+
+def test_output_event_idle_uses_pending_followed_sink_before_metadata_refresh() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.accept_output_events = True
+    controller.output_event_source_id = 123
+    controller.pending_followed_output_sink = "hdmi"
+    controller.follow_default_output = True
+    controller.output_backend = FakeOutputBackend([make_node(1, "hdmi")])
+    controller._output_preset_target_sink = "speakers"
+    controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("speakers", None, ("speakers",))
+    calls: list[object] = []
+    controller.switch_output_sink = lambda sink_name, explicit: calls.append(("switch", sink_name, explicit))
+    controller.refresh_followed_output_sink = lambda: calls.append("refresh")
+    controller.refresh_output_route_param_monitor = lambda: calls.append("route-monitor")
+    controller.outputs_changed_callback = lambda: calls.append("outputs")
+
+    assert routing.SystemWideEqController.on_output_event_idle(controller) is False
+
+    assert controller.output_event_source_id == 0
+    assert controller.pending_followed_output_sink is None
+    assert controller._output_preset_target_sink is None
+    assert controller._output_preset_target is None
+    assert calls == [("switch", "hdmi", False), "route-monitor", "outputs"]
+
+
 def test_output_object_added_schedules_refresh_only_for_audio_sinks(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.accept_output_events = True
