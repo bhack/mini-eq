@@ -90,11 +90,14 @@ def test_ci_scope_treats_release_workflow_and_release_gate_tools_as_tested_chang
 def test_headless_pipewire_runtime_smoke_is_optional_ci_gate_without_nested_gnome() -> None:
     ci_yml = workflow_text("ci.yml")
     job = ci_yml.partition("headless-pipewire-runtime-smoke:")[2].partition("live-ui-runtime-smoke:")[0]
+    script = (ROOT / "tools/run_headless_pipewire_runtime_smoke_ci.sh").read_text(encoding="utf-8")
 
     assert "headless_pipewire_runtime_smoke" in ci_yml
     assert "tools/run_headless_pipewire_runtime_smoke_ci.sh" in job
     assert "gnome-shell" not in job
     assert "python3-pyatspi" not in job
+    assert 'timeout="${MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT:-90}"' in script
+    assert 'audio_duration="${MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION:-180}"' in script
 
 
 def test_live_ui_runtime_smoke_uses_host_gir_build_environment() -> None:

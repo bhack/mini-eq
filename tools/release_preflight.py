@@ -449,11 +449,11 @@ def run_build_checks(python: Path) -> None:
 
 
 def run_headless_pipewire_runtime_smoke(python: Path) -> None:
-    timeout = bounded_int_env("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", 35, minimum=1, maximum=600)
+    timeout = bounded_int_env("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", 90, minimum=1, maximum=600)
     cycles = bounded_int_env("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", 2, minimum=1, maximum=20)
     audio_duration = bounded_int_env(
         "MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION",
-        90,
+        180,
         minimum=1,
         maximum=3600,
     )

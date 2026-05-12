@@ -97,6 +97,30 @@ def test_release_preflight_runs_headless_pipewire_runtime_smoke(monkeypatch) -> 
     ]
 
 
+def test_release_preflight_uses_hosted_headless_pipewire_defaults(monkeypatch) -> None:
+    commands: list[list[str | Path]] = []
+
+    monkeypatch.delenv("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", raising=False)
+    monkeypatch.delenv("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", raising=False)
+    monkeypatch.delenv("MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION", raising=False)
+    monkeypatch.setattr(release_preflight, "run", lambda command, **_kwargs: commands.append(command))
+
+    release_preflight.run_headless_pipewire_runtime_smoke(Path("/python"))
+
+    assert commands == [
+        [
+            Path("/python"),
+            release_preflight.ROOT / "tools/check_headless_pipewire_runtime.py",
+            "--timeout",
+            "90",
+            "--cycles",
+            "2",
+            "--audio-duration",
+            "180",
+        ]
+    ]
+
+
 def test_release_preflight_rejects_invalid_headless_pipewire_runtime_env(monkeypatch) -> None:
     def fail_run(_command, **_kwargs) -> None:
         raise AssertionError("Headless runtime smoke should not run with invalid environment")

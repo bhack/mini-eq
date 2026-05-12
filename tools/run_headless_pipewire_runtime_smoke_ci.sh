@@ -2,9 +2,9 @@
 set -eu
 
 venv="${MINI_EQ_HEADLESS_PIPEWIRE_VENV:-${RUNNER_TEMP:-/tmp}/mini-eq-headless-pipewire-venv}"
-timeout="${MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT:-35}"
+timeout="${MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT:-90}"
 cycles="${MINI_EQ_HEADLESS_PIPEWIRE_CYCLES:-3}"
-audio_duration="${MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION:-120}"
+audio_duration="${MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION:-180}"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
