@@ -32,7 +32,6 @@ EXPORT_CURRENT_CURVE_ACTION = "Export Current Curve\u2026"
 IMPORT_PRESET_ACTION = "Import Preset\u2026"
 DEFAULT_AUDIO_SINK_KEY = "default.audio.sink"
 DEFAULT_CONFIGURED_AUDIO_SINK_KEY = "default.configured.audio.sink"
-DEFAULT_METADATA_VALUE_TYPE = "Spa:String:JSON"
 CONTROL_BUS_NAME = "io.github.bhack.mini-eq"
 CONTROL_OBJECT_PATH = "/io/github/bhack/mini_eq/Control"
 CONTROL_INTERFACE_NAME = "io.github.bhack.MiniEq.Control"
@@ -225,16 +224,16 @@ def default_sink_name() -> str | None:
 
 
 def set_configured_default_sink_name(sink_name: str, timeout_seconds: float) -> None:
-    value = json.dumps({"name": sink_name}, separators=(",", ":"))
+    sink = wait_for(
+        f"PipeWire sink {sink_name}",
+        lambda: node_by_name(sink_name),
+        timeout_seconds,
+    )
     subprocess.run(
         [
-            "pw-metadata",
-            "-n",
-            "default",
-            "0",
-            DEFAULT_CONFIGURED_AUDIO_SINK_KEY,
-            value,
-            DEFAULT_METADATA_VALUE_TYPE,
+            "wpctl",
+            "set-default",
+            str(node_id(sink)),
         ],
         check=True,
         text=True,
@@ -243,6 +242,11 @@ def set_configured_default_sink_name(sink_name: str, timeout_seconds: float) -> 
     wait_for(
         f"PipeWire configured default sink metadata to become {sink_name}",
         lambda: configured_default_sink_name() == sink_name,
+        timeout_seconds,
+    )
+    wait_for(
+        f"WirePlumber default sink metadata to become {sink_name}",
+        lambda: default_sink_name() == sink_name,
         timeout_seconds,
     )
 
@@ -1324,7 +1328,7 @@ def run_helper(_args: argparse.Namespace) -> int:
         return HELPER_SKIP_EXIT_CODE
 
     try:
-        for tool in ("pipewire", "wireplumber", "pw-cat", "pw-dump", "pw-metadata", "gnome-shell"):
+        for tool in ("pipewire", "wireplumber", "wpctl", "pw-cat", "pw-dump", "pw-metadata", "gnome-shell"):
             require_tool(tool)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)

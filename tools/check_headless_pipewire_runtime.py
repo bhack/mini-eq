@@ -305,7 +305,7 @@ def start_pipewire_session(
 
 def run_helper(_args: argparse.Namespace) -> int:
     try:
-        for tool in ("pipewire", "wireplumber", "pw-cat", "pw-dump", "pw-metadata"):
+        for tool in ("pipewire", "wireplumber", "wpctl", "pw-cat", "pw-dump", "pw-metadata"):
             require_tool(tool)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
