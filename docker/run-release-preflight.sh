@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+ulimit -c 0 || true
 
 workdir="${MINI_EQ_PREFLIGHT_WORKDIR:-/work}"
 venv="${MINI_EQ_PREFLIGHT_VENV:-/tmp/mini-eq-preflight-venv}"
