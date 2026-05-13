@@ -177,6 +177,9 @@ class MiniEqWindowGraphMixin:
 
         self.update_status_summary()
         self.update_preset_state()
+        notify_control_state_changed = getattr(self, "notify_control_state_changed", None)
+        if callable(notify_control_state_changed):
+            notify_control_state_changed()
         return False
 
     def schedule_band_engine_update(self, index: int) -> None:
@@ -461,7 +464,7 @@ class MiniEqWindowGraphMixin:
         self.update_status_summary()
         self.invalidate_graph_response_cache()
         self.queue_response_draw()
-        self.update_preset_state()
+        self.schedule_curve_metadata_refresh()
 
     def on_custom_band_solo_toggled(self, index: int, soloed: bool) -> None:
         if self.updating_ui:
@@ -480,7 +483,7 @@ class MiniEqWindowGraphMixin:
         self.update_status_summary()
         self.invalidate_graph_response_cache()
         self.queue_response_draw()
-        self.update_preset_state()
+        self.schedule_curve_metadata_refresh()
 
     def on_selected_band_type_changed(self, combo: Gtk.DropDown, _param: object) -> None:
         if self.updating_ui:
@@ -505,7 +508,7 @@ class MiniEqWindowGraphMixin:
         self.update_status_summary()
         self.invalidate_graph_response_cache()
         self.queue_response_draw()
-        self.update_preset_state()
+        self.schedule_curve_metadata_refresh()
 
     def on_selected_band_frequency_changed(self, spin: Gtk.SpinButton) -> None:
         if self.updating_ui:

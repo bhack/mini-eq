@@ -342,7 +342,9 @@ class MiniEqIndicator extends PanelMenu.Button {
             ? Boolean(unpackValue(state.analyzer_enabled))
             : true;
         const presetName = unpackValue(state.preset_name) || _('Current State');
+        const curveLabel = unpackValue(state.curve_label) || presetName;
         const outputPresetName = unpackValue(state.output_preset_name) || '';
+        const outputPresetLabel = unpackValue(state.output_preset_label) || outputPresetName;
         const capabilities = unpackValue(state.capabilities) || [];
         this._capabilities = new Set(Array.isArray(capabilities) ? capabilities : []);
         const canQuit = this._capabilities.has('quit');
@@ -367,9 +369,9 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._routingItem.setSensitive(running);
         this._eqItem.setSensitive(running && routed);
         this._presetsItem.setSensitive(running);
-        this._presetsItem.label.text = running ? _('Preset: %s').format(presetName) : _('Presets');
+        this._presetsItem.label.text = running ? _('Curve: %s').format(curveLabel) : _('Presets');
         this._statusItem.label.text = this._statusText(running, routed, eqEnabled);
-        this._outputPresetItem.label.text = this._outputPresetText(running, outputPresetName);
+        this._outputPresetItem.label.text = this._outputPresetText(running, outputPresetLabel);
         this._quitItem.visible = running && canQuit;
     }
 
