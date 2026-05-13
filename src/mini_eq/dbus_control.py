@@ -24,6 +24,19 @@ CAPABILITIES = (
     "output-presets",
     "analyzer-levels",
 )
+CURVE_STATUS_BY_PRESET_STATE = {
+    "preset": "preset",
+    "modified": "modified",
+    "neutral": "neutral",
+    "unsaved": "unsaved",
+}
+OUTPUT_PRESET_STATUS_LABELS = {
+    "applied": "Applied",
+    "different": "Different",
+    "linked": "Linked",
+    "missing": "Missing",
+    "modified": "Modified",
+}
 
 INTROSPECTION_XML = f"""
 <node>
@@ -117,6 +130,93 @@ class ApplicationProtocol(Protocol):
     def get_dbus_connection(self) -> Gio.DBusConnection | None: ...
 
 
+def curve_status_from_preset_state(value: object) -> str:
+    return CURVE_STATUS_BY_PRESET_STATE.get(str(value or "").strip().casefold(), "unknown")
+
+
+def format_curve_label(name: str, status: str) -> str:
+    label = name.strip() or "Current State"
+    if status == "modified":
+        return f"{label} (modified)"
+    return label
+
+
+def window_curve_display_state(window: object | None) -> tuple[str, str, str]:
+    if window is None:
+        return "", "none", "Current State"
+
+    curve_name = ""
+    curve_status = "unknown"
+    panel_state_factory = getattr(window, "preset_panel_ui_state", None)
+    if callable(panel_state_factory):
+        try:
+            panel_state = panel_state_factory()
+            curve_name = str(getattr(panel_state, "current_curve_text", "") or "").strip()
+            curve_status = curve_status_from_preset_state(getattr(panel_state, "preset_state_text", ""))
+        except Exception:
+            curve_name = ""
+            curve_status = "unknown"
+
+    if not curve_name:
+        curve_name = str(getattr(window, "current_preset_name", "") or "").strip() or "Current State"
+    if curve_status == "unknown" and getattr(window, "current_preset_name", None):
+        curve_status = "preset"
+
+    return curve_name, curve_status, format_curve_label(curve_name, curve_status)
+
+
+def window_output_preset_link_name(window: object | None) -> str:
+    if window is None:
+        return ""
+
+    output_preset_link_name = getattr(window, "output_preset_link_name", None)
+    if not callable(output_preset_link_name):
+        return ""
+
+    try:
+        return str(output_preset_link_name() or "").strip()
+    except Exception:
+        return ""
+
+
+def window_preset_name_exists(window: object, preset_name: str) -> bool:
+    preset_name_exists = getattr(window, "preset_name_exists", None)
+    if not callable(preset_name_exists):
+        return True
+
+    try:
+        return bool(preset_name_exists(preset_name))
+    except Exception:
+        return True
+
+
+def window_output_preset_status(window: object | None, preset_name: str) -> str:
+    if window is None or not preset_name:
+        return "none"
+
+    if not window_preset_name_exists(window, preset_name):
+        return "missing"
+    if bool(getattr(window, "output_preset_auto_applied", False)):
+        return "applied"
+
+    current_preset_name = getattr(window, "current_preset_name", None)
+    if current_preset_name == preset_name:
+        return "modified"
+    if current_preset_name:
+        return "different"
+    return "linked"
+
+
+def format_output_preset_label(preset_name: str, status: str) -> str:
+    if not preset_name:
+        return ""
+
+    status_label = OUTPUT_PRESET_STATUS_LABELS.get(status)
+    if status_label is None:
+        return preset_name
+    return f"{status_label} - {preset_name}"
+
+
 class MiniEqDbusControl:
     def __init__(self, app: ApplicationProtocol) -> None:
         self.app = app
@@ -148,11 +248,10 @@ class MiniEqDbusControl:
     def state(self) -> dict[str, GLib.Variant]:
         controller = self.app.controller
         window = self.app.window
-        output_preset_name = ""
-        if window is not None:
-            output_preset_link_name = getattr(window, "output_preset_link_name", None)
-            if output_preset_link_name is not None:
-                output_preset_name = output_preset_link_name() or ""
+        curve_name, curve_status, curve_label = window_curve_display_state(window)
+        output_preset_name = window_output_preset_link_name(window)
+        output_preset_status = window_output_preset_status(window, output_preset_name)
+        output_preset_label = format_output_preset_label(output_preset_name, output_preset_status)
 
         return {
             "api_version": GLib.Variant("u", API_VERSION),
@@ -164,8 +263,13 @@ class MiniEqDbusControl:
             "preset_name": GLib.Variant(
                 "s", window.current_preset_name if window and window.current_preset_name else ""
             ),
+            "curve_name": GLib.Variant("s", curve_name),
+            "curve_status": GLib.Variant("s", curve_status),
+            "curve_label": GLib.Variant("s", curve_label),
             "output_sink": GLib.Variant("s", controller.output_sink if controller and controller.output_sink else ""),
             "output_preset_name": GLib.Variant("s", output_preset_name),
+            "output_preset_status": GLib.Variant("s", output_preset_status),
+            "output_preset_label": GLib.Variant("s", output_preset_label),
             "output_preset_auto_applied": GLib.Variant(
                 "b",
                 bool(window and getattr(window, "output_preset_auto_applied", False)),

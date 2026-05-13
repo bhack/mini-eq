@@ -289,3 +289,20 @@ def test_curve_metadata_refresh_updates_preset_state_with_pending_idle(monkeypat
 
     assert calls == ["preset-state"]
     assert test_window.curve_metadata_refresh_source_id == 42
+
+
+def test_curve_metadata_refresh_idle_notifies_control_clients() -> None:
+    calls: list[str] = []
+    test_window = SimpleNamespace(
+        curve_metadata_refresh_source_id=42,
+        ui_shutting_down=False,
+        update_status_summary=lambda: calls.append("status"),
+        update_preset_state=lambda: calls.append("preset-state"),
+        notify_control_state_changed=lambda: calls.append("control-state"),
+    )
+
+    keep_source = window_graph.MiniEqWindowGraphMixin.on_curve_metadata_refresh_idle(test_window)
+
+    assert keep_source is False
+    assert test_window.curve_metadata_refresh_source_id == 0
+    assert calls == ["status", "preset-state", "control-state"]

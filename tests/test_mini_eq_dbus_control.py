@@ -98,7 +98,11 @@ class FakeWindow:
         self.route_switch = FakeSwitch(controller.routed)
         self.loaded_presets: list[str] = []
         self.update_count = 0
+        self.current_curve_text = "Flat"
+        self.preset_state_text = "Preset"
+        self.output_preset_link = "Headphones"
         self.output_preset_auto_applied = False
+        self.existing_presets = {"Flat", "Headphones"}
         self.visible = True
 
     def sync_control_switches_from_controller(self, *, route: bool = True, eq: bool = True) -> None:
@@ -148,10 +152,21 @@ class FakeWindow:
 
     def load_library_preset(self, name: str) -> None:
         self.current_preset_name = name
+        self.current_curve_text = name
+        self.preset_state_text = "Preset"
         self.loaded_presets.append(name)
 
     def output_preset_link_name(self) -> str | None:
-        return "Headphones"
+        return self.output_preset_link
+
+    def preset_panel_ui_state(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            current_curve_text=self.current_curve_text,
+            preset_state_text=self.preset_state_text,
+        )
+
+    def preset_name_exists(self, preset_name: str) -> bool:
+        return preset_name in self.existing_presets
 
     def present(self) -> None:
         pass
@@ -214,8 +229,13 @@ def test_dbus_control_state_contains_shell_summary() -> None:
         "eq_enabled": True,
         "routed": False,
         "preset_name": "Flat",
+        "curve_name": "Flat",
+        "curve_status": "preset",
+        "curve_label": "Flat",
         "output_sink": "alsa_output.test",
         "output_preset_name": "Headphones",
+        "output_preset_status": "different",
+        "output_preset_label": "Different - Headphones",
         "output_preset_auto_applied": False,
         "analyzer_enabled": False,
         "background_mode": True,
@@ -223,6 +243,46 @@ def test_dbus_control_state_contains_shell_summary() -> None:
         "start_active_at_login": False,
         "window_visible": True,
     }
+
+
+def test_dbus_control_state_marks_modified_curve_for_shell() -> None:
+    control, _controller, window = make_control()
+    window.current_curve_text = "Flat"
+    window.preset_state_text = "Modified"
+
+    state = {key: value.unpack() for key, value in control.state().items()}
+
+    assert state["curve_name"] == "Flat"
+    assert state["curve_status"] == "modified"
+    assert state["curve_label"] == "Flat (modified)"
+
+
+@pytest.mark.parametrize(
+    ("current_preset_name", "auto_applied", "existing_presets", "status", "label"),
+    [
+        ("Headphones", True, {"Headphones"}, "applied", "Applied - Headphones"),
+        ("Headphones", False, {"Headphones"}, "modified", "Modified - Headphones"),
+        ("Flat", False, {"Flat", "Headphones"}, "different", "Different - Headphones"),
+        (None, False, {"Headphones"}, "linked", "Linked - Headphones"),
+        ("Flat", False, {"Flat"}, "missing", "Missing - Headphones"),
+    ],
+)
+def test_dbus_control_state_describes_output_preset_for_shell(
+    current_preset_name: str | None,
+    auto_applied: bool,
+    existing_presets: set[str],
+    status: str,
+    label: str,
+) -> None:
+    control, _controller, window = make_control()
+    window.current_preset_name = current_preset_name
+    window.output_preset_auto_applied = auto_applied
+    window.existing_presets = existing_presets
+
+    state = {key: value.unpack() for key, value in control.state().items()}
+
+    assert state["output_preset_status"] == status
+    assert state["output_preset_label"] == label
 
 
 def test_dbus_control_compacts_analyzer_levels_for_shell_signal() -> None:
