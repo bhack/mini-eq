@@ -1,11 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-05-13
 
-- Add direct AutoEq search, curve preview, and on-demand preset import from the app.
-- Show current AppStream release notes in the About dialog.
-- Request Flatpak network access so AutoEq.app profile search and preset generation work in sandboxed builds.
-- Keep the Flatpak display permission Wayland-only, avoiding the X11 screen-contents access grant.
+- Add direct AutoEq profile search, curve preview, and on-demand headphone
+  correction import.
+- Show generated AutoEq target, preamp, source, and filter count before
+  importing a profile.
+- Remember window size across launches and show current release notes in the
+  About dialog.
+- Clarify modified curves and auto preset state in the GNOME Shell extension.
 
 ## 0.7.4 - 2026-05-11
 
