@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1 - 2026-05-14
+
+- Fix first-run Flatpak window sizing and state restoration.
+- Fix GNOME Shell startup notification handling when launching Mini EQ from the
+  app icon.
+
 ## 0.8.0 - 2026-05-13
 
 - Add direct AutoEq profile search, curve preview, and on-demand headphone
