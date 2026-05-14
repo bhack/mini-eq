@@ -5,9 +5,10 @@ import time
 import gi
 
 gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gio, GLib, GObject, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from .analyzer import (
     ANALYZER_BIN_COUNT,
@@ -53,7 +54,9 @@ from .window_utils import requested_switch_state, set_switch_confirmed_state
 TOAST_TIMEOUT_SECONDS = 2
 MIN_WINDOW_WIDTH = 980
 MIN_WINDOW_HEIGHT = 600
+DEFAULT_WINDOW_WIDTH = 1360
 DEFAULT_WINDOW_HEIGHT = 720
+DEFAULT_WINDOW_SCREEN_MARGIN = 32
 ROUTING_CLOSE_SETTLE_MS = 300
 TOAST_IGNORED_PREFIXES = (
     "filter-chain PipeWire EQ ready:",
@@ -124,6 +127,40 @@ def output_preset_target_identity(owner: object, fallback: str | None) -> str | 
     return fallback
 
 
+def fit_window_default_size_to_monitor(
+    width: int,
+    height: int,
+    *,
+    monitor_width: int,
+    monitor_height: int,
+    min_width: int = MIN_WINDOW_WIDTH,
+    min_height: int = MIN_WINDOW_HEIGHT,
+    margin: int = DEFAULT_WINDOW_SCREEN_MARGIN,
+) -> tuple[int, int]:
+    available_width = max(min_width, monitor_width - margin)
+    available_height = max(min_height, monitor_height - margin)
+    return (max(min_width, min(width, available_width)), max(min_height, min(height, available_height)))
+
+
+def initial_window_default_size() -> tuple[int, int]:
+    display = Gdk.Display.get_default()
+    if display is None:
+        return (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+
+    monitors = display.get_monitors()
+    monitor = monitors.get_item(0) if monitors.get_n_items() > 0 else None
+    if monitor is None:
+        return (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+
+    geometry = monitor.get_geometry()
+    return fit_window_default_size_to_monitor(
+        DEFAULT_WINDOW_WIDTH,
+        DEFAULT_WINDOW_HEIGHT,
+        monitor_width=geometry.width,
+        monitor_height=geometry.height,
+    )
+
+
 class MiniEqWindow(
     MiniEqWindowPresetMixin,
     MiniEqWindowAnalyzerMixin,
@@ -156,7 +193,7 @@ class MiniEqWindow(
         self.min_window_width = MIN_WINDOW_WIDTH
         self.compact_min_window_height = MIN_WINDOW_HEIGHT
         self.default_min_window_height = MIN_WINDOW_HEIGHT
-        self.set_default_size(1360, DEFAULT_WINDOW_HEIGHT)
+        self.set_default_size(*initial_window_default_size())
         self.window_state_settings = bind_window_state(self)
         _default_width, default_height = self.get_default_size()
         self.initial_layout_height = default_height if default_height > 0 else DEFAULT_WINDOW_HEIGHT
@@ -323,12 +360,12 @@ class MiniEqWindow(
 
         if not self.ui_shutting_down:
             if self.present_when_ready:
+                application = self.get_application()
+                prepare_startup_notification = getattr(application, "prepare_window_startup_notification", None)
+                if callable(prepare_startup_notification):
+                    prepare_startup_notification(self)
                 self.set_visible(True)
                 self.present()
-            application = self.get_application()
-            finish_startup_notification = getattr(application, "finish_startup_notification", None)
-            if callable(finish_startup_notification):
-                finish_startup_notification()
         self.notify_control_state_changed()
         return False
 

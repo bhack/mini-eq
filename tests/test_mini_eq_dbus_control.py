@@ -104,6 +104,8 @@ class FakeWindow:
         self.output_preset_auto_applied = False
         self.existing_presets = {"Flat", "Headphones"}
         self.visible = True
+        self.present_count = 0
+        self.startup_ids: list[str] = []
 
     def sync_control_switches_from_controller(self, *, route: bool = True, eq: bool = True) -> None:
         self.updating_ui = True
@@ -169,7 +171,10 @@ class FakeWindow:
         return preset_name in self.existing_presets
 
     def present(self) -> None:
-        pass
+        self.present_count += 1
+
+    def set_startup_id(self, startup_id: str) -> None:
+        self.startup_ids.append(startup_id)
 
     def get_visible(self) -> bool:
         return self.visible
@@ -210,7 +215,7 @@ def make_control() -> tuple[dbus_control.MiniEqDbusControl, FakeController, Fake
         start_active_at_login=False,
         activate=lambda: None,
         get_dbus_connection=lambda: None,
-        present_main_window=lambda: None,
+        present_main_window=lambda startup_id=None: None,
         quit_fully=lambda: None,
     )
     return dbus_control.MiniEqDbusControl(app), controller, window
@@ -453,6 +458,47 @@ def test_dbus_control_set_preset_sanitizes_name() -> None:
     assert window.loaded_presets == ["Headphones"]
 
 
+def test_dbus_control_present_window_forwards_startup_id() -> None:
+    calls: list[str | None] = []
+    app = SimpleNamespace(
+        controller=None,
+        window=None,
+        background_mode=False,
+        start_at_login=False,
+        start_active_at_login=False,
+        activate=lambda: None,
+        get_dbus_connection=lambda: None,
+        present_main_window=lambda startup_id=None: calls.append(startup_id),
+        quit_fully=lambda: None,
+    )
+    control = dbus_control.MiniEqDbusControl(app)
+
+    control.present_window("startup-token")
+
+    assert calls == ["startup-token"]
+
+
+def test_dbus_control_present_window_sets_startup_id_without_application_helper() -> None:
+    controller = FakeController()
+    window = FakeWindow(controller)
+    app = SimpleNamespace(
+        controller=controller,
+        window=window,
+        background_mode=False,
+        start_at_login=False,
+        start_active_at_login=False,
+        activate=lambda: None,
+        get_dbus_connection=lambda: None,
+        quit_fully=lambda: None,
+    )
+    control = dbus_control.MiniEqDbusControl(app)
+
+    control.present_window("startup-token")
+
+    assert window.startup_ids == ["startup-token"]
+    assert window.present_count == 1
+
+
 def test_dbus_control_quit_delegates_to_application_full_quit() -> None:
     calls: list[str] = []
     app = SimpleNamespace(
@@ -463,7 +509,7 @@ def test_dbus_control_quit_delegates_to_application_full_quit() -> None:
         start_active_at_login=False,
         activate=lambda: None,
         get_dbus_connection=lambda: None,
-        present_main_window=lambda: None,
+        present_main_window=lambda startup_id=None: None,
         quit_fully=lambda: calls.append("quit"),
     )
     control = dbus_control.MiniEqDbusControl(app)
@@ -491,6 +537,7 @@ def test_dbus_introspection_exposes_expected_interface() -> None:
         "SetRoutingEnabled",
         "SetPreset",
         "PresentWindow",
+        "PresentWindowWithStartupId",
         "Quit",
     }
     assert {signal.name for signal in node_info.interfaces[0].signals} == {

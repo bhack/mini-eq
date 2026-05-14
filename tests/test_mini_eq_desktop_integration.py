@@ -22,6 +22,7 @@ def test_desktop_file_launches_installed_module(monkeypatch) -> None:
 
     assert 'Exec="/opt/Mini EQ/python" -m mini_eq' in desktop_file
     assert "Icon=io.github.bhack.mini-eq" in desktop_file
+    assert "StartupNotify=true" in desktop_file
     assert "StartupWMClass=io.github.bhack.mini-eq" in desktop_file
 
 

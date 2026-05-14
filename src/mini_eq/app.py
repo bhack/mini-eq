@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import signal
 import sys
 from argparse import Namespace
@@ -7,10 +8,9 @@ from argparse import Namespace
 import gi
 
 gi.require_version("Adw", "1")
-gi.require_version("Gdk", "4.0")
 gi.require_version("GLibUnix", "2.0")
 
-from gi.repository import Adw, Gdk, Gio, GLib, GLibUnix
+from gi.repository import Adw, Gio, GLib, GLibUnix
 
 from .appearance import apply_appearance_preference, load_appearance_preference
 from .background import (
@@ -31,9 +31,11 @@ from .routing import SystemWideEqController
 from .window import MiniEqWindow
 from .window_presets import imported_apo_curve_label
 
+STARTUP_NOTIFICATION_ENV_KEYS = ("XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID")
+
 
 class MiniEqApplication(Adw.Application):
-    def __init__(self, args: Namespace) -> None:
+    def __init__(self, args: Namespace, startup_notification_id: str | None = None) -> None:
         super().__init__(application_id=APP_ID)
         self.args = args
         self.controller: SystemWideEqController | None = None
@@ -44,6 +46,9 @@ class MiniEqApplication(Adw.Application):
         self.window_starting = False
         self.window_start_hold = False
         self.pending_present_when_ready = False
+        self.pending_startup_notification_id = (
+            None if bool(getattr(args, "background", False)) else startup_notification_id
+        )
         self.background_mode = load_background_mode() or bool(getattr(args, "background", False))
         self.start_at_login = load_start_at_login()
         self.start_active_at_login = load_start_active_at_login() and self.start_at_login
@@ -81,8 +86,9 @@ class MiniEqApplication(Adw.Application):
     def do_activate(self) -> None:
         self.ensure_window(present=not bool(getattr(self.args, "background", False)))
 
-    def ensure_window(self, *, present: bool) -> None:
+    def ensure_window(self, *, present: bool, startup_id: str | None = None) -> None:
         install_app_icon()
+        self.queue_startup_notification_id(startup_id)
 
         if self.window is not None:
             if self.window.ui_shutting_down:
@@ -90,9 +96,9 @@ class MiniEqApplication(Adw.Application):
             if present:
                 self.window.present_when_ready = True
                 if self.window.startup_ready:
+                    self.prepare_window_startup_notification(self.window)
                     self.window.set_visible(True)
                     self.window.present()
-                    self.finish_startup_notification()
                     self.emit_control_state_changed()
             self.window.schedule_startup_ready()
             return
@@ -162,8 +168,8 @@ class MiniEqApplication(Adw.Application):
 
         controller.start(on_ready=on_ready, on_error=on_error)
 
-    def present_main_window(self) -> None:
-        self.ensure_window(present=True)
+    def present_main_window(self, startup_id: str | None = None) -> None:
+        self.ensure_window(present=True, startup_id=startup_id)
 
     def quit_fully(self) -> None:
         if self.window is not None and not self.window.ui_shutting_down:
@@ -206,20 +212,23 @@ class MiniEqApplication(Adw.Application):
         if self.window is None or self.window.ui_shutting_down:
             return False
 
+        self.prepare_window_startup_notification(self.window)
         self.window.present()
-        self.finish_startup_notification()
         return False
 
-    def finish_startup_notification(self) -> None:
-        display = Gdk.Display.get_default()
-        if display is None:
-            return
+    def queue_startup_notification_id(self, startup_id: str | None) -> None:
+        if startup_id:
+            self.pending_startup_notification_id = startup_id
 
-        startup_id = display.get_startup_notification_id()
+    def prepare_window_startup_notification(self, window: object) -> None:
+        startup_id = self.pending_startup_notification_id
         if not startup_id:
             return
 
-        display.notify_startup_complete(startup_id)
+        self.pending_startup_notification_id = None
+        set_startup_id = getattr(window, "set_startup_id", None)
+        if callable(set_startup_id):
+            set_startup_id(startup_id)
 
     def emit_control_state_changed(self) -> None:
         if self.window is not None and not self.window.get_visible():
@@ -336,6 +345,8 @@ def run_from_args(args: Namespace) -> int:
         install_desktop_integration()
         return 0
 
+    startup_notification_id = None if getattr(args, "background", False) else startup_notification_id_from_environment()
+
     try:
         instance_guard = MiniEqInstanceGuard.acquire()
     except MiniEqAlreadyRunningError as exc:
@@ -343,7 +354,7 @@ def run_from_args(args: Namespace) -> int:
             return 0
 
         try:
-            call_present_window()
+            call_present_window(startup_id=startup_notification_id)
             return 0
         except Exception:
             pass
@@ -360,12 +371,21 @@ def run_from_args(args: Namespace) -> int:
         if args.headless:
             return run_headless(args)
 
-        app = MiniEqApplication(args)
+        app = MiniEqApplication(args, startup_notification_id=startup_notification_id)
         return app.run([sys.argv[0]])
 
 
 def main(argv: list[str]) -> int:
     return run_from_args(parse_args(argv))
+
+
+def startup_notification_id_from_environment() -> str | None:
+    for key in STARTUP_NOTIFICATION_ENV_KEYS:
+        startup_id = os.environ.get(key, "").strip()
+        if startup_id:
+            return startup_id
+
+    return None
 
 
 if __name__ == "__main__":

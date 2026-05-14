@@ -144,6 +144,20 @@ def test_visual_layout_height_prefers_real_allocation() -> None:
     assert window_layout.visual_layout_height(fake_window, 960) == 960
 
 
+def test_fit_window_default_size_keeps_preferred_size_on_roomy_monitor() -> None:
+    assert window.fit_window_default_size_to_monitor(1360, 720, monitor_width=1920, monitor_height=1080) == (
+        1360,
+        720,
+    )
+
+
+def test_fit_window_default_size_leaves_margin_on_small_monitor() -> None:
+    assert window.fit_window_default_size_to_monitor(1360, 720, monitor_width=1366, monitor_height=736) == (
+        1334,
+        704,
+    )
+
+
 def test_on_close_request_starts_custom_shutdown_sequence() -> None:
     calls: list[str] = []
     fake_window = SimpleNamespace(
@@ -325,7 +339,7 @@ def test_begin_close_request_shutdown_hides_when_background_mode_is_enabled() ->
 def test_startup_ready_applies_startup_state_before_presenting() -> None:
     calls: list[object] = []
     controller = SimpleNamespace(eq_enabled=True, routed=False)
-    application = SimpleNamespace(finish_startup_notification=lambda: calls.append("startup-complete"))
+    application = SimpleNamespace(prepare_window_startup_notification=lambda _window: calls.append("startup-id"))
 
     def route_system_audio(enabled: bool) -> None:
         calls.append(("route", enabled))
@@ -376,16 +390,19 @@ def test_startup_ready_applies_startup_state_before_presenting() -> None:
         ("summary", True),
         "focus",
         "notify",
+        "startup-id",
         ("visible", True),
         "present",
-        "startup-complete",
         "notify",
     ]
 
 
-def test_startup_ready_finishes_startup_notification_without_presenting() -> None:
+def test_startup_ready_without_presenting_does_not_force_startup_notification() -> None:
     calls: list[object] = []
-    application = SimpleNamespace(finish_startup_notification=lambda: calls.append("startup-complete"))
+    application = SimpleNamespace(
+        finish_startup_notification=lambda: (_ for _ in ()).throw(AssertionError("unexpected")),
+        prepare_window_startup_notification=lambda _window: (_ for _ in ()).throw(AssertionError("unexpected")),
+    )
     fake_window = SimpleNamespace(
         startup_ready_source_id=99,
         startup_auto_route_source_id=0,
@@ -408,7 +425,6 @@ def test_startup_ready_finishes_startup_notification_without_presenting() -> Non
         "preset-monitor",
         "output-preset",
         "monitor",
-        "startup-complete",
         "notify",
     ]
 

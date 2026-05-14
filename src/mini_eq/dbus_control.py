@@ -23,6 +23,7 @@ CAPABILITIES = (
     "set-preset",
     "output-presets",
     "analyzer-levels",
+    "startup-notification",
 )
 CURVE_STATUS_BY_PRESET_STATE = {
     "preset": "preset",
@@ -57,6 +58,9 @@ INTROSPECTION_XML = f"""
       <arg name="name" type="s" direction="in"/>
     </method>
     <method name="PresentWindow"/>
+    <method name="PresentWindowWithStartupId">
+      <arg name="startup_id" type="s" direction="in"/>
+    </method>
     <method name="Quit"/>
     <signal name="StateChanged">
       <arg name="state" type="a{{sv}}"/>
@@ -123,7 +127,7 @@ class ApplicationProtocol(Protocol):
 
     def activate(self) -> None: ...
 
-    def present_main_window(self) -> None: ...
+    def present_main_window(self, startup_id: str | None = None) -> None: ...
 
     def quit_fully(self) -> None: ...
 
@@ -404,15 +408,18 @@ class MiniEqDbusControl:
         window.load_library_preset(preset_name)
         self.emit_state_changed()
 
-    def present_window(self) -> None:
+    def present_window(self, startup_id: str | None = None) -> None:
         present_main_window = getattr(self.app, "present_main_window", None)
         if present_main_window is not None:
-            present_main_window()
+            present_main_window(startup_id)
             return
 
         self.app.activate()
         window = self.app.window
         if window is not None and not window.ui_shutting_down:
+            set_startup_id = getattr(window, "set_startup_id", None)
+            if startup_id and callable(set_startup_id):
+                set_startup_id(startup_id)
             window.present()
 
     def quit(self) -> None:
@@ -458,6 +465,10 @@ class MiniEqDbusControl:
             elif method_name == "PresentWindow":
                 self.present_window()
                 invocation.return_value(None)
+            elif method_name == "PresentWindowWithStartupId":
+                (startup_id,) = parameters.unpack()
+                self.present_window(startup_id)
+                invocation.return_value(None)
             elif method_name == "Quit":
                 invocation.return_value(None)
                 self.quit()
@@ -467,8 +478,25 @@ class MiniEqDbusControl:
             invocation.return_dbus_error(f"{INTERFACE_NAME}.Error", str(exc))
 
 
-def call_present_window(timeout_ms: int = 3000) -> None:
+def call_present_window(startup_id: str | None = None, timeout_ms: int = 3000) -> None:
     connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    if startup_id:
+        try:
+            connection.call_sync(
+                BUS_NAME,
+                OBJECT_PATH,
+                INTERFACE_NAME,
+                "PresentWindowWithStartupId",
+                GLib.Variant("(s)", (startup_id,)),
+                None,
+                Gio.DBusCallFlags.NONE,
+                timeout_ms,
+                None,
+            )
+            return
+        except GLib.Error:
+            pass
+
     connection.call_sync(
         BUS_NAME,
         OBJECT_PATH,

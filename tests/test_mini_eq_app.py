@@ -21,9 +21,13 @@ class FakeWindow:
         self.present_count = 0
         self.close_count = 0
         self.shutdown_count = 0
+        self.startup_ids: list[str] = []
 
     def present(self) -> None:
         self.present_count += 1
+
+    def set_startup_id(self, startup_id: str) -> None:
+        self.startup_ids.append(startup_id)
 
     def close(self) -> None:
         self.close_count += 1
@@ -59,17 +63,20 @@ def test_window_present_idle_skips_window_during_shutdown() -> None:
 
 def test_window_present_idle_presents_active_window() -> None:
     window = FakeWindow(ui_shutting_down=False)
-    calls: list[str] = []
     application = SimpleNamespace(
         window=window,
         window_present_source_id=123,
-        finish_startup_notification=lambda: calls.append("startup-complete"),
+        pending_startup_notification_id="startup-token",
+    )
+    application.prepare_window_startup_notification = lambda window: (
+        app.MiniEqApplication.prepare_window_startup_notification(application, window)
     )
 
     assert app.MiniEqApplication.on_window_present_idle(application) is False
     assert application.window_present_source_id == 0
     assert window.present_count == 1
-    assert calls == ["startup-complete"]
+    assert window.startup_ids == ["startup-token"]
+    assert application.pending_startup_notification_id is None
 
 
 def test_ensure_window_defers_existing_window_present_until_startup_ready(monkeypatch) -> None:
@@ -86,7 +93,7 @@ def test_ensure_window_defers_existing_window_present_until_startup_ready(monkey
     application = SimpleNamespace(
         window=window,
         emit_control_state_changed=lambda: calls.append("state"),
-        finish_startup_notification=lambda: calls.append("startup-complete"),
+        queue_startup_notification_id=lambda _startup_id: None,
     )
 
     app.MiniEqApplication.ensure_window(application, present=True)
@@ -109,36 +116,33 @@ def test_ensure_window_presents_existing_ready_window_immediately(monkeypatch) -
     application = SimpleNamespace(
         window=window,
         emit_control_state_changed=lambda: calls.append("state"),
-        finish_startup_notification=lambda: calls.append("startup-complete"),
+        pending_startup_notification_id="startup-token",
+        queue_startup_notification_id=lambda _startup_id: None,
+        prepare_window_startup_notification=lambda window: calls.append(("startup-id", window)),
     )
 
     app.MiniEqApplication.ensure_window(application, present=True)
 
     assert window.present_when_ready is True
-    assert calls == [("visible", True), "present", "startup-complete", "state", "ready-scheduled"]
+    assert calls == [("startup-id", window), ("visible", True), "present", "state", "ready-scheduled"]
 
 
-def test_finish_startup_notification_completes_current_gdk_startup_id(monkeypatch) -> None:
-    calls: list[object] = []
-    display = SimpleNamespace(
-        get_startup_notification_id=lambda: "mini-eq-startup",
-        notify_startup_complete=lambda startup_id: calls.append(("complete", startup_id)),
-    )
-    monkeypatch.setattr(app.Gdk.Display, "get_default", lambda: display)
+def test_prepare_window_startup_notification_sets_id_once() -> None:
+    window = FakeWindow(ui_shutting_down=False)
+    application = SimpleNamespace(pending_startup_notification_id="startup-token")
 
-    app.MiniEqApplication.finish_startup_notification(SimpleNamespace())
+    app.MiniEqApplication.prepare_window_startup_notification(application, window)
+    app.MiniEqApplication.prepare_window_startup_notification(application, window)
 
-    assert calls == [("complete", "mini-eq-startup")]
+    assert window.startup_ids == ["startup-token"]
+    assert application.pending_startup_notification_id is None
 
 
-def test_finish_startup_notification_ignores_missing_gdk_startup_id(monkeypatch) -> None:
-    display = SimpleNamespace(
-        get_startup_notification_id=lambda: None,
-        notify_startup_complete=lambda _startup_id: (_ for _ in ()).throw(AssertionError("unexpected")),
-    )
-    monkeypatch.setattr(app.Gdk.Display, "get_default", lambda: display)
+def test_startup_notification_id_prefers_wayland_activation_token(monkeypatch) -> None:
+    monkeypatch.setenv("XDG_ACTIVATION_TOKEN", "wayland-token")
+    monkeypatch.setenv("DESKTOP_STARTUP_ID", "x11-token")
 
-    app.MiniEqApplication.finish_startup_notification(SimpleNamespace())
+    assert app.startup_notification_id_from_environment() == "wayland-token"
 
 
 def test_run_headless_skips_loop_after_synchronous_start_error(monkeypatch, capsys) -> None:
@@ -171,6 +175,52 @@ def test_run_headless_skips_loop_after_synchronous_start_error(monkeypatch, caps
     assert app.run_headless(args) == 1
     assert calls == ["controller:speakers", "start", "quit", "shutdown"]
     assert "startup failed" in capsys.readouterr().err
+
+
+def test_run_from_args_captures_startup_token_before_adw_init(monkeypatch) -> None:
+    calls: list[object] = []
+
+    class FakeInstanceGuard:
+        cleaned_filter_chains = []
+
+        def __enter__(self):
+            calls.append("guard-enter")
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb) -> None:
+            calls.append("guard-exit")
+
+    class FakeMiniEqApplication:
+        def __init__(self, args, *, startup_notification_id: str | None = None) -> None:
+            del args
+            calls.append(("app", startup_notification_id))
+
+        def run(self, argv: list[str]) -> int:
+            calls.append(("run", bool(argv)))
+            return 0
+
+    def read_startup_token() -> str:
+        calls.append("read-token")
+        return "startup-token"
+
+    def init_adw() -> None:
+        calls.append("adw-init")
+
+    monkeypatch.setattr(app, "startup_notification_id_from_environment", read_startup_token)
+    monkeypatch.setattr(app.MiniEqInstanceGuard, "acquire", lambda: FakeInstanceGuard())
+    monkeypatch.setattr(app.Adw, "init", init_adw)
+    monkeypatch.setattr(app, "MiniEqApplication", FakeMiniEqApplication)
+    args = SimpleNamespace(check_deps=False, install_desktop=False, background=False, headless=False)
+
+    assert app.run_from_args(args) == 0
+    assert calls == [
+        "read-token",
+        "guard-enter",
+        "adw-init",
+        ("app", "startup-token"),
+        ("run", True),
+        "guard-exit",
+    ]
 
 
 def test_install_unix_signal_handlers_uses_exported_glib_unix_source_api(monkeypatch) -> None:
@@ -313,11 +363,12 @@ def test_second_normal_launch_presents_running_instance(monkeypatch, capsys) -> 
         raise app.MiniEqAlreadyRunningError("Mini EQ is already running")
 
     monkeypatch.setattr(app.MiniEqInstanceGuard, "acquire", fail_acquire)
-    monkeypatch.setattr(app, "call_present_window", lambda: calls.append("present"))
+    monkeypatch.setattr(app, "startup_notification_id_from_environment", lambda: "startup-token")
+    monkeypatch.setattr(app, "call_present_window", lambda *, startup_id=None: calls.append(f"present:{startup_id}"))
     args = SimpleNamespace(check_deps=False, install_desktop=False, background=False)
 
     assert app.run_from_args(args) == 0
-    assert calls == ["present"]
+    assert calls == ["present:startup-token"]
     assert capsys.readouterr().err == ""
 
 
@@ -329,6 +380,11 @@ def test_second_background_launch_exits_without_presenting(monkeypatch, capsys) 
 
     monkeypatch.setattr(app.MiniEqInstanceGuard, "acquire", fail_acquire)
     monkeypatch.setattr(app, "call_present_window", lambda: calls.append("present"))
+    monkeypatch.setattr(
+        app,
+        "startup_notification_id_from_environment",
+        lambda: (_ for _ in ()).throw(AssertionError("unexpected")),
+    )
     args = SimpleNamespace(check_deps=False, install_desktop=False, background=True)
 
     assert app.run_from_args(args) == 0
