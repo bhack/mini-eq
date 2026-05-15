@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -42,6 +43,7 @@ SMOKE_APPLICATION_NAME = "mini-eq-flatpak-smoke"
 SMOKE_MEDIA_ROLE = "MiniEQSmoke"
 SMOKE_NODE_NAME = "mini-eq-flatpak-smoke"
 VIRTUAL_SINK_NAME = "mini_eq_sink"
+FILTER_OUTPUT_NAME = f"{VIRTUAL_SINK_NAME}_output"
 PIPEWIRE_MANAGER_ACCESS = "flatpak-manager"
 TARGET_OBJECT_RE = re.compile(
     r"update: id:(?P<id>\d+) key:'target\.object' value:'(?P<value>[^']*)' type:'(?P<type>[^']*)'"
@@ -129,6 +131,10 @@ def node_items() -> list[dict[str, Any]]:
     return [item for item in read_pw_dump() if item.get("type") == "PipeWire:Interface:Node"]
 
 
+def link_items() -> list[dict[str, Any]]:
+    return [item for item in read_pw_dump() if item.get("type") == "PipeWire:Interface:Link"]
+
+
 def client_items() -> list[dict[str, Any]]:
     return [item for item in read_pw_dump() if item.get("type") == "PipeWire:Interface:Client"]
 
@@ -164,6 +170,25 @@ def bound_id(node: dict[str, Any]) -> int:
     return node_id
 
 
+def link_endpoint_ids(link: dict[str, Any]) -> set[int]:
+    endpoints: set[int] = set()
+    props = item_props(link)
+    for key in ("link.output.node", "link.input.node"):
+        try:
+            endpoints.add(int(props.get(key)))
+        except (TypeError, ValueError):
+            pass
+    return endpoints
+
+
+def link_state(link: dict[str, Any]) -> str | None:
+    info_state = link.get("info", {}).get("state")
+    if isinstance(info_state, str):
+        return info_state
+    prop_state = item_props(link).get("link.state")
+    return str(prop_state) if prop_state is not None else None
+
+
 def metadata_targets() -> dict[int, tuple[str, str]]:
     result = subprocess.run(["pw-metadata", "-n", "default"], check=True, text=True, stdout=subprocess.PIPE)
     targets: dict[int, tuple[str, str]] = {}
@@ -193,6 +218,46 @@ def wait_for(label: str, predicate: Callable[[], Any], timeout_seconds: float) -
 
     detail = f": {last_error}" if last_error is not None else ""
     raise RuntimeError(f"Timed out waiting for {label}{detail}")
+
+
+def route_to_current_virtual(smoke_id: int, virtual_serial: str) -> bool:
+    return metadata_targets().get(smoke_id) == (virtual_serial, "Spa:Id")
+
+
+def force_stream_target(smoke_id: int, target_sink_name: str, timeout_seconds: float) -> str:
+    target_sink = wait_for(
+        f"PipeWire sink {target_sink_name}",
+        lambda: node_by_name(target_sink_name),
+        timeout_seconds,
+    )
+    target_id = bound_id(target_sink)
+    target_serial = object_serial(target_sink)
+    for key, value in (("target.node", str(target_id)), ("target.object", target_serial)):
+        subprocess.run(
+            ["pw-metadata", "-n", "default", str(smoke_id), key, value, "Spa:Id"],
+            check=True,
+            text=True,
+            stdout=subprocess.DEVNULL,
+        )
+    return target_serial
+
+
+def processing_path_has_active_links() -> bool:
+    virtual_sink = node_by_name(VIRTUAL_SINK_NAME)
+    filter_output = node_by_name(FILTER_OUTPUT_NAME)
+    if virtual_sink is None or filter_output is None:
+        return False
+
+    required_ids = {bound_id(virtual_sink): False, bound_id(filter_output): False}
+    for link in link_items():
+        if link_state(link) != "active":
+            continue
+        endpoints = link_endpoint_ids(link)
+        for required_id in tuple(required_ids):
+            if required_id in endpoints:
+                required_ids[required_id] = True
+
+    return all(required_ids.values())
 
 
 def mini_eq_has_manager_access() -> bool:
@@ -264,6 +329,52 @@ def stop_process(process: subprocess.Popen[str], label: str, timeout_seconds: fl
     return output or ""
 
 
+def stop_smoke_stream(smoke: subprocess.Popen[str], timeout_seconds: float) -> None:
+    stop_process(smoke, "pw-cat smoke stream", timeout_seconds)
+    wait_for("smoke stream to disappear", lambda: smoke_stream_node() is None, timeout_seconds)
+
+
+def wait_for_smoke_stream(smoke: subprocess.Popen[str], timeout_seconds: float) -> int:
+    def live_smoke_stream_node() -> dict[str, Any] | None:
+        if smoke.poll() is not None:
+            output = stop_process(smoke, "pw-cat smoke stream")
+            detail = f": {output.strip()}" if output.strip() else ""
+            raise RuntimeError(f"pw-cat exited before its PipeWire stream appeared{detail}")
+        return smoke_stream_node()
+
+    return bound_id(wait_for("silent PipeWire smoke stream", live_smoke_stream_node, timeout_seconds))
+
+
+def smoke_stream_still_present(smoke_id: int) -> bool:
+    smoke_node = smoke_stream_node()
+    return smoke_node is not None and bound_id(smoke_node) == smoke_id
+
+
+def wait_for_idle_gap(label: str, idle_gap_seconds: float) -> None:
+    deadline = time.monotonic() + idle_gap_seconds
+    wait_for(label, lambda: time.monotonic() >= deadline, idle_gap_seconds + 1.0)
+
+
+def pause_smoke_stream_for_idle(
+    smoke: subprocess.Popen[str],
+    smoke_id: int,
+    idle_gap_seconds: float,
+    timeout_seconds: float,
+) -> None:
+    if smoke.poll() is not None:
+        raise RuntimeError("pw-cat exited before it could be paused")
+
+    smoke.send_signal(signal.SIGSTOP)
+    try:
+        wait_for(
+            "paused smoke stream to remain registered", lambda: smoke_stream_still_present(smoke_id), timeout_seconds
+        )
+        wait_for_idle_gap("idle gap with paused smoke stream", idle_gap_seconds)
+    finally:
+        if smoke.poll() is None:
+            smoke.send_signal(signal.SIGCONT)
+
+
 def assert_no_existing_virtual_sink() -> None:
     if node_by_name(VIRTUAL_SINK_NAME) is not None:
         raise RuntimeError(
@@ -276,29 +387,29 @@ def run_runtime_smoke(
     duration_seconds: float,
     timeout_seconds: float,
     smoke_target: str | None,
+    idle_gap_seconds: float,
 ) -> None:
     assert_no_existing_virtual_sink()
 
     deps = run(flatpak_run_command(app_ref, "--check-deps"))
     print(deps.stdout.rstrip(), flush=True)
 
-    # Keep pw-cat alive across stream discovery, app startup, routing, app runtime, and restore waits.
-    smoke_audio_duration = max(duration_seconds + timeout_seconds * 4.0 + 15.0, 60.0)
+    # Keep the Flatpak alive across every post-start transition this smoke can wait for.
+    post_start_transition_count = 9 if smoke_target is not None else 7
+    app_duration = max(
+        duration_seconds,
+        timeout_seconds * post_start_transition_count + idle_gap_seconds * 2.0 + 10.0,
+    )
+
+    # Keep pw-cat alive across stream discovery, app startup, routing, idle phases, and restore waits.
+    smoke_audio_duration = max(app_duration + timeout_seconds * 4.0 + idle_gap_seconds * 2.0 + 15.0, 60.0)
     smoke_audio = create_silent_wav(smoke_audio_duration)
     smoke = start_smoke_stream(smoke_target, smoke_audio)
     app: subprocess.Popen[str] | None = None
+    relink_recovery_checked = False
 
     try:
-
-        def live_smoke_stream_node() -> dict[str, Any] | None:
-            if smoke.poll() is not None:
-                output = stop_process(smoke, "pw-cat smoke stream")
-                detail = f": {output.strip()}" if output.strip() else ""
-                raise RuntimeError(f"pw-cat exited before its PipeWire stream appeared{detail}")
-            return smoke_stream_node()
-
-        smoke_node = wait_for("silent PipeWire smoke stream", live_smoke_stream_node, timeout_seconds)
-        smoke_id = bound_id(smoke_node)
+        smoke_id = wait_for_smoke_stream(smoke, timeout_seconds)
         original_target = metadata_targets().get(smoke_id)
 
         command = flatpak_run_command(
@@ -306,7 +417,7 @@ def run_runtime_smoke(
             "--headless",
             "--auto-route",
             "--duration",
-            str(duration_seconds),
+            str(app_duration),
         )
         print(f"$ {format_command(command)}", flush=True)
         app = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -337,12 +448,52 @@ def run_runtime_smoke(
         def smoke_stream_targets_virtual_sink() -> bool:
             note_manager_access()
             require_mini_eq_running("the smoke stream was routed")
-            target = metadata_targets().get(smoke_id)
-            return target == (virtual_serial, "Spa:Id")
+            return route_to_current_virtual(smoke_id, virtual_serial)
 
         wait_for("smoke stream routed through Mini EQ", smoke_stream_targets_virtual_sink, timeout_seconds)
+        wait_for("Mini EQ processing path links to become active", processing_path_has_active_links, timeout_seconds)
 
-        output, _stderr = app.communicate(timeout=max(duration_seconds + timeout_seconds, timeout_seconds))
+        print("## Flatpak idle stream recreation", flush=True)
+        stop_smoke_stream(smoke, timeout_seconds)
+        wait_for_idle_gap("idle gap after smoke stream cleanup", idle_gap_seconds)
+        smoke = start_smoke_stream(smoke_target, smoke_audio)
+        smoke_id = wait_for_smoke_stream(smoke, timeout_seconds)
+        original_target = None
+        wait_for("recreated smoke stream routed through Mini EQ", smoke_stream_targets_virtual_sink, timeout_seconds)
+        wait_for(
+            "Mini EQ processing path links to become active after stream recreation",
+            processing_path_has_active_links,
+            timeout_seconds,
+        )
+
+        print("## Flatpak paused stream resume", flush=True)
+        pause_smoke_stream_for_idle(smoke, smoke_id, idle_gap_seconds, timeout_seconds)
+        wait_for(
+            "resumed smoke stream to remain registered", lambda: smoke_stream_still_present(smoke_id), timeout_seconds
+        )
+        wait_for(
+            "resumed smoke stream still routed through Mini EQ", smoke_stream_targets_virtual_sink, timeout_seconds
+        )
+        wait_for(
+            "Mini EQ processing path links to become active after paused resume",
+            processing_path_has_active_links,
+            timeout_seconds,
+        )
+
+        if smoke_target is not None:
+            print("## Flatpak tracked stream relink recovery", flush=True)
+            force_stream_target(smoke_id, smoke_target, timeout_seconds)
+            wait_for(
+                "relinked smoke stream routed back through Mini EQ", smoke_stream_targets_virtual_sink, timeout_seconds
+            )
+            wait_for(
+                "Mini EQ processing path links to become active after tracked stream relink",
+                processing_path_has_active_links,
+                timeout_seconds,
+            )
+            relink_recovery_checked = True
+
+        output, _stderr = app.communicate(timeout=max(app_duration + timeout_seconds, timeout_seconds))
         print(output.rstrip(), flush=True)
         if app.returncode != 0:
             raise RuntimeError(f"Mini EQ Flatpak exited with status {app.returncode}")
@@ -364,7 +515,11 @@ def run_runtime_smoke(
         else:
             print("Mini EQ PipeWire manager access client was not observed; routing behavior was verified.", flush=True)
 
-        print("Flatpak runtime smoke passed: stream routing and restore behavior verified.")
+        relink_summary = "tracked stream relink recovery, " if relink_recovery_checked else ""
+        print(
+            "Flatpak runtime smoke passed: stream routing, idle stream recreation, "
+            f"paused stream resume, {relink_summary}active processing links, and restore behavior verified."
+        )
     finally:
         if app is not None:
             stop_process(app, "Mini EQ Flatpak")
@@ -386,7 +541,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--duration",
         type=float,
         default=8.0,
-        help="How long to keep the headless Mini EQ app running during the routing check.",
+        help="Minimum seconds to keep the headless Mini EQ app running; idle phases may extend this.",
     )
     parser.add_argument(
         "--timeout",
@@ -398,7 +553,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--smoke-target",
         type=pipewire_node_target,
         default=None,
-        help="Optional PipeWire node target for the silent smoke stream.",
+        help="Optional PipeWire node target for the silent smoke stream; enables tracked relink recovery coverage.",
+    )
+    parser.add_argument(
+        "--idle-gap",
+        type=float,
+        default=8.0,
+        help=("Seconds to keep Mini EQ routed during the streamless recreation and paused persistent-stream phases."),
     )
     return parser.parse_args(argv)
 
@@ -408,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         require_tools("flatpak", "pw-cat", "pw-dump", "pw-metadata")
-        run_runtime_smoke(args.app_ref, args.duration, args.timeout, args.smoke_target)
+        run_runtime_smoke(args.app_ref, args.duration, args.timeout, args.smoke_target, args.idle_gap)
     except subprocess.CalledProcessError as exc:
         if exc.stdout:
             sys.stderr.write(exc.stdout)

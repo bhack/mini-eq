@@ -143,6 +143,9 @@ class PipeWireStreamRouter:
     def _link_touches_processing_path(self, link: PipeWireLink) -> bool:
         return bool(self._processing_path_node_ids() & {link.output_node_id, link.input_node_id})
 
+    def _link_touches_routed_stream(self, link: PipeWireLink) -> bool:
+        return bool(self.routed_stream_ids & {link.output_node_id, link.input_node_id})
+
     def handle_link_state_changed(self, state: str | None) -> None:
         if state == LINK_STATE_ACTIVE:
             self.schedule_refresh(route_applied=True)
@@ -318,6 +321,8 @@ class PipeWireStreamRouter:
         if self._link_touches_processing_path(link):
             self.track_processing_link_state(link)
             self.schedule_refresh(route_applied=True)
+        elif self._link_touches_routed_stream(link):
+            self.schedule_refresh()
 
     def handle_object_removed(self, _manager, node) -> None:
         try:
@@ -325,7 +330,10 @@ class PipeWireStreamRouter:
         except Exception:
             return
 
+        should_refresh = self._link_touches_processing_path(link) or self._link_touches_routed_stream(link)
         self.untrack_processing_link_state(link)
+        if should_refresh:
+            self.schedule_refresh()
 
     def untrack_processing_link_states(self) -> None:
         for handler_id in list(self.link_state_handler_ids.values()):
