@@ -485,6 +485,7 @@ def run_headless_pipewire_runtime_smoke(python: Path) -> None:
         minimum=1,
         maximum=3600,
     )
+    idle_gap = bounded_int_env("MINI_EQ_HEADLESS_PIPEWIRE_IDLE_GAP", 8, minimum=0, maximum=600)
     run(
         [
             python,
@@ -495,6 +496,8 @@ def run_headless_pipewire_runtime_smoke(python: Path) -> None:
             cycles,
             "--audio-duration",
             audio_duration,
+            "--idle-gap",
+            idle_gap,
         ]
     )
 

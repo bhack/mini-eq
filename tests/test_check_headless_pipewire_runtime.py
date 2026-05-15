@@ -71,3 +71,13 @@ def test_headless_runtime_rejects_stale_virtual_route(monkeypatch) -> None:
     monkeypatch.setattr(headless.live, "metadata_targets", lambda: {42: ("old-serial", "Spa:Id")})
 
     assert headless.route_to_current_virtual(42, "mini_eq_sink") is None
+
+
+def test_dynamic_sink_properties_create_hotplug_audio_sink() -> None:
+    properties = headless.dynamic_sink_properties("ci_hotplug_sink")
+
+    assert 'node.name = "ci_hotplug_sink"' in properties
+    assert 'media.class = "Audio/Sink"' in properties
+    assert "object.linger = true" in properties
+    assert "factory.name = support.null-audio-sink" in properties
+    assert "session.suspend-timeout-seconds = 1" in properties

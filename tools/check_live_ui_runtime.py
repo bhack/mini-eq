@@ -229,16 +229,22 @@ def set_configured_default_sink_name(sink_name: str, timeout_seconds: float) -> 
         lambda: node_by_name(sink_name),
         timeout_seconds,
     )
-    subprocess.run(
-        [
-            "wpctl",
-            "set-default",
-            str(node_id(sink)),
-        ],
-        check=True,
-        text=True,
-        stdout=subprocess.DEVNULL,
-    )
+
+    def set_default() -> bool:
+        result = subprocess.run(
+            [
+                "wpctl",
+                "set-default",
+                str(node_id(sink)),
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+
+    wait_for(f"WirePlumber to accept {sink_name} as default sink", set_default, timeout_seconds)
     wait_for(
         f"PipeWire configured default sink metadata to become {sink_name}",
         lambda: configured_default_sink_name() == sink_name,

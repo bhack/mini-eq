@@ -536,6 +536,61 @@ def test_pipewire_router_reapplies_controls_when_processing_link_becomes_active(
     assert applied == ["apply", "apply"]
 
 
+def test_pipewire_router_reroutes_tracked_stream_when_relinked_away(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spotify = make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")
+    speakers = make_node(22, pw_backend.AUDIO_SINK, "speakers")
+    backend = FakePipeWireBackend([spotify], sinks=[speakers])
+    router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
+    scheduled_callbacks: list[object] = []
+
+    monkeypatch.setattr(
+        pw_router.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or 321,
+    )
+
+    router.enabled = True
+    router.accept_stream_events = True
+    router.routed_stream_ids = {spotify.bound_id}
+    router.handle_object_added(None, make_link(92, output_node_id=spotify.bound_id, input_node_id=speakers.bound_id))
+
+    assert len(scheduled_callbacks) == 1
+    scheduled_callbacks[0]()
+
+    assert backend.moves == [(spotify.bound_id, "mini_eq_sink")]
+
+
+def test_pipewire_router_reroutes_tracked_stream_when_current_link_disappears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spotify = make_node(1, pw_backend.STREAM_OUTPUT_AUDIO, "spotify", "Spotify")
+    virtual_sink = make_node(11, pw_backend.AUDIO_SINK, "mini_eq_sink")
+    backend = FakePipeWireBackend([spotify], sinks=[virtual_sink])
+    router = pw_router.PipeWireStreamRouter("mini_eq_sink", "mini_eq_sink_output", lambda _message: None, backend)
+    scheduled_callbacks: list[object] = []
+
+    monkeypatch.setattr(
+        pw_router.GLib,
+        "idle_add",
+        lambda callback: scheduled_callbacks.append(callback) or 321,
+    )
+
+    router.enabled = True
+    router.accept_stream_events = True
+    router.routed_stream_ids = {spotify.bound_id}
+    router.handle_object_removed(
+        None,
+        make_link(92, output_node_id=spotify.bound_id, input_node_id=virtual_sink.bound_id),
+    )
+
+    assert len(scheduled_callbacks) == 1
+    scheduled_callbacks[0]()
+
+    assert backend.moves == [(spotify.bound_id, "mini_eq_sink")]
+
+
 def test_pipewire_router_tracks_internal_output_links(monkeypatch: pytest.MonkeyPatch) -> None:
     internal_output = make_node(90, pw_backend.STREAM_OUTPUT_AUDIO, "mini_eq_sink_output")
     backend = FakePipeWireBackend([internal_output], sinks=[make_node(22, pw_backend.AUDIO_SINK, "speakers")])

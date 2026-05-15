@@ -4,6 +4,7 @@ set -euo pipefail
 manifest="${MINI_EQ_FLATPAK_MANIFEST:-io.github.bhack.mini-eq.yaml}"
 duration="${MINI_EQ_FLATPAK_SMOKE_DURATION:-8}"
 timeout="${MINI_EQ_FLATPAK_SMOKE_TIMEOUT:-20}"
+idle_gap="${MINI_EQ_FLATPAK_SMOKE_IDLE_GAP:-8}"
 build_flatpak="${MINI_EQ_FLATPAK_BUILD:-1}"
 install_remote="${MINI_EQ_FLATPAK_INSTALL_REMOTE:-0}"
 install_ref="${MINI_EQ_FLATPAK_INSTALL_REF:-io.github.bhack.mini-eq}"
@@ -87,6 +88,7 @@ export MINI_EQ_FLATPAK_MANIFEST="$manifest"
 export MINI_EQ_FLATPAK_APP_REF="$app_ref"
 export MINI_EQ_FLATPAK_SMOKE_DURATION="$duration"
 export MINI_EQ_FLATPAK_SMOKE_TIMEOUT="$timeout"
+export MINI_EQ_FLATPAK_SMOKE_IDLE_GAP="$idle_gap"
 export MINI_EQ_FLATPAK_BUILD="$build_flatpak"
 export MINI_EQ_FLATPAK_INSTALL_REMOTE="$install_remote"
 export MINI_EQ_FLATPAK_INSTALL_REF="$install_ref"
@@ -172,5 +174,6 @@ python3 tools/check_flatpak_runtime.py \
   --app-ref "$MINI_EQ_FLATPAK_APP_REF" \
   --duration "$MINI_EQ_FLATPAK_SMOKE_DURATION" \
   --timeout "$MINI_EQ_FLATPAK_SMOKE_TIMEOUT" \
+  --idle-gap "$MINI_EQ_FLATPAK_SMOKE_IDLE_GAP" \
   --smoke-target ci_null_sink
 SH

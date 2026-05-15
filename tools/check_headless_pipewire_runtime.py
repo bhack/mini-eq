@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 HELPER_SKIP_EXIT_CODE = live.HELPER_SKIP_EXIT_CODE
 REPO_ROOT = Path(__file__).resolve().parents[1]
+HOTPLUG_SINK_NAME = "ci_hotplug_sink"
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -117,6 +119,97 @@ def wait_for_processing_path_active(
     )
 
 
+def dynamic_sink_properties(sink_name: str) -> str:
+    return (
+        "{ "
+        "factory.name = support.null-audio-sink "
+        f'node.name = "{sink_name}" '
+        'node.description = "CI Hotplug Sink" '
+        'media.class = "Audio/Sink" '
+        "object.linger = true "
+        'audio.position = "FL,FR" '
+        "session.suspend-timeout-seconds = 1 "
+        "adapter.auto-port-config = { "
+        "mode = dsp "
+        "monitor = true "
+        "position = preserve "
+        "} "
+        "}"
+    )
+
+
+def create_dynamic_sink(sink_name: str, timeout_seconds: float) -> dict[str, Any]:
+    if live.node_by_name(sink_name) is not None:
+        destroy_dynamic_sink(sink_name, timeout_seconds)
+
+    command = ["pw-cli", "create-node", "adapter", dynamic_sink_properties(sink_name)]
+    print(f"$ {format_command(command)}", flush=True)
+    subprocess.run(command, check=True, text=True, stdout=subprocess.DEVNULL)
+    return dispatch_until(sink_name, lambda: live.node_by_name(sink_name), timeout_seconds)
+
+
+def destroy_dynamic_sink(sink_name: str, timeout_seconds: float) -> None:
+    sink = live.node_by_name(sink_name)
+    if sink is None:
+        return
+
+    sink_id = live.node_id(sink)
+    command = ["pw-cli", "destroy", str(sink_id)]
+    print(f"$ {format_command(command)}", flush=True)
+    subprocess.run(command, check=True, text=True, stdout=subprocess.DEVNULL)
+    dispatch_until(f"{sink_name} to disappear", lambda: live.node_by_name(sink_name) is None, timeout_seconds)
+
+
+def switch_default_output_and_wait(
+    controller,
+    sink_name: str,
+    filter_output_name: str,
+    timeout_seconds: float,
+) -> str:
+    sink = dispatch_until(
+        sink_name,
+        lambda: live.node_by_name(sink_name),
+        timeout_seconds,
+    )
+    sink_serial = live.object_serial(sink)
+    live.set_configured_default_sink_name(sink_name, timeout_seconds)
+    try:
+        dispatch_until(
+            f"Mini EQ controller followed {sink_name}",
+            lambda: controller.output_sink == sink_name,
+            timeout_seconds,
+        )
+    except RuntimeError:
+        print(
+            f"Controller default-follow state after {sink_name} default move: "
+            f"{describe_controller_default_follow_state(controller)}",
+            flush=True,
+        )
+        raise
+    dispatch_until(
+        f"{filter_output_name} target.object metadata to point at {sink_serial}",
+        lambda: node_targets_serial(filter_output_name, sink_serial),
+        timeout_seconds,
+    )
+    return sink_serial
+
+
+def wait_for_stream_routed_and_processing(
+    smoke_id: int,
+    virtual_sink_name: str,
+    filter_output_name: str,
+    timeout_seconds: float,
+    label: str,
+) -> str:
+    virtual_serial = dispatch_until(
+        f"synthetic stream routed to current Mini EQ virtual sink {label}",
+        lambda: route_to_current_virtual(smoke_id, virtual_sink_name),
+        timeout_seconds,
+    )
+    wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
+    return virtual_serial
+
+
 def bad_monitor_source_nodes() -> list[dict[str, Any]]:
     return [
         live.item_props(node)
@@ -147,6 +240,81 @@ def wait_for_controller_ready(controller, timeout_seconds: float) -> None:
         return bool(state["ready"])
 
     dispatch_until("Mini EQ controller ready and routed", ready, timeout_seconds)
+
+
+def wait_for_smoke_stream(smoke: subprocess.Popen[str], timeout_seconds: float) -> int:
+    smoke_node = dispatch_until(
+        "synthetic PipeWire playback stream",
+        lambda: live.smoke_stream_node() if smoke.poll() is None else None,
+        timeout_seconds,
+    )
+    return live.node_id(smoke_node)
+
+
+def wait_for_smoke_routed(smoke_id: int, virtual_sink_name: str, timeout_seconds: float) -> str:
+    return dispatch_until(
+        "synthetic stream routed to current Mini EQ virtual sink",
+        lambda: route_to_current_virtual(smoke_id, virtual_sink_name),
+        timeout_seconds,
+    )
+
+
+def force_stream_target(smoke_id: int, target_sink_name: str, timeout_seconds: float) -> str:
+    target_sink = dispatch_until(
+        f"PipeWire sink {target_sink_name}",
+        lambda: live.node_by_name(target_sink_name),
+        timeout_seconds,
+    )
+    target_id = live.node_id(target_sink)
+    target_serial = live.object_serial(target_sink)
+    for key, value in (("target.node", str(target_id)), ("target.object", target_serial)):
+        subprocess.run(
+            ["pw-metadata", "-n", "default", str(smoke_id), key, value, "Spa:Id"],
+            check=True,
+            text=True,
+            stdout=subprocess.DEVNULL,
+        )
+    return target_serial
+
+
+def stop_smoke_stream(smoke: subprocess.Popen[str], timeout_seconds: float) -> None:
+    live.terminate_process(smoke, "pw-cat synthetic stream")
+    dispatch_until("synthetic stream to disappear", lambda: live.smoke_stream_node() is None, timeout_seconds)
+
+
+def smoke_stream_still_present(smoke_id: int) -> bool:
+    smoke_node = live.smoke_stream_node()
+    return smoke_node is not None and live.node_id(smoke_node) == smoke_id
+
+
+def wait_for_idle_gap(label: str, idle_gap_seconds: float) -> None:
+    idle_deadline = time.monotonic() + idle_gap_seconds
+    dispatch_until(label, lambda: time.monotonic() >= idle_deadline, idle_gap_seconds + 1.0)
+
+
+def pause_smoke_stream_for_idle(
+    smoke: subprocess.Popen[str],
+    smoke_id: int,
+    idle_gap_seconds: float,
+    timeout_seconds: float,
+    during_idle: Callable[[], None] | None = None,
+) -> None:
+    if smoke.poll() is not None:
+        raise RuntimeError("synthetic stream exited before it could be paused")
+
+    smoke.send_signal(signal.SIGSTOP)
+    try:
+        dispatch_until(
+            "paused synthetic stream to remain registered",
+            lambda: smoke_stream_still_present(smoke_id),
+            timeout_seconds,
+        )
+        wait_for_idle_gap("idle gap with paused synthetic stream", idle_gap_seconds)
+        if during_idle is not None:
+            during_idle()
+    finally:
+        if smoke.poll() is None:
+            smoke.send_signal(signal.SIGCONT)
 
 
 def describe_controller_default_follow_state(controller) -> str:
@@ -181,7 +349,87 @@ def describe_controller_default_follow_state(controller) -> str:
     )
 
 
-def run_controller_flow(*, tmp_dir: Path, timeout_seconds: float, cycles: int, audio_duration: float) -> None:
+def run_dynamic_hotplug_recovery_phase(
+    *,
+    controller,
+    smoke: subprocess.Popen[str],
+    smoke_id: int,
+    virtual_sink_name: str,
+    filter_output_name: str,
+    idle_gap_seconds: float,
+    timeout_seconds: float,
+) -> str:
+    controller.set_analyzer_enabled(False)
+    print("## headless dynamic output hotplug recovery with monitor off", flush=True)
+
+    hotplug_sink = create_dynamic_sink(HOTPLUG_SINK_NAME, timeout_seconds)
+    first_hotplug_serial = live.object_serial(hotplug_sink)
+    switch_default_output_and_wait(controller, HOTPLUG_SINK_NAME, filter_output_name, timeout_seconds)
+    virtual_serial = wait_for_stream_routed_and_processing(
+        smoke_id,
+        virtual_sink_name,
+        filter_output_name,
+        timeout_seconds,
+        "after dynamic output move",
+    )
+
+    def remove_hotplug_and_select_primary() -> None:
+        destroy_dynamic_sink(HOTPLUG_SINK_NAME, timeout_seconds)
+        switch_default_output_and_wait(controller, live.PRIMARY_SINK_NAME, filter_output_name, timeout_seconds)
+
+    pause_smoke_stream_for_idle(
+        smoke,
+        smoke_id,
+        idle_gap_seconds,
+        timeout_seconds,
+        during_idle=remove_hotplug_and_select_primary,
+    )
+    dispatch_until(
+        "resumed synthetic stream to remain registered after dynamic output removal",
+        lambda: smoke_stream_still_present(smoke_id),
+        timeout_seconds,
+    )
+    virtual_serial = wait_for_stream_routed_and_processing(
+        smoke_id,
+        virtual_sink_name,
+        filter_output_name,
+        timeout_seconds,
+        "after dynamic output removal with monitor off",
+    )
+
+    hotplug_sink = create_dynamic_sink(HOTPLUG_SINK_NAME, timeout_seconds)
+    second_hotplug_serial = live.object_serial(hotplug_sink)
+    if second_hotplug_serial == first_hotplug_serial:
+        raise RuntimeError(f"{HOTPLUG_SINK_NAME} was recreated without a new object.serial")
+
+    switch_default_output_and_wait(controller, HOTPLUG_SINK_NAME, filter_output_name, timeout_seconds)
+    virtual_serial = wait_for_stream_routed_and_processing(
+        smoke_id,
+        virtual_sink_name,
+        filter_output_name,
+        timeout_seconds,
+        "after dynamic output reappeared with new serial",
+    )
+    switch_default_output_and_wait(controller, live.PRIMARY_SINK_NAME, filter_output_name, timeout_seconds)
+    virtual_serial = wait_for_stream_routed_and_processing(
+        smoke_id,
+        virtual_sink_name,
+        filter_output_name,
+        timeout_seconds,
+        "after restoring primary from dynamic output",
+    )
+    destroy_dynamic_sink(HOTPLUG_SINK_NAME, timeout_seconds)
+    return virtual_serial
+
+
+def run_controller_flow(
+    *,
+    tmp_dir: Path,
+    timeout_seconds: float,
+    cycles: int,
+    audio_duration: float,
+    idle_gap_seconds: float,
+) -> None:
     ensure_source_path()
 
     from mini_eq.routing import SystemWideEqController
@@ -190,17 +438,12 @@ def run_controller_flow(*, tmp_dir: Path, timeout_seconds: float, cycles: int, a
     live.verify_pipewire_gobject_probe(timeout_seconds)
 
     audio_file = live.create_sine_wav(tmp_dir / "mini-eq-headless-pipewire-smoke.wav", audio_duration)
-    smoke = live.start_smoke_stream(audio_file)
+    smoke: subprocess.Popen[str] | None = live.start_smoke_stream(audio_file)
     controller = None
     statuses: list[str] = []
 
     try:
-        smoke_node = dispatch_until(
-            "synthetic PipeWire playback stream",
-            lambda: live.smoke_stream_node() if smoke.poll() is None else None,
-            timeout_seconds,
-        )
-        smoke_id = live.node_id(smoke_node)
+        smoke_id = wait_for_smoke_stream(smoke, timeout_seconds)
 
         controller = SystemWideEqController(None)
         controller.set_status_callback(statuses.append)
@@ -208,12 +451,111 @@ def run_controller_flow(*, tmp_dir: Path, timeout_seconds: float, cycles: int, a
 
         virtual_sink_name = controller.virtual_sink_name
         filter_output_name = controller.filter_output_name
-        virtual_serial = dispatch_until(
-            "synthetic stream routed to current Mini EQ virtual sink",
-            lambda: route_to_current_virtual(smoke_id, virtual_sink_name),
+        virtual_serial = wait_for_smoke_routed(smoke_id, virtual_sink_name, timeout_seconds)
+        wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
+
+        print("## headless idle stream recreation", flush=True)
+        stop_smoke_stream(smoke, timeout_seconds)
+        smoke = None
+        wait_for_idle_gap("idle gap after synthetic stream cleanup", idle_gap_seconds)
+        smoke = live.start_smoke_stream(audio_file)
+        smoke_id = wait_for_smoke_stream(smoke, timeout_seconds)
+        virtual_serial = wait_for_smoke_routed(smoke_id, virtual_sink_name, timeout_seconds)
+        wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
+
+        print("## headless paused stream resume", flush=True)
+        pause_smoke_stream_for_idle(smoke, smoke_id, idle_gap_seconds, timeout_seconds)
+        dispatch_until(
+            "resumed synthetic stream to remain registered",
+            lambda: smoke_stream_still_present(smoke_id),
             timeout_seconds,
         )
-        wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after paused resume",
+        )
+
+        print("## headless tracked stream relink recovery", flush=True)
+        force_stream_target(smoke_id, live.PRIMARY_SINK_NAME, timeout_seconds)
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after tracked stream relink",
+        )
+
+        controller.set_analyzer_enabled(False)
+        print("## headless paused output switch recovery with monitor off", flush=True)
+
+        def switch_to_alt_output() -> None:
+            switch_default_output_and_wait(
+                controller,
+                live.ALT_SINK_NAME,
+                filter_output_name,
+                timeout_seconds,
+            )
+
+        pause_smoke_stream_for_idle(
+            smoke,
+            smoke_id,
+            idle_gap_seconds,
+            timeout_seconds,
+            during_idle=switch_to_alt_output,
+        )
+        dispatch_until(
+            "resumed synthetic stream to remain registered after paused output move",
+            lambda: smoke_stream_still_present(smoke_id),
+            timeout_seconds,
+        )
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after paused output move with monitor off",
+        )
+
+        def switch_to_primary_output() -> None:
+            switch_default_output_and_wait(
+                controller,
+                live.PRIMARY_SINK_NAME,
+                filter_output_name,
+                timeout_seconds,
+            )
+
+        pause_smoke_stream_for_idle(
+            smoke,
+            smoke_id,
+            idle_gap_seconds,
+            timeout_seconds,
+            during_idle=switch_to_primary_output,
+        )
+        dispatch_until(
+            "resumed synthetic stream to remain registered after paused output restore",
+            lambda: smoke_stream_still_present(smoke_id),
+            timeout_seconds,
+        )
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after paused output restore with monitor off",
+        )
+
+        virtual_serial = run_dynamic_hotplug_recovery_phase(
+            controller=controller,
+            smoke=smoke,
+            smoke_id=smoke_id,
+            virtual_sink_name=virtual_sink_name,
+            filter_output_name=filter_output_name,
+            idle_gap_seconds=idle_gap_seconds,
+            timeout_seconds=timeout_seconds,
+        )
 
         for cycle in range(cycles):
             print(f"## headless route toggle cycle {cycle + 1}/{cycles}", flush=True)
@@ -225,68 +567,41 @@ def run_controller_flow(*, tmp_dir: Path, timeout_seconds: float, cycles: int, a
             )
 
             controller.route_system_audio(True, announce=False)
-            virtual_serial = dispatch_until(
-                "synthetic stream rerouted to current Mini EQ virtual sink",
-                lambda: route_to_current_virtual(smoke_id, virtual_sink_name),
+            virtual_serial = wait_for_stream_routed_and_processing(
+                smoke_id,
+                virtual_sink_name,
+                filter_output_name,
                 timeout_seconds,
+                "after route toggle",
             )
-            wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
 
-        alt_sink = dispatch_until(
+        switch_default_output_and_wait(
+            controller,
             live.ALT_SINK_NAME,
-            lambda: live.node_by_name(live.ALT_SINK_NAME),
+            filter_output_name,
             timeout_seconds,
         )
-        alt_serial = live.object_serial(alt_sink)
-        live.set_configured_default_sink_name(live.ALT_SINK_NAME, timeout_seconds)
-        try:
-            dispatch_until(
-                f"Mini EQ controller followed {live.ALT_SINK_NAME}",
-                lambda: controller.output_sink == live.ALT_SINK_NAME,
-                timeout_seconds,
-            )
-        except RuntimeError:
-            print(
-                "Controller default-follow state after alt default move: "
-                f"{describe_controller_default_follow_state(controller)}",
-                flush=True,
-            )
-            raise
-        dispatch_until(
-            f"{filter_output_name} target.object metadata to point at {alt_serial}",
-            lambda: node_targets_serial(filter_output_name, alt_serial),
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
             timeout_seconds,
+            "after output move",
         )
-        virtual_serial = dispatch_until(
-            "synthetic stream stayed routed to current Mini EQ virtual sink after output move",
-            lambda: route_to_current_virtual(smoke_id, virtual_sink_name),
-            timeout_seconds,
-        )
-        wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
 
-        primary_sink = dispatch_until(
+        switch_default_output_and_wait(
+            controller,
             live.PRIMARY_SINK_NAME,
-            lambda: live.node_by_name(live.PRIMARY_SINK_NAME),
+            filter_output_name,
             timeout_seconds,
         )
-        primary_serial = live.object_serial(primary_sink)
-        live.set_configured_default_sink_name(live.PRIMARY_SINK_NAME, timeout_seconds)
-        dispatch_until(
-            f"Mini EQ controller followed {live.PRIMARY_SINK_NAME}",
-            lambda: controller.output_sink == live.PRIMARY_SINK_NAME,
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
             timeout_seconds,
+            "after output restore",
         )
-        dispatch_until(
-            f"{filter_output_name} target.object metadata to point at {primary_serial}",
-            lambda: node_targets_serial(filter_output_name, primary_serial),
-            timeout_seconds,
-        )
-        virtual_serial = dispatch_until(
-            "synthetic stream stayed routed to current Mini EQ virtual sink after output restore",
-            lambda: route_to_current_virtual(smoke_id, virtual_sink_name),
-            timeout_seconds,
-        )
-        wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
 
         controller.set_analyzer_enabled(False)
         for cycle in range(cycles):
@@ -315,13 +630,14 @@ def run_controller_flow(*, tmp_dir: Path, timeout_seconds: float, cycles: int, a
             )
             wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
 
-        live.terminate_process(smoke, "pw-cat synthetic stream")
+        stop_smoke_stream(smoke, timeout_seconds)
         smoke = None
-        dispatch_until("synthetic stream to disappear", lambda: live.smoke_stream_node() is None, timeout_seconds)
 
         print(
             "Headless PipeWire runtime smoke passed: synthetic stream routing, route toggles, "
-            "default-output moves, active processing links, monitor toggles, and stream cleanup verified."
+            "idle stream recreation, paused stream resume, tracked stream relink recovery, "
+            "paused default-output moves with monitor off, dynamic output hotplug recovery, active processing links, "
+            "monitor toggles, and stream cleanup verified."
         )
         if statuses:
             print("Controller status trace:", flush=True)
@@ -339,13 +655,14 @@ def start_pipewire_session(
     pipewire, wireplumber = live.start_pipewire_processes(tmp_dir)
     live.wait_for_sink(live.PRIMARY_SINK_NAME, timeout_seconds)
     live.wait_for_sink(live.ALT_SINK_NAME, timeout_seconds)
-    live.wait_for("WirePlumber default output metadata", live.default_output_metadata_is_ready, timeout_seconds)
+    live.wait_for("WirePlumber default metadata", live.default_metadata_is_ready, timeout_seconds)
+    live.set_configured_default_sink_name(live.PRIMARY_SINK_NAME, timeout_seconds)
     return pipewire, wireplumber
 
 
 def run_helper(_args: argparse.Namespace) -> int:
     try:
-        for tool in ("pipewire", "wireplumber", "wpctl", "pw-cat", "pw-dump", "pw-metadata"):
+        for tool in ("pipewire", "wireplumber", "wpctl", "pw-cat", "pw-cli", "pw-dump", "pw-metadata"):
             require_tool(tool)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
@@ -354,6 +671,7 @@ def run_helper(_args: argparse.Namespace) -> int:
     timeout_seconds = float(os.environ["MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT"])
     cycles = int(os.environ["MINI_EQ_HEADLESS_PIPEWIRE_CYCLES"])
     audio_duration = float(os.environ["MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION"])
+    idle_gap_seconds = float(os.environ["MINI_EQ_HEADLESS_PIPEWIRE_IDLE_GAP"])
     pipewire: subprocess.Popen[str] | None = None
     wireplumber: subprocess.Popen[str] | None = None
 
@@ -381,6 +699,7 @@ def run_helper(_args: argparse.Namespace) -> int:
             timeout_seconds=timeout_seconds,
             cycles=cycles,
             audio_duration=audio_duration,
+            idle_gap_seconds=idle_gap_seconds,
         )
     finally:
         live.terminate_process(wireplumber, "WirePlumber")
@@ -401,6 +720,7 @@ def run_parent(args: argparse.Namespace) -> int:
     env["MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT"] = str(args.timeout)
     env["MINI_EQ_HEADLESS_PIPEWIRE_CYCLES"] = str(args.cycles)
     env["MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION"] = str(args.audio_duration)
+    env["MINI_EQ_HEADLESS_PIPEWIRE_IDLE_GAP"] = str(args.idle_gap)
     env["PYTHONUNBUFFERED"] = "1"
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
@@ -432,6 +752,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=float,
         default=120.0,
         help="Duration of the generated sine-wave playback stream.",
+    )
+    parser.add_argument(
+        "--idle-gap",
+        type=float,
+        default=8.0,
+        help=("Seconds to keep Mini EQ routed during the streamless recreation and paused persistent-stream phases."),
     )
     return parser.parse_args(argv)
 

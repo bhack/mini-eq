@@ -110,6 +110,7 @@ def test_headless_pipewire_runtime_smoke_is_optional_ci_gate_without_nested_gnom
     assert "python3-pyatspi" not in job
     assert 'timeout="${MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT:-90}"' in script
     assert 'audio_duration="${MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION:-180}"' in script
+    assert 'idle_gap="${MINI_EQ_HEADLESS_PIPEWIRE_IDLE_GAP:-8}"' in script
 
 
 def test_live_ui_runtime_smoke_uses_host_gir_build_environment() -> None:
@@ -129,3 +130,4 @@ def test_flatpak_runtime_smoke_tolerates_pipewire_startup_race() -> None:
     assert "{ pw-dump 2>/dev/null || true; }" in script
     assert "first(.[] | select(" in script
     assert "| head -n 1" not in script
+    assert 'idle_gap="${MINI_EQ_FLATPAK_SMOKE_IDLE_GAP:-8}"' in script

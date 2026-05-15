@@ -88,6 +88,7 @@ def test_release_preflight_runs_headless_pipewire_runtime_smoke(monkeypatch) -> 
     monkeypatch.setenv("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", "12")
     monkeypatch.setenv("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", "4")
     monkeypatch.setenv("MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION", "34")
+    monkeypatch.setenv("MINI_EQ_HEADLESS_PIPEWIRE_IDLE_GAP", "5")
     monkeypatch.setattr(release_preflight, "run", lambda command, **_kwargs: commands.append(command))
 
     release_preflight.run_headless_pipewire_runtime_smoke(Path("/python"))
@@ -102,6 +103,8 @@ def test_release_preflight_runs_headless_pipewire_runtime_smoke(monkeypatch) -> 
             "4",
             "--audio-duration",
             "34",
+            "--idle-gap",
+            "5",
         ]
     ]
 
@@ -132,6 +135,7 @@ def test_release_preflight_uses_hosted_headless_pipewire_defaults(monkeypatch) -
     monkeypatch.delenv("MINI_EQ_HEADLESS_PIPEWIRE_TIMEOUT", raising=False)
     monkeypatch.delenv("MINI_EQ_HEADLESS_PIPEWIRE_CYCLES", raising=False)
     monkeypatch.delenv("MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION", raising=False)
+    monkeypatch.delenv("MINI_EQ_HEADLESS_PIPEWIRE_IDLE_GAP", raising=False)
     monkeypatch.setattr(release_preflight, "run", lambda command, **_kwargs: commands.append(command))
 
     release_preflight.run_headless_pipewire_runtime_smoke(Path("/python"))
@@ -146,6 +150,8 @@ def test_release_preflight_uses_hosted_headless_pipewire_defaults(monkeypatch) -
             "2",
             "--audio-duration",
             "180",
+            "--idle-gap",
+            "8",
         ]
     ]
 
