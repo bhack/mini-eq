@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2 - 2026-05-16
+
+- Fixed routed audio recovery after PipeWire or WirePlumber relinks playback
+  streams while system audio routing is enabled.
+- Fixed output recovery when speakers, headphones, or displays are recreated
+  under the same PipeWire name.
+
 ## 0.8.1 - 2026-05-14
 
 - Fix first-run Flatpak window sizing and state restoration.
