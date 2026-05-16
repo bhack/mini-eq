@@ -27,7 +27,9 @@ import mini_eq.core
 """
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(["src", env.get("PYTHONPATH", "")])
-    subprocess.run([sys.executable, "-c", script], check=True, env=env)
+    result = subprocess.run([sys.executable, "-c", script], check=True, env=env)
+
+    assert result.returncode == 0
 
 
 def test_default_preset_storage_uses_standalone_config_namespace(
@@ -281,9 +283,14 @@ def test_delete_preset_file_removes_only_named_storage_file(monkeypatch: pytest.
 
 
 def test_delete_preset_file_ignores_missing_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "mini-eq-presets")
+    storage_dir = tmp_path / "mini-eq-presets"
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", storage_dir)
 
     core.delete_preset_file("Missing")
+
+    assert storage_dir.is_dir()
+    assert not (storage_dir / "Missing.json").exists()
+    assert list(storage_dir.iterdir()) == []
 
 
 def test_delete_preset_file_rejects_empty_name(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

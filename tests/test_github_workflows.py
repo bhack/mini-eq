@@ -77,15 +77,19 @@ def test_release_workflow_blocks_publish_on_release_preflight() -> None:
 
 def test_ci_scope_treats_release_workflow_and_release_gate_tools_as_tested_changes() -> None:
     ci_yml = workflow_text("ci.yml")
+    release_gates_py = (ROOT / "tools/release_gates.py").read_text(encoding="utf-8")
 
-    assert ".github/workflows/*.yml)" in ci_yml
-    assert "tools/check_autoeq_live.py" in ci_yml
-    assert "tools/release_gates.py" in ci_yml
-    assert "tools/release_runtime_gate.py" in ci_yml
-    assert "tools/check_headless_pipewire_runtime.py" in ci_yml
-    assert "tools/run_headless_pipewire_runtime_smoke_ci.sh" in ci_yml
+    assert "tools/ci_scope.py" in ci_yml
+    assert "github.base_ref" in ci_yml
+    assert "fallback_scopes true" in ci_yml
+    assert ".github/workflows/*.yml" in release_gates_py
+    assert "tools/check_autoeq_live.py" in release_gates_py
+    assert "tools/release_gates.py" in release_gates_py
+    assert "tools/release_runtime_gate.py" in release_gates_py
+    assert "tools/check_headless_pipewire_runtime.py" in release_gates_py
+    assert "tools/run_headless_pipewire_runtime_smoke_ci.sh" in release_gates_py
     assert "live_ui_runtime_smoke" in ci_yml
-    assert "tools/run_live_ui_runtime_smoke_ci.sh" in ci_yml
+    assert "tools/run_live_ui_runtime_smoke_ci.sh" in release_gates_py
 
 
 def test_autoeq_live_workflow_is_scheduled_and_manual_only() -> None:

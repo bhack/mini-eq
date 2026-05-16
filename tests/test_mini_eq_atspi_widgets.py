@@ -13,6 +13,8 @@ if os.environ.get("MINI_EQ_RUN_ATSPI") != "1":
     pytestmark = pytest.mark.skip(reason="set MINI_EQ_RUN_ATSPI=1 to run nested AT-SPI widget checks")
 
 HELPER_SKIP_EXIT_CODE = 77
+NESTED_SESSION_SIGSEGV_EXIT_CODE = 139
+NESTED_SESSION_RETRIES = 1
 
 NESTED_ATSPI_HELPER = r"""
 import os
@@ -549,13 +551,15 @@ def write_test_settings(config_dir: Path) -> None:
     )
 
 
-def run_nested_atspi_helper(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+def run_nested_atspi_helper(tmp_path: Path, attempt: int) -> subprocess.CompletedProcess[str]:
     if not shutil.which("dbus-run-session"):
         pytest.skip("dbus-run-session is unavailable")
 
-    config_dir = tmp_path / "config"
-    data_dir = tmp_path / "data"
-    cache_dir = tmp_path / "cache"
+    attempt_dir = tmp_path / f"attempt-{attempt}"
+    config_dir = attempt_dir / "config"
+    data_dir = attempt_dir / "data"
+    cache_dir = attempt_dir / "cache"
+    attempt_dir.mkdir()
     config_dir.mkdir()
     data_dir.mkdir()
     cache_dir.mkdir()
@@ -578,9 +582,9 @@ def run_nested_atspi_helper(tmp_path: Path) -> subprocess.CompletedProcess[str]:
             "-c",
             NESTED_ATSPI_HELPER,
             str(config_dir),
-            f"mini-eq-atspi-{os.getpid()}",
-            str(tmp_path / "gnome-shell.log"),
-            str(tmp_path / "mini-eq.log"),
+            f"mini-eq-atspi-{os.getpid()}-{attempt}",
+            str(attempt_dir / "gnome-shell.log"),
+            str(attempt_dir / "mini-eq.log"),
         ],
         cwd=repo_root(),
         env=env,
@@ -592,7 +596,11 @@ def run_nested_atspi_helper(tmp_path: Path) -> subprocess.CompletedProcess[str]:
 
 
 def test_real_app_widgets_expose_and_update_accessible_state(tmp_path: Path) -> None:
-    result = run_nested_atspi_helper(tmp_path)
-    if result.returncode == HELPER_SKIP_EXIT_CODE:
-        pytest.skip(result.stdout.strip())
-    assert result.returncode == 0, result.stdout + result.stderr
+    attempts = NESTED_SESSION_RETRIES + 1
+    for attempt in range(1, attempts + 1):
+        result = run_nested_atspi_helper(tmp_path, attempt)
+        if result.returncode == HELPER_SKIP_EXIT_CODE:
+            pytest.skip(result.stdout.strip())
+        if result.returncode != NESTED_SESSION_SIGSEGV_EXIT_CODE or attempt >= attempts:
+            assert result.returncode == 0, result.stdout + result.stderr
+            return

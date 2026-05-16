@@ -51,7 +51,9 @@ def test_gsettings_schema_compiles(tmp_path) -> None:
     schema_path = tmp_path / desktop_integration.APP_SCHEMA_NAME
     schema_path.write_bytes(desktop_integration.APP_SCHEMA_SOURCE.read_bytes())
 
-    subprocess.run([glib_compile_schemas, "--strict", "--dry-run", str(tmp_path)], check=True)
+    result = subprocess.run([glib_compile_schemas, "--strict", "--dry-run", str(tmp_path)], check=True)
+
+    assert result.returncode == 0
 
 
 def test_install_gsettings_schema_copies_package_schema(monkeypatch, tmp_path) -> None:
@@ -84,4 +86,4 @@ def test_compile_gsettings_schemas_noops_without_compiler(monkeypatch, tmp_path)
     monkeypatch.setattr(desktop_integration.shutil, "which", lambda _name: None)
     monkeypatch.setattr(desktop_integration.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("compiler used"))
 
-    desktop_integration.compile_gsettings_schemas(tmp_path)
+    assert desktop_integration.compile_gsettings_schemas(tmp_path) is None

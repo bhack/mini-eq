@@ -16,6 +16,7 @@ include docs/release.md
 include docs/social-preview.png
 include docs/screenshots/README.md
 include docs/screenshots/*.png
+include tests/README.md
 include extensions/gnome-shell/README.md
 recursive-include extensions/gnome-shell/mini-eq@bhack.github.io *
 include tools/*.py

@@ -36,7 +36,9 @@ import mini_eq.ebur128
 """
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(["src", env.get("PYTHONPATH", "")])
-    subprocess.run([sys.executable, "-c", script], check=True, env=env)
+    result = subprocess.run([sys.executable, "-c", script], check=True, env=env)
+
+    assert result.returncode == 0
 
 
 def test_ebur128_reports_unavailable_when_library_cannot_load() -> None:

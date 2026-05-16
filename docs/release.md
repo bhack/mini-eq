@@ -168,6 +168,9 @@ python3 tools/release_status.py "$version" \
 The dashboard is intentionally state-aware: unpublished GitHub/PyPI artifacts
 are reported as pending, while metadata mismatches and artifact hash mismatches
 are reported as failures.
+Before the Flathub packaging manifest is updated, the dashboard is expected to
+fail the Flathub URL/SHA checks; treat that as the next handoff task, not as an
+upstream release failure.
 
 The `CI` workflow runs `tools/release_status.py --no-network` when release
 metadata, release docs, or release helper tests change. That catches local
@@ -291,10 +294,16 @@ the draft GitHub release and publishes to PyPI from the same built artifacts.
 That keeps the GitHub release files and PyPI files byte-for-byte comparable.
 Use a separate PyPI-only dispatch only as a recovery path, and document that it
 creates a second build.
+Draft GitHub release assets can appear under temporary `untagged-*` URLs. Do
+not use those URLs for downstream packaging; publish the release first, then
+run the post-publish checks to verify stable tag URLs and hashes.
 
 Use Trusted Publishing/OIDC for TestPyPI and PyPI. Do not use long-lived PyPI
 API tokens. Keep the `pypi` environment protected with required review before
 production publishing.
+Production publish runs can pause at the protected `pypi` environment after
+the draft GitHub release has already been created. Approve the deployment only
+after the preflight, runtime gate, and artifact build jobs passed.
 
 Install-check TestPyPI artifacts with PyPI enabled for dependencies and pin the
 exact version being validated. Run this in an environment that has the
@@ -356,6 +365,20 @@ Flathub packaging repository. The release handoff is maintainer-owned:
 
 Use the Flathub `beta` branch only when a release candidate needs broader
 Flatpak testing before the stable update.
+
+The manifest update can be prepared with:
+
+```bash
+python3 tools/prepare_flathub_release.py "$version" \
+  /path/to/flathub/io.github.bhack.mini-eq.yaml \
+  --pr-body /tmp/mini-eq-flathub-pr.md
+```
+
+For runtime-sensitive releases, a full local Flatpak build is useful extra
+evidence, but export to a local repository can fail when Flatpak's free-space
+guard is tripped. If the build itself completed, run the built-tree
+`mini-eq --check-deps` smoke and let Flathub CI be authoritative for the final
+repository export.
 
 ## Security
 

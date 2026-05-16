@@ -14,12 +14,12 @@ spec.loader.exec_module(check_gnome_shell_extension)
 
 
 def test_gnome_shell_extension_metadata_is_publishable() -> None:
-    check_gnome_shell_extension.check_metadata()
+    assert check_gnome_shell_extension.check_metadata() is None
 
 
 def test_gnome_shell_extension_dbus_contract_matches_app() -> None:
-    check_gnome_shell_extension.check_dbus_contract()
+    assert check_gnome_shell_extension.check_dbus_contract() is None
 
 
 def test_gnome_shell_extension_fake_control_matches_shell_usage() -> None:
-    check_gnome_shell_extension.check_fake_control_contract()
+    assert check_gnome_shell_extension.check_fake_control_contract() is None

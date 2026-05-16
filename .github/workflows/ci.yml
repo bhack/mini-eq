@@ -68,6 +68,11 @@ jobs:
       pwg: ${{ steps.filter.outputs.pwg }}
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref }}
+
       - name: Detect changed files
         id: filter
         env:
@@ -80,29 +85,51 @@ jobs:
 
           files="$(mktemp)"
 
-          set_all() {
+          fallback_scopes() {
+            local value="$1"
             {
-              echo "test=true"
-              echo "tooling=true"
-              echo "pwg=true"
-              echo "flatpak=true"
-              echo "release_metadata=true"
+              echo "test=$value"
+              echo "tooling=$value"
+              echo "pwg=$value"
+              echo "flatpak=$value"
+              echo "release_metadata=$value"
             } >> "$GITHUB_OUTPUT"
+
+            {
+              echo "### CI scope"
+              echo
+              echo "tools/ci_scope.py is not available in the checked-out base branch; falling back to \`$value\` for every scope."
+              echo
+              echo "- test: \`$value\`"
+              echo "- tooling: \`$value\`"
+              echo "- pipewire-gobject: \`$value\`"
+              echo "- flatpak: \`$value\`"
+              echo "- release metadata: \`$value\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          set_scopes() {
+            if [[ -f tools/ci_scope.py ]]; then
+              python3 tools/ci_scope.py "$@" \
+                --github-output "$GITHUB_OUTPUT" \
+                --github-summary "$GITHUB_STEP_SUMMARY"
+              return
+            fi
+
+            if [[ "${1:-}" == "--none" ]]; then
+              fallback_scopes false
+            else
+              fallback_scopes true
+            fi
           }
 
           case "$GITHUB_EVENT_NAME" in
             workflow_dispatch)
               if [[ "${SMOKE_ONLY:-false}" == "true" ]]; then
-                {
-                  echo "test=false"
-                  echo "tooling=false"
-                  echo "pwg=false"
-                  echo "flatpak=false"
-                  echo "release_metadata=false"
-                } >> "$GITHUB_OUTPUT"
+                set_scopes --none
                 exit 0
               fi
-              set_all
+              set_scopes --all
               exit 0
               ;;
             pull_request)
@@ -110,82 +137,18 @@ jobs:
               ;;
             push)
               if [[ -z "${BEFORE:-}" || "$BEFORE" =~ ^0+$ ]]; then
-                set_all
+                set_scopes --all
                 exit 0
               fi
               gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$GITHUB_SHA" --jq '.files[].filename' > "$files"
               ;;
             *)
-              set_all
+              set_scopes --all
               exit 0
               ;;
           esac
 
-          test=false
-          tooling=false
-          pwg=false
-          flatpak=false
-          release_metadata=false
-
-          while IFS= read -r path; do
-            case "$path" in
-              .github/workflows/*.yml)
-                test=true
-                tooling=true
-                pwg=true
-                flatpak=true
-                release_metadata=true
-                ;;
-              README.md|pyproject.toml|MANIFEST.in|src/*|tests/*|data/*|extensions/*)
-                test=true
-                ;;
-              tools/check_autoeq_live.py|tools/check_gnome_shell_extension.py|tools/check_headless_pipewire_runtime.py|tools/pack_gnome_shell_extension.sh|tools/prepare_release.py|tools/release_gates.py|tools/release_preflight.py|tools/release_runtime_gate.py|tools/release_status.py|tools/run_headless_pipewire_runtime_smoke_ci.sh|tools/run_live_ui_runtime_smoke_ci.sh)
-                test=true
-                ;;
-            esac
-
-            case "$path" in
-              tools/*)
-                tooling=true
-                ;;
-            esac
-
-            case "$path" in
-              CHANGELOG.md|README.md|MANIFEST.in|pyproject.toml|data/io.github.bhack.mini-eq.metainfo.xml|docs/development.md|docs/flathub.md|docs/release.md|docs/screenshots/README.md|tools/prepare_release.py|tools/release_status.py|tests/test_prepare_release.py|tests/test_release_status.py)
-                release_metadata=true
-                ;;
-            esac
-
-            case "$path" in
-              .github/workflows/*.yml|tools/check_headless_pipewire_runtime.py|tools/check_pipewire_gobject.py|tools/release_gates.py|tools/release_runtime_gate.py|tools/run_headless_pipewire_runtime_smoke_ci.sh|src/mini_eq/pipewire_backend.py|src/mini_eq/analyzer.py)
-                pwg=true
-                ;;
-            esac
-
-            case "$path" in
-              .github/workflows/*.yml|io.github.bhack.mini-eq.yaml|python3-dependencies.yaml|flatpak/*|src/*|data/*|pyproject.toml|MANIFEST.in|tools/check_pipewire_gobject.py|tools/release_gates.py|tools/release_runtime_gate.py)
-                flatpak=true
-                ;;
-            esac
-          done < "$files"
-
-          {
-            echo "test=$test"
-            echo "tooling=$tooling"
-            echo "pwg=$pwg"
-            echo "flatpak=$flatpak"
-            echo "release_metadata=$release_metadata"
-          } >> "$GITHUB_OUTPUT"
-
-          {
-            echo "### CI scope"
-            echo
-            echo "- test: \`$test\`"
-            echo "- tooling: \`$tooling\`"
-            echo "- pipewire-gobject: \`$pwg\`"
-            echo "- flatpak: \`$flatpak\`"
-            echo "- release metadata: \`$release_metadata\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          set_scopes "$files"
 
   release-metadata:
     needs: changes

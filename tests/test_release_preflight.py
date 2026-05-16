@@ -183,7 +183,7 @@ def test_flatpak_pipewire_gobject_pin_accepts_matching_floor(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    release_preflight.check_flatpak_pipewire_gobject_pin(tmp_path)
+    assert release_preflight.check_flatpak_pipewire_gobject_pin(tmp_path) is None
 
 
 def test_flatpak_pipewire_gobject_pin_rejects_stale_manifest(tmp_path: Path) -> None:
