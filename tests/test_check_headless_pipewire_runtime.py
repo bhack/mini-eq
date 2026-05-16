@@ -25,6 +25,26 @@ def link_item(item_id: int, output_node: int, input_node: int, state: str) -> di
     }
 
 
+class AlwaysPendingContext:
+    def __init__(self) -> None:
+        self.iterations = 0
+
+    def pending(self) -> bool:
+        return True
+
+    def iteration(self, may_block: bool) -> None:
+        assert may_block is False
+        self.iterations += 1
+
+
+def test_drain_main_context_limits_continuous_pending_events() -> None:
+    context = AlwaysPendingContext()
+
+    headless.drain_main_context(context, max_iterations=3)
+
+    assert context.iterations == 3
+
+
 def test_headless_runtime_recognizes_active_processing_path(monkeypatch) -> None:
     monkeypatch.setattr(
         headless.live,
