@@ -11,13 +11,13 @@ def make_fader(gain_db: float = 0.0):
     selected: list[int] = []
     gains: list[tuple[int, float]] = []
     activated: list[int] = []
-    fader = band_fader.EqBandFader(
-        2,
-        selected.append,
-        lambda index, gain: gains.append((index, gain)),
-        activated.append,
-    )
+    fader = band_fader.EqBandFader.__new__(band_fader.EqBandFader)
+    fader.index = 2
+    fader.select_callback = selected.append
+    fader.gain_changed_callback = lambda index, gain: gains.append((index, gain))
+    fader.activate_callback = activated.append
     fader.gain_db = gain_db
+    fader.grab_focus = lambda: None
     return fader, selected, gains, activated
 
 
