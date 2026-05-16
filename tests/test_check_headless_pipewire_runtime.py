@@ -81,3 +81,15 @@ def test_dynamic_sink_properties_create_hotplug_audio_sink() -> None:
     assert "object.linger = true" in properties
     assert "factory.name = support.null-audio-sink" in properties
     assert "session.suspend-timeout-seconds = 1" in properties
+
+
+def test_alsa_null_sink_properties_create_alsa_pcm_audio_sink() -> None:
+    properties = headless.alsa_null_sink_properties("ci_alsa_null_sink")
+
+    assert 'node.name = "ci_alsa_null_sink"' in properties
+    assert 'media.class = "Audio/Sink"' in properties
+    assert "object.linger = true" in properties
+    assert "factory.name = api.alsa.pcm.sink" in properties
+    assert 'api.alsa.path = "null"' in properties
+    assert 'audio.format = "S16LE"' in properties
+    assert "session.suspend-timeout-seconds = 1" in properties
