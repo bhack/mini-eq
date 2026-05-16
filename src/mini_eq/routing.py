@@ -70,6 +70,7 @@ class SystemWideEqController:
         self.filter_node_id: int | None = None
         self.output_event_source_id = 0
         self.pending_followed_output_sink: str | None = None
+        self.pending_current_output_sink_refresh = False
         self.output_object_added_handler_id = 0
         self.output_object_removed_handler_id = 0
         self.output_metadata_changed_handler_id = 0
@@ -147,6 +148,20 @@ class SystemWideEqController:
             return None
 
         return self.output_backend.audio_sink_by_name(sink_name)
+
+    def filter_output_already_targets_sink(self, sink: PipeWireNode) -> bool:
+        if not self.running or self.filter_node_id is None or not sink.object_serial:
+            return False
+
+        try:
+            filter_output = self.output_backend.output_stream_by_name(self.filter_output_name)
+            if filter_output is None:
+                return False
+            target = self.output_backend.stream_target(filter_output.bound_id)
+        except Exception:
+            return False
+
+        return target.target_object == sink.object_serial
 
     def output_preset_keys(self) -> tuple[str, ...]:
         return self.output_preset_target().keys
@@ -271,9 +286,33 @@ class SystemWideEqController:
         return analyzer.set_enabled(enabled)
 
     def switch_output_sink(self, sink_name: str, explicit: bool) -> None:
-        if not sink_name or sink_name == self.output_sink:
+        if not sink_name:
             if explicit:
                 self.follow_default_output = False
+            return
+
+        if sink_name == self.output_sink:
+            if explicit:
+                self.follow_default_output = False
+
+            output_sink = self.get_sink(sink_name)
+            if output_sink is None:
+                return
+
+            self.refresh_output_route_param_monitor()
+            if self.stream_router is not None:
+                self.stream_router.set_output_sink_name(sink_name)
+            if self.output_analyzer is not None:
+                output_sink_description = output_sink.node_description if output_sink is not None else None
+                self.output_analyzer.set_output_sink_name(sink_name, output_sink_description)
+
+            if self.filter_output_already_targets_sink(output_sink):
+                return
+
+            if self.retarget_filter_output():
+                return
+
+            self.restart_engine()
             return
 
         if not self.is_valid_output_sink(sink_name):
@@ -356,6 +395,8 @@ class SystemWideEqController:
             return
 
         if node.is_audio_sink:
+            if node.node_name == getattr(self, "output_sink", ""):
+                self.pending_current_output_sink_refresh = True
             self.schedule_output_event_refresh()
 
     def handle_output_object_removed(self, _manager, _proxy) -> None:
@@ -423,11 +464,23 @@ class SystemWideEqController:
 
         self.invalidate_output_preset_target()
         pending_followed_output_sink = getattr(self, "pending_followed_output_sink", None)
+        pending_current_output_sink_refresh = getattr(self, "pending_current_output_sink_refresh", False)
         self.pending_followed_output_sink = None
+        self.pending_current_output_sink_refresh = False
+        followed_output_refreshed = False
         if pending_followed_output_sink is not None:
-            self.refresh_followed_output_sink_from_event(pending_followed_output_sink)
+            followed_output_refreshed = self.refresh_followed_output_sink_from_event(pending_followed_output_sink)
         else:
-            self.refresh_followed_output_sink(snapshot=True)
+            followed_output_refreshed = self.refresh_followed_output_sink(snapshot=True)
+        if (
+            pending_current_output_sink_refresh
+            and not followed_output_refreshed
+            and self.get_sink(getattr(self, "output_sink", "")) is not None
+        ):
+            try:
+                self.switch_output_sink(self.output_sink, explicit=False)
+            except Exception as exc:
+                self.emit_status(f"output refresh warning: {exc}")
         self.refresh_output_route_param_monitor()
 
         if self.outputs_changed_callback is not None:

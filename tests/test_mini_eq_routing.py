@@ -341,6 +341,8 @@ def test_output_object_added_schedules_refresh_only_for_audio_sinks(monkeypatch:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.accept_output_events = True
     controller.output_event_source_id = 0
+    controller.output_sink = "speakers"
+    controller.pending_current_output_sink_refresh = False
     controller.output_backend = type("Backend", (), {"node_from_proxy": lambda _self, node: node})()
     scheduled_callbacks: list[object] = []
 
@@ -358,7 +360,34 @@ def test_output_object_added_schedules_refresh_only_for_audio_sinks(monkeypatch:
     routing.SystemWideEqController.handle_output_object_added(controller, None, make_node(2, "speakers"))
 
     assert controller.output_event_source_id == 123
+    assert controller.pending_current_output_sink_refresh is True
     assert len(scheduled_callbacks) == 1
+
+
+def test_output_event_idle_retargets_recreated_explicit_output() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.accept_output_events = True
+    controller.output_event_source_id = 123
+    controller.pending_followed_output_sink = None
+    controller.pending_current_output_sink_refresh = True
+    controller.follow_default_output = False
+    controller.output_sink = "hdmi"
+    controller.output_backend = FakeOutputBackend([make_node(1, "hdmi")])
+    controller._output_preset_target_sink = "hdmi"
+    controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("hdmi", None, ("hdmi",))
+    calls: list[object] = []
+    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh") or False
+    controller.switch_output_sink = lambda sink_name, explicit: calls.append(("switch", sink_name, explicit))
+    controller.refresh_output_route_param_monitor = lambda: calls.append("route-monitor")
+    controller.outputs_changed_callback = lambda: calls.append("outputs")
+
+    assert routing.SystemWideEqController.on_output_event_idle(controller) is False
+
+    assert controller.output_event_source_id == 0
+    assert controller.pending_current_output_sink_refresh is False
+    assert controller._output_preset_target_sink is None
+    assert controller._output_preset_target is None
+    assert calls == ["refresh", ("switch", "hdmi", False), "route-monitor", "outputs"]
 
 
 def test_output_event_idle_invalidates_output_preset_target_cache() -> None:
@@ -590,6 +619,91 @@ def test_switch_output_sink_retargets_running_filter_output_without_restart() ->
         "apply",
         ("status", "filter-chain PipeWire EQ ready: mini_eq_sink -> hdmi"),
     ]
+
+
+def test_switch_output_sink_retargets_recreated_same_name_sink_without_restart() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[object] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def move_named_output_stream_to_target(self, stream_node_name: str, target_node_name: str) -> None:
+            calls.append(("retarget", stream_node_name, target_node_name))
+
+    class FakeRouter:
+        def set_output_sink_name(self, sink_name: str) -> None:
+            calls.append(("router-target", sink_name))
+
+    class FakeAnalyzer:
+        def set_output_sink_name(self, sink_name: str, sink_description: str | None = None) -> None:
+            calls.append(("analyzer-target", sink_name, sink_description))
+
+    controller.output_backend = FakeBackend([make_node(2, "hdmi")])
+    controller.output_sink = "hdmi"
+    controller.follow_default_output = True
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.filter_output_name = "mini_eq_sink_output"
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.stream_router = FakeRouter()
+    controller.output_analyzer = FakeAnalyzer()
+    controller.refresh_output_route_param_monitor = lambda: calls.append("route-param-monitor")
+    controller.apply_state_to_engine = lambda: calls.append("apply")
+    controller.emit_status = lambda message: calls.append(("status", message))
+    controller.stop_engine = lambda *_args, **_kwargs: calls.append("stop")
+    controller.start_engine = lambda: calls.append("start")
+
+    routing.SystemWideEqController.switch_output_sink(controller, "hdmi", explicit=False)
+
+    assert controller.output_sink == "hdmi"
+    assert controller.follow_default_output is True
+    assert calls == [
+        "route-param-monitor",
+        ("router-target", "hdmi"),
+        ("analyzer-target", "hdmi", None),
+        ("retarget", "mini_eq_sink_output", "hdmi"),
+        "apply",
+        ("status", "filter-chain PipeWire EQ ready: mini_eq_sink -> hdmi"),
+    ]
+
+
+def test_switch_output_sink_skips_same_name_retarget_when_filter_output_already_targets_sink() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[object] = []
+    sink = make_node(2, "hdmi")
+    filter_output = make_node(42, "mini_eq_sink_output", pw_backend.STREAM_OUTPUT_AUDIO)
+
+    class FakeBackend(FakeOutputBackend):
+        def output_stream_by_name(self, node_name: str) -> pw_backend.PipeWireNode | None:
+            return filter_output if node_name == "mini_eq_sink_output" else None
+
+        def stream_target(self, stream_bound_id: int) -> pw_backend.PipeWireStreamTarget:
+            assert stream_bound_id == filter_output.bound_id
+            return pw_backend.PipeWireStreamTarget(None, None, sink.object_serial, "Spa:Id")
+
+        def move_named_output_stream_to_target(self, _stream_node_name: str, _target_node_name: str) -> None:
+            calls.append("unexpected-retarget")
+
+    class FakeRouter:
+        def set_output_sink_name(self, sink_name: str) -> None:
+            calls.append(("router-target", sink_name))
+
+    controller.output_backend = FakeBackend([sink])
+    controller.output_sink = "hdmi"
+    controller.follow_default_output = True
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.filter_output_name = "mini_eq_sink_output"
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.stream_router = FakeRouter()
+    controller.output_analyzer = None
+    controller.refresh_output_route_param_monitor = lambda: calls.append("route-param-monitor")
+    controller.apply_state_to_engine = lambda: calls.append("apply")
+    controller.emit_status = lambda message: calls.append(("status", message))
+    controller.restart_engine = lambda: calls.append("restart")
+
+    routing.SystemWideEqController.switch_output_sink(controller, "hdmi", explicit=False)
+
+    assert calls == ["route-param-monitor", ("router-target", "hdmi")]
 
 
 def test_explicit_output_change_schedules_coalesced_output_refresh(monkeypatch: pytest.MonkeyPatch) -> None:

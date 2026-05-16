@@ -21,6 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 HELPER_SKIP_EXIT_CODE = live.HELPER_SKIP_EXIT_CODE
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOTPLUG_SINK_NAME = "ci_hotplug_sink"
+ALSA_NULL_SINK_NAME = "ci_alsa_null_sink"
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -138,6 +139,28 @@ def dynamic_sink_properties(sink_name: str) -> str:
     )
 
 
+def alsa_null_sink_properties(sink_name: str) -> str:
+    return (
+        "{ "
+        "factory.name = api.alsa.pcm.sink "
+        f'node.name = "{sink_name}" '
+        'node.description = "CI ALSA Null Sink" '
+        'media.class = "Audio/Sink" '
+        'api.alsa.path = "null" '
+        'audio.format = "S16LE" '
+        "audio.rate = 48000 "
+        'audio.position = "FL,FR" '
+        "object.linger = true "
+        "session.suspend-timeout-seconds = 1 "
+        "adapter.auto-port-config = { "
+        "mode = dsp "
+        "monitor = true "
+        "position = preserve "
+        "} "
+        "}"
+    )
+
+
 def create_dynamic_sink(sink_name: str, timeout_seconds: float) -> dict[str, Any]:
     if live.node_by_name(sink_name) is not None:
         destroy_dynamic_sink(sink_name, timeout_seconds)
@@ -145,6 +168,22 @@ def create_dynamic_sink(sink_name: str, timeout_seconds: float) -> dict[str, Any
     command = ["pw-cli", "create-node", "adapter", dynamic_sink_properties(sink_name)]
     print(f"$ {format_command(command)}", flush=True)
     subprocess.run(command, check=True, text=True, stdout=subprocess.DEVNULL)
+    return dispatch_until(sink_name, lambda: live.node_by_name(sink_name), timeout_seconds)
+
+
+def create_alsa_null_sink(sink_name: str, timeout_seconds: float) -> dict[str, Any] | None:
+    if live.node_by_name(sink_name) is not None:
+        destroy_dynamic_sink(sink_name, timeout_seconds)
+
+    command = ["pw-cli", "create-node", "adapter", alsa_null_sink_properties(sink_name)]
+    print(f"$ {format_command(command)}", flush=True)
+    result = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if result.returncode != 0:
+        output = result.stdout.strip()
+        detail = f": {output}" if output else ""
+        print(f"## skipping ALSA null output phase; api.alsa.pcm.sink is unavailable{detail}", flush=True)
+        return None
+
     return dispatch_until(sink_name, lambda: live.node_by_name(sink_name), timeout_seconds)
 
 
@@ -422,6 +461,82 @@ def run_dynamic_hotplug_recovery_phase(
     return virtual_serial
 
 
+def run_alsa_null_output_phase(
+    *,
+    controller,
+    smoke: subprocess.Popen[str],
+    smoke_id: int,
+    virtual_sink_name: str,
+    filter_output_name: str,
+    idle_gap_seconds: float,
+    timeout_seconds: float,
+) -> tuple[str, bool]:
+    controller.set_analyzer_enabled(False)
+    print("## headless ALSA-backed null output recovery with monitor off", flush=True)
+
+    alsa_sink = create_alsa_null_sink(ALSA_NULL_SINK_NAME, timeout_seconds)
+    if alsa_sink is None:
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after skipped ALSA-backed null output phase",
+        )
+        return virtual_serial, False
+
+    try:
+        switch_default_output_and_wait(controller, ALSA_NULL_SINK_NAME, filter_output_name, timeout_seconds)
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after ALSA-backed null output move",
+        )
+
+        pause_smoke_stream_for_idle(smoke, smoke_id, idle_gap_seconds, timeout_seconds)
+        dispatch_until(
+            "resumed synthetic stream to remain registered after ALSA-backed output idle",
+            lambda: smoke_stream_still_present(smoke_id),
+            timeout_seconds,
+        )
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after ALSA-backed null output idle",
+        )
+
+        def remove_alsa_and_select_primary() -> None:
+            destroy_dynamic_sink(ALSA_NULL_SINK_NAME, timeout_seconds)
+            switch_default_output_and_wait(controller, live.PRIMARY_SINK_NAME, filter_output_name, timeout_seconds)
+
+        pause_smoke_stream_for_idle(
+            smoke,
+            smoke_id,
+            idle_gap_seconds,
+            timeout_seconds,
+            during_idle=remove_alsa_and_select_primary,
+        )
+        dispatch_until(
+            "resumed synthetic stream to remain registered after ALSA-backed output removal",
+            lambda: smoke_stream_still_present(smoke_id),
+            timeout_seconds,
+        )
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id,
+            virtual_sink_name,
+            filter_output_name,
+            timeout_seconds,
+            "after ALSA-backed null output removal",
+        )
+        return virtual_serial, True
+    finally:
+        destroy_dynamic_sink(ALSA_NULL_SINK_NAME, timeout_seconds)
+
+
 def run_controller_flow(
     *,
     tmp_dir: Path,
@@ -557,6 +672,16 @@ def run_controller_flow(
             timeout_seconds=timeout_seconds,
         )
 
+        virtual_serial, alsa_null_phase_verified = run_alsa_null_output_phase(
+            controller=controller,
+            smoke=smoke,
+            smoke_id=smoke_id,
+            virtual_sink_name=virtual_sink_name,
+            filter_output_name=filter_output_name,
+            idle_gap_seconds=idle_gap_seconds,
+            timeout_seconds=timeout_seconds,
+        )
+
         for cycle in range(cycles):
             print(f"## headless route toggle cycle {cycle + 1}/{cycles}", flush=True)
             controller.route_system_audio(False, announce=False)
@@ -633,10 +758,16 @@ def run_controller_flow(
         stop_smoke_stream(smoke, timeout_seconds)
         smoke = None
 
+        optional_phase_labels = []
+        if alsa_null_phase_verified:
+            optional_phase_labels.append("ALSA-backed null output recovery")
+        optional_phases = f"{', '.join(optional_phase_labels)}, " if optional_phase_labels else ""
+
         print(
             "Headless PipeWire runtime smoke passed: synthetic stream routing, route toggles, "
             "idle stream recreation, paused stream resume, tracked stream relink recovery, "
-            "paused default-output moves with monitor off, dynamic output hotplug recovery, active processing links, "
+            "paused default-output moves with monitor off, dynamic output hotplug recovery, "
+            f"{optional_phases}active processing links, "
             "monitor toggles, and stream cleanup verified."
         )
         if statuses:
