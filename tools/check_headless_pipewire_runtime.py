@@ -22,6 +22,7 @@ HELPER_SKIP_EXIT_CODE = live.HELPER_SKIP_EXIT_CODE
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOTPLUG_SINK_NAME = "ci_hotplug_sink"
 ALSA_NULL_SINK_NAME = "ci_alsa_null_sink"
+MAX_CONTEXT_DRAIN_ITERATIONS = 250
 
 
 def format_command(command: list[str | Path]) -> str:
@@ -38,6 +39,13 @@ def ensure_source_path() -> None:
         sys.path.insert(0, src_path)
 
 
+def drain_main_context(context: Any, *, max_iterations: int = MAX_CONTEXT_DRAIN_ITERATIONS) -> None:
+    for _ in range(max_iterations):
+        if not context.pending():
+            return
+        context.iteration(False)
+
+
 def dispatch_until(
     label: str,
     predicate: Callable[[], Any],
@@ -51,8 +59,7 @@ def dispatch_until(
     last_error: Exception | None = None
 
     while time.monotonic() < deadline:
-        while context.pending():
-            context.iteration(False)
+        drain_main_context(context)
 
         try:
             value = predicate()
@@ -64,8 +71,7 @@ def dispatch_until(
 
         time.sleep(interval_seconds)
 
-    while context.pending():
-        context.iteration(False)
+    drain_main_context(context)
 
     detail = f": {last_error}" if last_error is not None else ""
     raise RuntimeError(f"timed out waiting for {label}{detail}")
