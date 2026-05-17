@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import array
+import sys
+
+import pytest
+
 from tools import check_headless_pipewire_runtime as headless
 
 
@@ -91,6 +96,32 @@ def test_headless_runtime_rejects_stale_virtual_route(monkeypatch) -> None:
     monkeypatch.setattr(headless.live, "metadata_targets", lambda: {42: ("old-serial", "Spa:Id")})
 
     assert headless.route_to_current_virtual(42, "mini_eq_sink") is None
+
+
+def test_raw_s16le_rms_skips_initial_frames(tmp_path) -> None:
+    samples = array.array("h", [0, 0] * 4 + [1000, -1000] * 4)
+    if sys.byteorder != "little":
+        samples.byteswap()
+
+    raw_path = tmp_path / "capture.raw"
+    raw_path.write_bytes(samples.tobytes())
+
+    assert headless.raw_s16le_rms(raw_path, skip_frames=4, channels=2) == pytest.approx(1000 / 32768.0)
+
+
+def test_signal_processing_check_rejects_unattenuated_resume() -> None:
+    headless.assert_signal_is_attenuated(
+        "attenuated",
+        baseline_rms=0.10,
+        measured_rms=0.012,
+    )
+
+    with pytest.raises(RuntimeError, match="signal processing check failed"):
+        headless.assert_signal_is_attenuated(
+            "unattenuated",
+            baseline_rms=0.10,
+            measured_rms=0.09,
+        )
 
 
 def test_dynamic_sink_properties_create_hotplug_audio_sink() -> None:
