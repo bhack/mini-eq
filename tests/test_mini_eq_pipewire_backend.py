@@ -582,6 +582,180 @@ def test_connect_link_state_changed_binds_and_dispatches_state() -> None:
     assert link.disconnected == [77]
 
 
+def test_connect_node_state_changed_binds_and_dispatches_state_and_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeLiveNode:
+        def __init__(self) -> None:
+            self.state = "suspended"
+            self.error: str | None = None
+            self.disconnected: list[int] = []
+            self.state_callback = None
+            self.error_callback = None
+
+        def get_state(self) -> str | None:
+            return self.state
+
+        def dup_error(self) -> str | None:
+            return self.error
+
+        def disconnect(self, handler_id: int) -> None:
+            self.disconnected.append(handler_id)
+
+        def emit_state(self, state: str, error: str | None = None) -> None:
+            assert self.state_callback is not None
+            self.state = state
+            self.error = error
+            self.state_callback(self, None)
+
+        def emit_error(self, error: str | None) -> None:
+            assert self.error_callback is not None
+            self.error = error
+            self.error_callback(self, None)
+
+    class FakeNodeApi:
+        @staticmethod
+        def get_state():
+            return None
+
+        @staticmethod
+        def dup_error():
+            return None
+
+    class FakeGObjectObject:
+        @staticmethod
+        def connect(node: FakeLiveNode, signal_name: str, callback) -> int:
+            if signal_name == "notify::state":
+                node.state_callback = callback
+                return 77
+            if signal_name == "notify::error":
+                node.error_callback = callback
+                return 78
+            raise AssertionError(f"unexpected signal: {signal_name}")
+
+    node = FakeLiveNode()
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(Node=FakeNodeApi)
+    backend._GObject = SimpleNamespace(Object=FakeGObjectObject)
+    backend._ensure_connected = lambda: None
+    monkeypatch.setattr(backend, "_node_proxy_by_bound_id", lambda _bound_id: node)
+    states: list[tuple[str | None, str | None]] = []
+
+    handler_id = backend.connect_node_state_changed(42, lambda state, error: states.append((state, error)))
+    node.emit_state("running")
+    node.emit_error("device suspended")
+    backend.disconnect_node_state_handler(handler_id)
+
+    assert handler_id == 77
+    assert states == [
+        ("suspended", None),
+        ("running", None),
+        ("running", "device suspended"),
+    ]
+    assert node.disconnected == [78, 77]
+
+
+def test_connect_node_param_changed_subscribes_and_dispatches_matching_param(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeParam:
+        def __init__(self, param_id: int) -> None:
+            self.param_id = param_id
+
+        def get_id(self) -> int:
+            return self.param_id
+
+    class FakeParamInfo:
+        def __init__(self, param_id: int, name: str) -> None:
+            self.param_id = param_id
+            self.name = name
+
+        def get_id(self) -> int:
+            return self.param_id
+
+        def dup_name(self) -> str:
+            return self.name
+
+    class FakeLiveNode:
+        def __init__(self) -> None:
+            self.param_infos = FakeModel([FakeParamInfo(13, "Props"), FakeParamInfo(14, "Format")])
+            self.subscriptions: list[FakeVariant] = []
+            self.disconnected: list[int] = []
+            self.param_callback = None
+            self.param_infos_callback = None
+
+        def get_param_infos(self) -> FakeModel:
+            return self.param_infos
+
+        def subscribe_params(self, ids: FakeVariant) -> None:
+            self.subscriptions.append(ids)
+
+        def disconnect(self, handler_id: int) -> None:
+            self.disconnected.append(handler_id)
+
+        def emit_param(self, param_id: int) -> None:
+            assert self.param_callback is not None
+            self.param_callback(self, FakeParam(param_id))
+
+        def emit_param_infos_changed(self) -> None:
+            assert self.param_infos_callback is not None
+            self.param_infos_callback(self, None)
+
+    class FakeNodeApi:
+        @staticmethod
+        def enum_params_sync():
+            return None
+
+        @staticmethod
+        def new():
+            return None
+
+        @staticmethod
+        def subscribe_params():
+            return None
+
+        @staticmethod
+        def sync():
+            return None
+
+    class FakeGObjectObject:
+        @staticmethod
+        def connect(node: FakeLiveNode, signal_name: str, callback) -> int:
+            if signal_name == "param":
+                node.param_callback = callback
+                return 77
+            if signal_name == "notify::param-infos":
+                node.param_infos_callback = callback
+                return 78
+            raise AssertionError(f"unexpected signal: {signal_name}")
+
+    node = FakeLiveNode()
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(Node=FakeNodeApi)
+    backend._GLib = FakeGLib
+    backend._GObject = SimpleNamespace(Object=FakeGObjectObject)
+    backend._ensure_connected = lambda: None
+    backend._sync_proxy = lambda _proxy, _label: None
+    monkeypatch.setattr(backend, "_node_proxy_by_bound_id", lambda _bound_id: node)
+    calls: list[str] = []
+
+    handler_id = backend.connect_node_param_changed(42, "Props", lambda: calls.append("props"))
+
+    assert handler_id == 77
+    assert [(variant.signature, variant.value) for variant in node.subscriptions] == [("au", [13])]
+
+    node.emit_param(14)
+    assert calls == []
+
+    node.emit_param(13)
+    node.emit_param_infos_changed()
+
+    assert calls == ["props", "props"]
+
+    backend.disconnect_node_param_handler(handler_id)
+
+    assert [(variant.signature, variant.value) for variant in node.subscriptions] == [("au", [13]), ("au", [])]
+    assert node.disconnected == [78, 77]
+
+
 def test_new_core_uses_pipewire_gobject_core_constructor() -> None:
     FakeCore.calls = 0
 

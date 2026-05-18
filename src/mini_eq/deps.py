@@ -12,8 +12,8 @@ from typing import Literal
 
 Status = Literal["ok", "missing", "warning"]
 
-PWG_REQUIRED_VERSION = "0.3.7"
-PWG_REQUIRED_VERSION_PARTS = (0, 3, 7)
+PWG_REQUIRED_VERSION = "0.3.8"
+PWG_REQUIRED_VERSION_PARTS = (0, 3, 8)
 PWG_REQUIRED_SYMBOLS = (
     "Core.set_pipewire_property",
     "Core.sync",
@@ -27,7 +27,14 @@ PWG_REQUIRED_SYMBOLS = (
     "Link.new",
     "Link.sync",
     "Metadata.sync",
+    "Node.dup_error",
+    "Node.enum_params_sync",
+    "Node.get_param_infos",
+    "Node.get_state",
     "Node.sync",
+    "Node.subscribe_params",
+    "ParamInfo.dup_name",
+    "ParamInfo.get_id",
     "Param.new_props_controls",
     "Registry.sync",
     "RouteInfo.new_from_param",

@@ -44,6 +44,7 @@ from .glib_utils import destroy_glib_source
 from .pipewire_backend import (
     DEFAULT_AUDIO_SINK_KEY,
     DEFAULT_CONFIGURED_AUDIO_SINK_KEY,
+    NODE_PROPS_PARAM_NAME,
     PipeWireBackend,
     PipeWireNode,
     node_sample_rate,
@@ -51,6 +52,8 @@ from .pipewire_backend import (
 )
 from .pipewire_routes import PipeWireOutputPresetTarget
 from .pipewire_stream_router import PipeWireStreamRouter
+
+FILTER_CONTROL_PARAM_ECHO_GRACE_USEC = 500_000
 
 
 class SystemWideEqController:
@@ -76,6 +79,14 @@ class SystemWideEqController:
         self.output_metadata_changed_handler_id = 0
         self.output_route_param_handler_id = 0
         self.output_route_param_device_id = 0
+        self.filter_node_state_handler_id = 0
+        self.filter_control_param_handler_id = 0
+        self.filter_control_reapply_source_id = 0
+        self.filter_control_reapply_source_is_verification = False
+        self.applying_filter_control_verification = False
+        self.ignored_filter_control_param_events = 0
+        self.ignored_filter_control_param_events_to_verify = 0
+        self.ignored_filter_control_param_events_deadline_us = 0
         self.accept_output_events = False
         self.routed = False
         self.running = False
@@ -665,6 +676,8 @@ class SystemWideEqController:
             self.running = True
             self.emit_status(f"filter-chain PipeWire EQ ready: {self.virtual_sink_name} -> {self.output_sink}")
             self.apply_state_to_engine()
+            self.start_filter_node_state_monitor()
+            self.start_filter_control_param_monitor()
             if on_ready is not None:
                 on_ready()
 
@@ -704,11 +717,15 @@ class SystemWideEqController:
         self.cancel_pending_engine_start()
         module = getattr(self, "engine_module", None)
         if module is None:
+            self.stop_filter_node_state_monitor()
+            self.stop_filter_control_param_monitor()
             self.filter_node_id = None
             self.running = False
             return
 
         self.engine_module = None
+        self.stop_filter_node_state_monitor()
+        self.stop_filter_control_param_monitor()
         self.filter_node_id = None
 
         try:
@@ -760,6 +777,142 @@ class SystemWideEqController:
             self.output_backend.set_node_params(self.filter_node_id, controls)
         except Exception as exc:
             self.emit_status(f"PipeWire EQ control update failed: {exc}")
+        else:
+            self.ignore_next_filter_control_param_event(
+                verify_after_echo=not getattr(self, "applying_filter_control_verification", False)
+            )
+
+    def start_filter_node_state_monitor(self) -> None:
+        if getattr(self, "filter_node_state_handler_id", 0) > 0 or self.filter_node_id is None:
+            return
+        if not hasattr(self.output_backend, "connect_node_state_changed"):
+            return
+
+        try:
+            handler_id = self.output_backend.connect_node_state_changed(
+                self.filter_node_id,
+                self.handle_filter_node_state_changed,
+            )
+        except Exception as exc:
+            self.emit_status(f"PipeWire EQ node state monitor warning: {exc}")
+            return
+
+        self.filter_node_state_handler_id = handler_id
+
+    def stop_filter_node_state_monitor(self) -> None:
+        handler_id = getattr(self, "filter_node_state_handler_id", 0)
+        self.filter_node_state_handler_id = 0
+
+        if handler_id > 0:
+            self.output_backend.disconnect_node_state_handler(handler_id)
+
+    def handle_filter_node_state_changed(self, state: str | None, error: str | None) -> None:
+        if state == "error" and error:
+            self.emit_status(f"PipeWire EQ filter node error: {error}")
+            return
+
+        if state == "running":
+            self.schedule_filter_control_reapply()
+
+    def ignore_next_filter_control_param_event(self, *, verify_after_echo: bool = True) -> None:
+        if getattr(self, "filter_control_param_handler_id", 0) <= 0:
+            return
+
+        self.ignored_filter_control_param_events = getattr(self, "ignored_filter_control_param_events", 0) + 1
+        if verify_after_echo:
+            self.ignored_filter_control_param_events_to_verify = (
+                getattr(self, "ignored_filter_control_param_events_to_verify", 0) + 1
+            )
+        self.ignored_filter_control_param_events_deadline_us = (
+            GLib.get_monotonic_time() + FILTER_CONTROL_PARAM_ECHO_GRACE_USEC
+        )
+
+    def start_filter_control_param_monitor(self) -> None:
+        if getattr(self, "filter_control_param_handler_id", 0) > 0 or self.filter_node_id is None:
+            return
+        if not hasattr(self.output_backend, "connect_node_param_changed"):
+            return
+
+        try:
+            handler_id = self.output_backend.connect_node_param_changed(
+                self.filter_node_id,
+                NODE_PROPS_PARAM_NAME,
+                self.handle_filter_control_param_changed,
+            )
+        except Exception as exc:
+            self.emit_status(f"PipeWire EQ control monitor warning: {exc}")
+            return
+
+        self.filter_control_param_handler_id = handler_id
+        if handler_id > 0:
+            self.ignore_next_filter_control_param_event()
+
+    def stop_filter_control_param_monitor(self) -> None:
+        handler_id = getattr(self, "filter_control_param_handler_id", 0)
+        self.filter_control_param_handler_id = 0
+
+        reapply_source_id = getattr(self, "filter_control_reapply_source_id", 0)
+        if reapply_source_id > 0:
+            destroy_glib_source(reapply_source_id)
+            self.filter_control_reapply_source_id = 0
+            self.filter_control_reapply_source_is_verification = False
+
+        self.ignored_filter_control_param_events = 0
+        self.ignored_filter_control_param_events_to_verify = 0
+        self.ignored_filter_control_param_events_deadline_us = 0
+
+        if handler_id > 0:
+            self.output_backend.disconnect_node_param_handler(handler_id)
+
+    def handle_filter_control_param_changed(self) -> None:
+        ignored_events = getattr(self, "ignored_filter_control_param_events", 0)
+        if ignored_events > 0:
+            now_us = GLib.get_monotonic_time()
+            deadline_us = getattr(self, "ignored_filter_control_param_events_deadline_us", 0)
+            if now_us <= deadline_us:
+                self.ignored_filter_control_param_events = ignored_events - 1
+                verify_events = getattr(self, "ignored_filter_control_param_events_to_verify", 0)
+                if verify_events > 0:
+                    self.ignored_filter_control_param_events_to_verify = verify_events - 1
+                    delay_ms = max(1, int((deadline_us - now_us + 999) // 1000))
+                    self.schedule_filter_control_reapply(delay_ms=delay_ms, verification=True)
+                return
+
+            self.ignored_filter_control_param_events = 0
+            self.ignored_filter_control_param_events_to_verify = 0
+
+        self.schedule_filter_control_reapply()
+
+    def schedule_filter_control_reapply(self, *, delay_ms: int = 0, verification: bool = False) -> None:
+        if not self.running or self.filter_node_id is None:
+            return
+
+        reapply_source_id = getattr(self, "filter_control_reapply_source_id", 0)
+        if reapply_source_id > 0:
+            if verification or not getattr(self, "filter_control_reapply_source_is_verification", False):
+                return
+
+            destroy_glib_source(reapply_source_id)
+            self.filter_control_reapply_source_id = 0
+
+        self.filter_control_reapply_source_is_verification = verification
+        if delay_ms > 0:
+            self.filter_control_reapply_source_id = GLib.timeout_add(delay_ms, self.on_filter_control_reapply_idle)
+        else:
+            self.filter_control_reapply_source_id = GLib.idle_add(self.on_filter_control_reapply_idle)
+
+    def on_filter_control_reapply_idle(self) -> bool:
+        verification = getattr(self, "filter_control_reapply_source_is_verification", False)
+        self.filter_control_reapply_source_id = 0
+        self.filter_control_reapply_source_is_verification = False
+        if self.running and self.filter_node_id is not None:
+            was_verifying = getattr(self, "applying_filter_control_verification", False)
+            self.applying_filter_control_verification = verification
+            try:
+                self.apply_state_to_engine()
+            finally:
+                self.applying_filter_control_verification = was_verifying
+        return False
 
     def apply_preamp_to_engine(self) -> None:
         self.set_filter_controls(builtin_biquad_preamp_control_values(self.preamp_db, self.eq_enabled))

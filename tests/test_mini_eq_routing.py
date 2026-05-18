@@ -1427,6 +1427,186 @@ def test_start_engine_waits_for_filter_chain_node_from_registry() -> None:
     assert controller.running is True
 
 
+def test_start_filter_control_param_monitor_subscribes_to_filter_props() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[tuple[int, str]] = []
+
+    class FakeBackend:
+        def connect_node_param_changed(self, node_bound_id: int, param_name: str, _callback) -> int:
+            calls.append((node_bound_id, param_name))
+            return 55
+
+    controller.output_backend = FakeBackend()
+    controller.filter_node_id = 42
+    controller.filter_control_param_handler_id = 0
+    controller.ignored_filter_control_param_events = 0
+    controller.ignored_filter_control_param_events_to_verify = 0
+
+    routing.SystemWideEqController.start_filter_control_param_monitor(controller)
+
+    assert calls == [(42, pw_backend.NODE_PROPS_PARAM_NAME)]
+    assert controller.filter_control_param_handler_id == 55
+    assert controller.ignored_filter_control_param_events == 1
+    assert controller.ignored_filter_control_param_events_to_verify == 1
+
+
+def test_start_filter_node_state_monitor_subscribes_to_filter_node() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[int] = []
+
+    class FakeBackend:
+        def connect_node_state_changed(self, node_bound_id: int, _callback) -> int:
+            calls.append(node_bound_id)
+            return 56
+
+    controller.output_backend = FakeBackend()
+    controller.filter_node_id = 42
+    controller.filter_node_state_handler_id = 0
+
+    routing.SystemWideEqController.start_filter_node_state_monitor(controller)
+
+    assert calls == [42]
+    assert controller.filter_node_state_handler_id == 56
+
+
+def test_filter_node_running_state_reapplies_current_engine_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    scheduled_callbacks: list[object] = []
+    applied: list[str] = []
+
+    monkeypatch.setattr(routing.GLib, "idle_add", lambda callback: scheduled_callbacks.append(callback) or 321)
+
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.filter_control_reapply_source_id = 0
+    controller.apply_state_to_engine = lambda: applied.append("apply")
+
+    routing.SystemWideEqController.handle_filter_node_state_changed(controller, "suspended", None)
+    routing.SystemWideEqController.handle_filter_node_state_changed(controller, "running", None)
+    routing.SystemWideEqController.handle_filter_node_state_changed(controller, "running", None)
+
+    assert controller.filter_control_reapply_source_id == 321
+    assert len(scheduled_callbacks) == 1
+
+    assert scheduled_callbacks.pop(0)() is False
+
+    assert applied == ["apply"]
+    assert controller.filter_control_reapply_source_id == 0
+
+
+def test_filter_node_error_state_reports_error() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    statuses: list[str] = []
+
+    controller.emit_status = statuses.append
+
+    routing.SystemWideEqController.handle_filter_node_state_changed(controller, "error", "device unavailable")
+
+    assert statuses == ["PipeWire EQ filter node error: device unavailable"]
+
+
+def test_filter_control_param_change_reapplies_current_engine_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    scheduled_callbacks: list[object] = []
+    applied: list[str] = []
+
+    monkeypatch.setattr(routing.GLib, "idle_add", lambda callback: scheduled_callbacks.append(callback) or 321)
+
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.filter_control_reapply_source_id = 0
+    controller.filter_control_reapply_source_is_verification = False
+    controller.ignored_filter_control_param_events = 0
+    controller.apply_state_to_engine = lambda: applied.append("apply")
+
+    routing.SystemWideEqController.handle_filter_control_param_changed(controller)
+    routing.SystemWideEqController.handle_filter_control_param_changed(controller)
+
+    assert controller.filter_control_reapply_source_id == 321
+    assert len(scheduled_callbacks) == 1
+
+    assert scheduled_callbacks.pop(0)() is False
+
+    assert applied == ["apply"]
+    assert controller.filter_control_reapply_source_id == 0
+
+
+def test_filter_control_param_change_ignores_recent_local_control_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    scheduled_timeouts: list[tuple[int, object]] = []
+    applied: list[str] = []
+
+    monkeypatch.setattr(routing.GLib, "get_monotonic_time", lambda: 1_000)
+    monkeypatch.setattr(
+        routing.GLib,
+        "timeout_add",
+        lambda delay_ms, callback: scheduled_timeouts.append((delay_ms, callback)) or 321,
+    )
+
+    controller.filter_control_param_handler_id = 55
+    controller.filter_control_reapply_source_id = 0
+    controller.filter_control_reapply_source_is_verification = False
+    controller.ignored_filter_control_param_events = 0
+    controller.ignored_filter_control_param_events_to_verify = 0
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.apply_state_to_engine = lambda: applied.append("apply")
+
+    routing.SystemWideEqController.ignore_next_filter_control_param_event(controller)
+    routing.SystemWideEqController.handle_filter_control_param_changed(controller)
+
+    assert controller.ignored_filter_control_param_events == 0
+    assert controller.ignored_filter_control_param_events_to_verify == 0
+    assert controller.filter_control_reapply_source_id == 321
+    assert controller.filter_control_reapply_source_is_verification is True
+    assert len(scheduled_timeouts) == 1
+    assert scheduled_timeouts[0][0] == 500
+
+    assert scheduled_timeouts[0][1]() is False
+
+    assert applied == ["apply"]
+    assert controller.filter_control_reapply_source_id == 0
+    assert controller.filter_control_reapply_source_is_verification is False
+    assert controller.applying_filter_control_verification is False
+
+
+def test_filter_control_verification_echo_does_not_schedule_another_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    scheduled_timeouts: list[tuple[int, object]] = []
+
+    class FakeBackend:
+        def set_node_params(self, _node_bound_id: int, _controls: dict[str, float]) -> None:
+            return None
+
+    monkeypatch.setattr(routing.GLib, "get_monotonic_time", lambda: 1_000)
+    monkeypatch.setattr(
+        routing.GLib,
+        "timeout_add",
+        lambda delay_ms, callback: scheduled_timeouts.append((delay_ms, callback)) or 321,
+    )
+
+    controller.output_backend = FakeBackend()
+    controller.filter_control_param_handler_id = 55
+    controller.filter_control_reapply_source_id = 0
+    controller.filter_control_reapply_source_is_verification = False
+    controller.ignored_filter_control_param_events = 0
+    controller.ignored_filter_control_param_events_to_verify = 0
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.applying_filter_control_verification = True
+
+    routing.SystemWideEqController.set_filter_controls(controller, {"preamp_l:b0": 1.0})
+    routing.SystemWideEqController.handle_filter_control_param_changed(controller)
+
+    assert controller.ignored_filter_control_param_events == 0
+    assert controller.ignored_filter_control_param_events_to_verify == 0
+    assert scheduled_timeouts == []
+
+
 def test_start_engine_clears_module_when_filter_chain_node_times_out() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     module = object()

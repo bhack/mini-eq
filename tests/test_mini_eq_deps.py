@@ -131,12 +131,12 @@ def test_pipewire_gobject_check_requires_current_library_version(monkeypatch) ->
     check = deps.check_pipewire_gobject()
 
     assert not check.ok
-    assert "older than required 0.3.7" in check.detail
+    assert "older than required 0.3.8" in check.detail
 
 
 def test_pipewire_gobject_check_requires_property_override_symbols(monkeypatch) -> None:
     fake_pwg = SimpleNamespace(
-        get_library_version=lambda: "0.3.7",
+        get_library_version=lambda: "0.3.8",
         Core=SimpleNamespace(),
         Device=SimpleNamespace(
             enum_all_params=object(),
