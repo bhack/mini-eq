@@ -87,11 +87,11 @@ Install the Python package after the system packages are present:
 ```bash
 python3 -m venv /tmp/mini-eq-pwg-build
 /tmp/mini-eq-pwg-build/bin/python -m pip install --upgrade pip
-/tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.8,<0.4' -w /tmp/mini-eq-wheelhouse
+/tmp/mini-eq-pwg-build/bin/python -m pip wheel 'pipewire-gobject>=0.3.9,<0.4' -w /tmp/mini-eq-wheelhouse
 
 python3 -m venv --system-site-packages ~/.local/share/mini-eq/venv
 ~/.local/share/mini-eq/venv/bin/python -m pip install --upgrade pip
-~/.local/share/mini-eq/venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.8,<0.4'
+~/.local/share/mini-eq/venv/bin/python -m pip install --no-index --find-links /tmp/mini-eq-wheelhouse 'pipewire-gobject>=0.3.9,<0.4'
 ~/.local/share/mini-eq/venv/bin/python -m pip install mini-eq
 ~/.local/share/mini-eq/venv/bin/mini-eq --check-deps
 ~/.local/share/mini-eq/venv/bin/mini-eq

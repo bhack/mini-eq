@@ -40,7 +40,7 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
     "Topic :: Multimedia :: Sound/Audio :: Mixers",
 ]
-dependencies = ["numpy>=1.26", "pipewire-gobject>=0.3.8,<0.4"]
+dependencies = ["numpy>=1.26", "pipewire-gobject>=0.3.9,<0.4"]
 
 [project.urls]
 Homepage = "https://github.com/bhack/mini-eq"

@@ -175,11 +175,11 @@ def test_release_preflight_rejects_invalid_headless_pipewire_runtime_env(monkeyp
 
 def test_flatpak_pipewire_gobject_pin_accepts_matching_floor(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\ndependencies = ["pipewire-gobject>=0.3.8,<0.4"]\n',
+        '[project]\ndependencies = ["pipewire-gobject>=0.3.9,<0.4"]\n',
         encoding="utf-8",
     )
     (tmp_path / "io.github.bhack.mini-eq.yaml").write_text(
-        "modules:\n  - name: pipewire-gobject\n    sources:\n      - type: git\n        tag: 0.3.8\n",
+        "modules:\n  - name: pipewire-gobject\n    sources:\n      - type: git\n        tag: 0.3.9\n",
         encoding="utf-8",
     )
 
@@ -188,11 +188,11 @@ def test_flatpak_pipewire_gobject_pin_accepts_matching_floor(tmp_path: Path) -> 
 
 def test_flatpak_pipewire_gobject_pin_rejects_stale_manifest(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\ndependencies = ["pipewire-gobject>=0.3.8,<0.4"]\n',
+        '[project]\ndependencies = ["pipewire-gobject>=0.3.9,<0.4"]\n',
         encoding="utf-8",
     )
     (tmp_path / "io.github.bhack.mini-eq.yaml").write_text(
-        "modules:\n  - name: pipewire-gobject\n    sources:\n      - type: git\n        tag: 0.3.7\n",
+        "modules:\n  - name: pipewire-gobject\n    sources:\n      - type: git\n        tag: 0.3.8\n",
         encoding="utf-8",
     )
 
@@ -200,7 +200,7 @@ def test_flatpak_pipewire_gobject_pin_rejects_stale_manifest(tmp_path: Path) -> 
         release_preflight.check_flatpak_pipewire_gobject_pin(tmp_path)
     except SystemExit as error:
         message = str(error)
-        assert "pipewire-gobject>=0.3.8" in message
-        assert "bundles tag 0.3.7" in message
+        assert "pipewire-gobject>=0.3.9" in message
+        assert "bundles tag 0.3.8" in message
     else:
         raise AssertionError("Expected stale Flatpak pipewire-gobject tag to fail")

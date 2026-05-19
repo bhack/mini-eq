@@ -53,8 +53,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PWG_VERSION: "0.3.8"
-  PWG_REQUIREMENT: "pipewire-gobject>=0.3.8,<0.4"
+  PWG_VERSION: "0.3.9"
+  PWG_REQUIREMENT: "pipewire-gobject>=0.3.9,<0.4"
 
 jobs:
   changes:

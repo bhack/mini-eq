@@ -12,8 +12,8 @@ from typing import Literal
 
 Status = Literal["ok", "missing", "warning"]
 
-PWG_REQUIRED_VERSION = "0.3.8"
-PWG_REQUIRED_VERSION_PARTS = (0, 3, 8)
+PWG_REQUIRED_VERSION = "0.3.9"
+PWG_REQUIRED_VERSION_PARTS = (0, 3, 9)
 PWG_REQUIRED_SYMBOLS = (
     "Core.set_pipewire_property",
     "Core.sync",
