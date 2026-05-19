@@ -6,13 +6,16 @@ import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from .analyzer import analyzer_db_to_display_norm
 from .appearance import style_manager_is_dark
 from .core import (
     DEFAULT_BAND_Q,
+    EQ_Q_MAX,
+    EQ_Q_MIN,
     FILTER_TYPE_INDEX_BY_VALUE,
     FILTER_TYPE_ORDER,
     FILTER_TYPES,
@@ -23,6 +26,7 @@ from .core import (
     MAX_BANDS,
     MODE_INDEX_BY_VALUE,
     SAMPLE_RATE,
+    EqBand,
     band_is_effective,
     bands_have_solo,
     clamp,
@@ -332,12 +336,12 @@ class MiniEqWindowGraphMixin:
 
     def on_graph_pressed(self, gesture: Gtk.GestureClick, _press_count: int, x: float, _y: float) -> None:
         width = self.graph_area.get_allocated_width()
-        if width <= 0:
+        height = self.graph_area.get_allocated_height()
+        if width <= 0 or height <= 0:
             return
 
-        plot_left = 58.0
-        plot_right = 52.0
-        freq = self.x_to_frequency(x, width, plot_left, plot_right)
+        width_f, height_f, left, right, top, bottom = self.graph_plot_bounds(width, height)
+        freq = self.x_to_frequency(x, width_f, left, right)
         visible_limit = self.visible_band_limit()
         visible_active = [index for index in self.active_band_indexes() if index < visible_limit]
         candidates = visible_active or list(range(visible_limit))
@@ -346,6 +350,131 @@ class MiniEqWindowGraphMixin:
             key=lambda index: abs(math.log10(max(self.controller.bands[index].frequency, 10.0)) - math.log10(freq)),
         )
         self.select_band(target)
+
+    def on_graph_drag_begin(self, gesture: Gtk.GestureDrag, start_x: float, start_y: float) -> None:
+        width = self.graph_area.get_allocated_width()
+        height = self.graph_area.get_allocated_height()
+        if width <= 0 or height <= 0:
+            return
+
+        width_f, height_f, left, right, top, bottom = self.graph_plot_bounds(width, height)
+
+        visible_limit = self.visible_band_limit()
+        active = [index for index in self.active_band_indexes() if index < visible_limit]
+        if not active:
+            active = list(range(visible_limit))
+
+        best_index = -1
+        min_dist = float("inf")
+
+        for index in active:
+            band = self.controller.bands[index]
+            bx = self.frequency_to_x(band.frequency, width_f, left, right)
+            by = self.db_to_y(
+                total_response_db(self.controller.bands, self.controller.preamp_db, SAMPLE_RATE, band.frequency),
+                height_f,
+                top,
+                bottom,
+            )
+            dist = math.sqrt((bx - start_x) ** 2 + (by - start_y) ** 2)
+            if dist < min_dist:
+                min_dist = dist
+                best_index = index
+
+        if min_dist < 32.0:
+            self.drag_band_index = best_index
+            self.drag_start_q = self.controller.bands[best_index].q
+            self.select_band(best_index)
+        else:
+            self.drag_band_index = None
+            self.drag_start_q = None
+
+    def on_graph_drag_update(self, gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
+        drag_index = getattr(self, "drag_band_index", None)
+        if drag_index is None:
+            return
+
+        width = self.graph_area.get_allocated_width()
+        height = self.graph_area.get_allocated_height()
+        if width <= 0 or height <= 0:
+            return
+
+        width_f, height_f, left, right, top, bottom = self.graph_plot_bounds(width, height)
+
+        success, start_x, start_y = gesture.get_start_point()
+        if not success:
+            return
+
+        state = gesture.get_current_event_state()
+        is_shift = (state & Gdk.ModifierType.SHIFT_MASK) != 0
+
+        bands = self.controller.bands
+        band = bands[drag_index]
+
+        changed_f = False
+        changed_g = False
+        changed_q = False
+
+        if is_shift:
+            # Shift + Vertical -> Q adjustment (isolated)
+            start_q = getattr(self, "drag_start_q", band.q)
+            new_q = clamp(start_q - (offset_y * 0.005), EQ_Q_MIN, EQ_Q_MAX)
+            changed_q = self.controller.set_band_q(drag_index, new_q, apply=False)
+        else:
+            # No shift -> Frequency and Gain adjustment
+            curr_x = start_x + offset_x
+            freq = self.x_to_frequency(curr_x, width_f, left, right)
+            changed_f = self.controller.set_band_frequency(drag_index, freq, apply=False)
+
+            # Gain adjustment (only for gain-capable filters)
+            if band.filter_type in {FILTER_TYPES["Bell"], FILTER_TYPES["Hi-shelf"], FILTER_TYPES["Lo-shelf"]}:
+                curr_y = start_y + offset_y
+                target_db = self.y_to_db(curr_y, height_f, top, bottom)
+
+                # To make the point stay under the mouse on the combined curve, we calculate
+                # the gain needed for this band by subtracting the contribution of all other bands.
+                # We preserve the full band list to maintain solo context during calculations.
+                temp_bands = [
+                    EqBand(
+                        filter_type=FILTER_TYPES["Off"] if i == drag_index else b.filter_type,
+                        frequency=b.frequency,
+                        gain_db=b.gain_db,
+                        q=b.q,
+                        mode=b.mode,
+                        slope=b.slope,
+                        mute=b.mute,
+                        solo=b.solo,
+                    )
+                    for i, b in enumerate(bands)
+                ]
+                db_others = total_response_db(temp_bands, self.controller.preamp_db, SAMPLE_RATE, freq)
+
+                # Required gain for this band at the current mouse frequency
+                new_gain = target_db - db_others
+
+                # Adjustment for shelf filters: at center frequency, a shelf provides half its gain in dB.
+                if band.filter_type in {FILTER_TYPES["Lo-shelf"], FILTER_TYPES["Hi-shelf"]}:
+                    new_gain *= 2.0
+
+                changed_g = self.controller.set_band_gain(drag_index, new_gain, apply=False)
+
+        if changed_f or changed_g or changed_q:
+            self.schedule_band_engine_update(drag_index)
+            self.selected_band_index = drag_index
+            self.updating_ui = True
+            try:
+                self.update_band_fader(drag_index)
+                self.update_focus_summary()
+                self.update_selected_band_editor()
+            finally:
+                self.updating_ui = False
+
+            self.invalidate_graph_response_cache()
+            self.queue_response_draw()
+            self.schedule_curve_metadata_refresh()
+
+    def on_graph_drag_end(self, _gesture: Gtk.GestureDrag, _offset_x: float, _offset_y: float) -> None:
+        self.drag_band_index = None
 
     def on_preamp_changed(self, scale: Gtk.Scale) -> None:
         value = scale.get_value()
@@ -572,6 +701,11 @@ class MiniEqWindowGraphMixin:
         usable = max(height - top - bottom, 1.0)
         normalized = (clamp(db_value, GRAPH_DB_MIN, GRAPH_DB_MAX) - GRAPH_DB_MIN) / (GRAPH_DB_MAX - GRAPH_DB_MIN)
         return (height - bottom) - (usable * normalized)
+
+    def y_to_db(self, y: float, height: float, top: float, bottom: float) -> float:
+        usable = max(height - top - bottom, 1.0)
+        normalized = clamp(((height - bottom) - y) / usable, 0.0, 1.0)
+        return GRAPH_DB_MIN + normalized * (GRAPH_DB_MAX - GRAPH_DB_MIN)
 
     def analyzer_display_db_to_y(self, display_db: float, height: float, top: float, bottom: float) -> float:
         usable = max(height - top - bottom, 1.0)

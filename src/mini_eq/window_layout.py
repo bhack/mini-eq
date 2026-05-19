@@ -385,6 +385,13 @@ class MiniEqWindowLayoutMixin:
         graph_click = Gtk.GestureClick()
         graph_click.connect("pressed", self.on_graph_pressed)
         self.graph_area.add_controller(graph_click)
+
+        graph_drag = Gtk.GestureDrag()
+        graph_drag.connect("drag-begin", self.on_graph_drag_begin)
+        graph_drag.connect("drag-update", self.on_graph_drag_update)
+        graph_drag.connect("drag-end", self.on_graph_drag_end)
+        self.graph_area.add_controller(graph_drag)
+
         graph_overlay.set_child(self.graph_area)
 
         self.analyzer_area = AnalyzerPlotWidget()
