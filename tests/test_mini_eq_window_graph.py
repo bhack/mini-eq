@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from tests._mini_eq_imports import import_mini_eq_module
 
 core = import_mini_eq_module("core")
@@ -92,6 +94,117 @@ class FakeScale:
 
     def get_value(self) -> float:
         return self.value
+
+
+class FakeGraphArea:
+    def __init__(self, width: int = 640, height: int = 240) -> None:
+        self.width = width
+        self.height = height
+
+    def get_allocated_width(self) -> int:
+        return self.width
+
+    def get_allocated_height(self) -> int:
+        return self.height
+
+
+class FakeGraphDragGesture:
+    def __init__(self, start_x: float, start_y: float, state=0) -> None:
+        self.start_x = start_x
+        self.start_y = start_y
+        self.state = state
+
+    def get_start_point(self) -> tuple[bool, float, float]:
+        return True, self.start_x, self.start_y
+
+    def get_current_event_state(self):
+        return self.state
+
+
+class FakeGraphController:
+    def __init__(self, bands: list[core.EqBand], preamp_db: float = 0.0) -> None:
+        self.bands = bands
+        self.preamp_db = preamp_db
+        self.frequency_updates: list[tuple[int, float]] = []
+        self.gain_updates: list[tuple[int, float]] = []
+        self.q_updates: list[tuple[int, float]] = []
+
+    def set_band_frequency(self, index: int, frequency: float, *, apply: bool = True) -> bool:
+        self.frequency_updates.append((index, frequency))
+        if self.bands[index].frequency == frequency:
+            return False
+        self.bands[index].frequency = frequency
+        return True
+
+    def set_band_gain(self, index: int, gain_db: float, *, apply: bool = True) -> bool:
+        self.gain_updates.append((index, gain_db))
+        if self.bands[index].gain_db == gain_db:
+            return False
+        self.bands[index].gain_db = gain_db
+        return True
+
+    def set_band_q(self, index: int, q_value: float, *, apply: bool = True) -> bool:
+        self.q_updates.append((index, q_value))
+        if self.bands[index].q == q_value:
+            return False
+        self.bands[index].q = q_value
+        return True
+
+
+class GraphInteractionWindow(window_graph.MiniEqWindowGraphMixin):
+    def __init__(self, bands: list[core.EqBand]) -> None:
+        self.controller = FakeGraphController(bands)
+        self.graph_area = FakeGraphArea()
+        self.visible_band_count = len(bands)
+        self.selected_band_index = None
+        self.updating_ui = False
+        self.drag_band_index = None
+        self.drag_start_q = None
+        self.engine_updates: list[int] = []
+        self.ui_updates: list[object] = []
+
+    def select_band(self, index: int) -> None:
+        self.selected_band_index = index
+
+    def schedule_band_engine_update(self, index: int) -> None:
+        self.engine_updates.append(index)
+
+    def update_band_fader(self, index: int, solo_active: bool | None = None) -> None:
+        self.ui_updates.append(("fader", index))
+
+    def update_focus_summary(self) -> None:
+        self.ui_updates.append("focus")
+
+    def update_selected_band_editor(self) -> None:
+        self.ui_updates.append("editor")
+
+    def invalidate_graph_response_cache(self) -> None:
+        self.ui_updates.append("invalidate")
+
+    def queue_response_draw(self) -> None:
+        self.ui_updates.append("draw")
+
+    def schedule_curve_metadata_refresh(self) -> None:
+        self.ui_updates.append("metadata")
+
+    def band_point(self, index: int) -> tuple[float, float]:
+        width = self.graph_area.get_allocated_width()
+        height = self.graph_area.get_allocated_height()
+        width_f, height_f, left, right, top, bottom = self.graph_plot_bounds(width, height)
+        band = self.controller.bands[index]
+        x = self.frequency_to_x(band.frequency, width_f, left, right)
+        y = self.db_to_y(
+            window_graph.total_response_db(
+                self.controller.bands,
+                self.controller.preamp_db,
+                core.SAMPLE_RATE,
+                band.frequency,
+            ),
+            height_f,
+            top,
+            bottom,
+        )
+        return x, y
 
 
 class FocusSummaryWindow(window_graph.MiniEqWindowGraphMixin):
@@ -306,3 +419,87 @@ def test_curve_metadata_refresh_idle_notifies_control_clients() -> None:
     assert keep_source is False
     assert test_window.curve_metadata_refresh_source_id == 0
     assert calls == ["status", "preset-state", "control-state"]
+
+
+def test_graph_press_uses_shared_plot_bounds_for_frequency_mapping() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Bell"], 100.0),
+            core.EqBand(core.FILTER_TYPES["Bell"], 1000.0),
+        ]
+    )
+    calls: list[tuple[float, float, float, float]] = []
+
+    def graph_plot_bounds(width: int, height: int) -> tuple[float, float, float, float, float, float]:
+        assert (width, height) == (640, 240)
+        return 640.0, 240.0, 11.0, 77.0, 13.0, 17.0
+
+    def x_to_frequency(x: float, width: float, left: float, right: float) -> float:
+        calls.append((x, width, left, right))
+        return 1000.0
+
+    window.graph_plot_bounds = graph_plot_bounds
+    window.x_to_frequency = x_to_frequency
+
+    window.on_graph_pressed(None, 1, 240.0, 120.0)
+
+    assert calls == [(240.0, 640.0, 11.0, 77.0)]
+    assert window.selected_band_index == 1
+
+
+def test_graph_drag_preserves_solo_context_when_calculating_other_response() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=6.0, solo=True),
+            core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=6.0),
+        ]
+    )
+    start_x, start_y = window.band_point(0)
+    window.drag_band_index = 0
+    window.drag_start_q = window.controller.bands[0].q
+
+    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 0.0, 0.0)
+
+    assert window.controller.gain_updates
+    assert window.controller.bands[0].gain_db == pytest.approx(6.0)
+
+
+def test_graph_drag_does_not_change_gain_for_non_gain_filters() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Hi-pass"], 1000.0, gain_db=3.0),
+        ]
+    )
+    start_x, start_y = window.band_point(0)
+    window.drag_band_index = 0
+    window.drag_start_q = window.controller.bands[0].q
+
+    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 40.0, 80.0)
+
+    assert window.controller.frequency_updates
+    assert window.controller.gain_updates == []
+    assert window.controller.bands[0].gain_db == 3.0
+
+
+def test_graph_shift_drag_changes_q_without_changing_frequency_or_gain() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=3.0, q=1.0),
+        ]
+    )
+    start_x, start_y = window.band_point(0)
+    window.drag_band_index = 0
+    window.drag_start_q = 1.0
+
+    window.on_graph_drag_update(
+        FakeGraphDragGesture(start_x, start_y, window_graph.Gdk.ModifierType.SHIFT_MASK),
+        90.0,
+        -100.0,
+    )
+
+    assert window.controller.frequency_updates == []
+    assert window.controller.gain_updates == []
+    assert window.controller.q_updates == [(0, pytest.approx(1.5))]
+    assert window.controller.bands[0].frequency == 1000.0
+    assert window.controller.bands[0].gain_db == 3.0
+    assert window.controller.bands[0].q == pytest.approx(1.5)
