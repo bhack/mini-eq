@@ -45,6 +45,8 @@ GRAPH_PLOT_RIGHT = 62.0
 GRAPH_PLOT_TOP = 26.0
 GRAPH_PLOT_BOTTOM = 34.0
 SELECTED_BAND_PLACEHOLDER_FREQUENCY_HZ = 1000.0
+GRAPH_DRAG_EDIT_THRESHOLD_FALLBACK_PX = 6.0
+GRAPH_POINT_HIT_RADIUS_PX = 32.0
 
 
 def rounded_rectangle_path(cr, x: float, y: float, width: float, height: float, radius: float) -> None:
@@ -352,6 +354,7 @@ class MiniEqWindowGraphMixin:
         self.select_band(target)
 
     def on_graph_drag_begin(self, gesture: Gtk.GestureDrag, start_x: float, start_y: float) -> None:
+        self.clear_graph_drag_state()
         width = self.graph_area.get_allocated_width()
         height = self.graph_area.get_allocated_height()
         if width <= 0 or height <= 0:
@@ -366,6 +369,8 @@ class MiniEqWindowGraphMixin:
 
         best_index = -1
         min_dist = float("inf")
+        best_point_x = 0.0
+        best_point_y = 0.0
 
         for index in active:
             band = self.controller.bands[index]
@@ -380,18 +385,37 @@ class MiniEqWindowGraphMixin:
             if dist < min_dist:
                 min_dist = dist
                 best_index = index
+                best_point_x = bx
+                best_point_y = by
 
-        if min_dist < 32.0:
+        if min_dist < GRAPH_POINT_HIT_RADIUS_PX:
             self.drag_band_index = best_index
             self.drag_start_q = self.controller.bands[best_index].q
+            self.drag_start_point_x = best_point_x
+            self.drag_start_point_y = best_point_y
             self.select_band(best_index)
-        else:
-            self.drag_band_index = None
-            self.drag_start_q = None
+
+    def clear_graph_drag_state(self) -> None:
+        self.drag_band_index = None
+        self.drag_start_q = None
+        self.drag_start_point_x = None
+        self.drag_start_point_y = None
+
+    def graph_drag_edit_threshold(self) -> float:
+        settings = Gtk.Settings.get_default()
+        if settings is not None:
+            try:
+                return max(1.0, float(settings.get_property("gtk-dnd-drag-threshold")))
+            except Exception:
+                pass
+
+        return GRAPH_DRAG_EDIT_THRESHOLD_FALLBACK_PX
 
     def on_graph_drag_update(self, gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
         drag_index = getattr(self, "drag_band_index", None)
         if drag_index is None:
+            return
+        if math.hypot(offset_x, offset_y) < self.graph_drag_edit_threshold():
             return
 
         width = self.graph_area.get_allocated_width()
@@ -422,13 +446,15 @@ class MiniEqWindowGraphMixin:
             changed_q = self.controller.set_band_q(drag_index, new_q, apply=False)
         else:
             # No shift -> Frequency and Gain adjustment
-            curr_x = start_x + offset_x
+            drag_start_point_x = getattr(self, "drag_start_point_x", None)
+            curr_x = (drag_start_point_x if drag_start_point_x is not None else start_x) + offset_x
             freq = self.x_to_frequency(curr_x, width_f, left, right)
             changed_f = self.controller.set_band_frequency(drag_index, freq, apply=False)
 
             # Gain adjustment (only for gain-capable filters)
             if band.filter_type in {FILTER_TYPES["Bell"], FILTER_TYPES["Hi-shelf"], FILTER_TYPES["Lo-shelf"]}:
-                curr_y = start_y + offset_y
+                drag_start_point_y = getattr(self, "drag_start_point_y", None)
+                curr_y = (drag_start_point_y if drag_start_point_y is not None else start_y) + offset_y
                 target_db = self.y_to_db(curr_y, height_f, top, bottom)
 
                 # To make the point stay under the mouse on the combined curve, we calculate
@@ -474,7 +500,7 @@ class MiniEqWindowGraphMixin:
             self.schedule_curve_metadata_refresh()
 
     def on_graph_drag_end(self, _gesture: Gtk.GestureDrag, _offset_x: float, _offset_y: float) -> None:
-        self.drag_band_index = None
+        self.clear_graph_drag_state()
 
     def on_preamp_changed(self, scale: Gtk.Scale) -> None:
         value = scale.get_value()

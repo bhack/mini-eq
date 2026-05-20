@@ -160,6 +160,8 @@ class GraphInteractionWindow(window_graph.MiniEqWindowGraphMixin):
         self.updating_ui = False
         self.drag_band_index = None
         self.drag_start_q = None
+        self.drag_start_point_x = None
+        self.drag_start_point_y = None
         self.engine_updates: list[int] = []
         self.ui_updates: list[object] = []
 
@@ -447,6 +449,66 @@ def test_graph_press_uses_shared_plot_bounds_for_frequency_mapping() -> None:
     assert window.selected_band_index == 1
 
 
+def test_graph_zero_offset_drag_selects_without_modifying_band() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=3.0),
+        ]
+    )
+    start_x, start_y = window.band_point(0)
+
+    window.on_graph_drag_begin(FakeGraphDragGesture(start_x, start_y), start_x, start_y)
+    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 0.0, 0.0)
+
+    assert window.selected_band_index == 0
+    assert window.controller.frequency_updates == []
+    assert window.controller.gain_updates == []
+    assert window.controller.q_updates == []
+    assert window.engine_updates == []
+    assert window.ui_updates == []
+
+
+def test_graph_drag_waits_for_edit_threshold_before_modifying_band() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=3.0),
+        ]
+    )
+    window.graph_drag_edit_threshold = lambda: 8.0
+    start_x, start_y = window.band_point(0)
+
+    window.on_graph_drag_begin(FakeGraphDragGesture(start_x, start_y), start_x, start_y)
+    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 4.0, 3.0)
+
+    assert window.controller.frequency_updates == []
+    assert window.controller.gain_updates == []
+    assert window.engine_updates == []
+
+
+def test_graph_drag_uses_band_point_as_anchor_to_avoid_click_jump() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Hi-pass"], 1000.0, gain_db=3.0),
+        ]
+    )
+    window.graph_drag_edit_threshold = lambda: 4.0
+    point_x, point_y = window.band_point(0)
+    captured_x: list[float] = []
+
+    def x_to_frequency(x: float, _width: float, _left: float, _right: float) -> float:
+        captured_x.append(x)
+        return 1200.0
+
+    window.x_to_frequency = x_to_frequency
+
+    window.on_graph_drag_begin(FakeGraphDragGesture(point_x + 20.0, point_y), point_x + 20.0, point_y)
+    window.on_graph_drag_update(FakeGraphDragGesture(point_x + 20.0, point_y), 10.0, 0.0)
+
+    assert captured_x == [pytest.approx(point_x + 10.0)]
+    assert window.controller.frequency_updates == [(0, 1200.0)]
+    assert window.controller.gain_updates == []
+
+
 def test_graph_drag_preserves_solo_context_when_calculating_other_response() -> None:
     window = GraphInteractionWindow(
         [
@@ -454,11 +516,12 @@ def test_graph_drag_preserves_solo_context_when_calculating_other_response() -> 
             core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=6.0),
         ]
     )
+    window.graph_drag_edit_threshold = lambda: 4.0
     start_x, start_y = window.band_point(0)
     window.drag_band_index = 0
     window.drag_start_q = window.controller.bands[0].q
 
-    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 0.0, 0.0)
+    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 12.0, 0.0)
 
     assert window.controller.gain_updates
     assert window.controller.bands[0].gain_db == pytest.approx(6.0)
