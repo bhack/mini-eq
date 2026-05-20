@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.3 - 2026-05-20
+
+- Recover EQ controls after PipeWire filter-chain resets.
+- Strengthen runtime checks for signal processing and recovery paths.
+- Update pipewire-gobject to 0.3.9.
+- Tune graph and fader drag activation to avoid accidental edits without
+  resisting movement.
+
 ## 0.8.2 - 2026-05-16
 
 - Fixed routed audio recovery after PipeWire or WirePlumber relinks playback

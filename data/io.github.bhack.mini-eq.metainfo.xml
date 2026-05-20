@@ -33,11 +33,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.2/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.3/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.2/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.3/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -45,6 +45,16 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.8.3" date="2026-05-20">
+      <description>
+        <ul>
+          <li>Recover EQ controls after PipeWire filter-chain resets.</li>
+          <li>Strengthen runtime checks for signal processing and recovery paths.</li>
+          <li>Update pipewire-gobject to 0.3.9.</li>
+          <li>Tune graph and fader drag activation to avoid accidental edits without resisting movement.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.2" date="2026-05-16">
       <description>
         <ul>
