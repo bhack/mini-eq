@@ -7,6 +7,19 @@ from tests._mini_eq_imports import import_mini_eq_module
 band_fader = import_mini_eq_module("band_fader")
 
 
+class FakeDragGesture:
+    def __init__(self, start_x: float = 12.0, start_y: float = 80.0, state=0) -> None:
+        self.start_x = start_x
+        self.start_y = start_y
+        self.state = state
+
+    def get_start_point(self) -> tuple[bool, float, float]:
+        return True, self.start_x, self.start_y
+
+    def get_current_event_state(self):
+        return self.state
+
+
 def make_fader(gain_db: float = 0.0):
     selected: list[int] = []
     gains: list[tuple[int, float]] = []
@@ -18,6 +31,10 @@ def make_fader(gain_db: float = 0.0):
     fader.activate_callback = activated.append
     fader.gain_db = gain_db
     fader.grab_focus = lambda: None
+    fader.queue_draw = lambda: None
+    fader.get_allocated_height = lambda: 220
+    fader.dragging_gain = False
+    fader.drag_start_gain_db = gain_db
     return fader, selected, gains, activated
 
 
@@ -82,3 +99,27 @@ def test_band_fader_scroll_uses_modifier_steps() -> None:
     assert gains[-1] == (2, 0.0)
 
     assert fader.on_scroll(controller, 0.0, 0.0) is False
+
+
+def test_band_fader_drag_uses_precision_threshold_before_gain_change() -> None:
+    fader, selected, gains, _activated = make_fader(gain_db=0.0)
+    gesture = FakeDragGesture()
+
+    fader.on_drag_begin(gesture, 12.0, 80.0)
+    fader.on_drag_update(gesture, 1.0, 1.0)
+
+    assert selected == [2]
+    assert fader.dragging_gain is False
+    assert gains == []
+
+
+def test_band_fader_drag_threshold_only_gates_activation() -> None:
+    fader, _selected, gains, _activated = make_fader(gain_db=0.0)
+    gesture = FakeDragGesture()
+
+    fader.on_drag_begin(gesture, 12.0, 80.0)
+    fader.on_drag_update(gesture, 2.0, 10.0)
+    fader.on_drag_update(gesture, 1.0, 1.0)
+
+    assert fader.dragging_gain is True
+    assert gains == [(2, -3.3), (2, -0.3)]

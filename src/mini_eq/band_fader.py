@@ -18,7 +18,7 @@ from .core import (
     clamp,
 )
 
-DRAG_THRESHOLD_PX = 3.0
+FADER_DRAG_START_THRESHOLD_PX = 2.0
 GAIN_MIN_DB = EQ_GAIN_MIN_DB
 GAIN_MAX_DB = EQ_GAIN_MAX_DB
 GAIN_RANGE_DB = GAIN_MAX_DB - GAIN_MIN_DB
@@ -539,6 +539,13 @@ class EqBandFader(Gtk.DrawingArea):
         if gain != self.gain_db:
             self.gain_changed_callback(self.index, gain)
 
+    def drag_threshold_passed(
+        self,
+        offset_x: float,
+        offset_y: float,
+    ) -> bool:
+        return math.hypot(offset_x, offset_y) >= FADER_DRAG_START_THRESHOLD_PX
+
     def on_drag_begin(self, _gesture: Gtk.GestureDrag, _x: float, _y: float) -> None:
         self.grab_focus()
         self.drag_start_gain_db = self.gain_db
@@ -548,7 +555,8 @@ class EqBandFader(Gtk.DrawingArea):
 
     def on_drag_update(self, gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
         if not self.dragging_gain:
-            if math.hypot(offset_x, offset_y) < DRAG_THRESHOLD_PX:
+            success, _start_x, _start_y = gesture.get_start_point()
+            if not success or not self.drag_threshold_passed(offset_x, offset_y):
                 return
             self.dragging_gain = True
 

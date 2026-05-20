@@ -162,6 +162,7 @@ class GraphInteractionWindow(window_graph.MiniEqWindowGraphMixin):
         self.drag_start_q = None
         self.drag_start_point_x = None
         self.drag_start_point_y = None
+        self.drag_edit_active = False
         self.engine_updates: list[int] = []
         self.ui_updates: list[object] = []
 
@@ -468,21 +469,38 @@ def test_graph_zero_offset_drag_selects_without_modifying_band() -> None:
     assert window.ui_updates == []
 
 
-def test_graph_drag_waits_for_edit_threshold_before_modifying_band() -> None:
+def test_graph_drag_uses_precision_threshold_before_modifying_band() -> None:
     window = GraphInteractionWindow(
         [
             core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=3.0),
         ]
     )
-    window.graph_drag_edit_threshold = lambda: 8.0
     start_x, start_y = window.band_point(0)
 
     window.on_graph_drag_begin(FakeGraphDragGesture(start_x, start_y), start_x, start_y)
-    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 4.0, 3.0)
+    window.on_graph_drag_update(FakeGraphDragGesture(start_x, start_y), 1.0, 1.0)
 
+    assert window.drag_edit_active is False
     assert window.controller.frequency_updates == []
     assert window.controller.gain_updates == []
     assert window.engine_updates == []
+
+
+def test_graph_drag_threshold_only_gates_activation() -> None:
+    window = GraphInteractionWindow(
+        [
+            core.EqBand(core.FILTER_TYPES["Hi-pass"], 1000.0, gain_db=3.0),
+        ]
+    )
+    point_x, point_y = window.band_point(0)
+
+    window.on_graph_drag_begin(FakeGraphDragGesture(point_x, point_y), point_x, point_y)
+    window.on_graph_drag_update(FakeGraphDragGesture(point_x, point_y), 2.0, 0.0)
+    window.on_graph_drag_update(FakeGraphDragGesture(point_x, point_y), 1.0, 0.0)
+
+    assert window.drag_edit_active is True
+    assert len(window.controller.frequency_updates) == 2
+    assert window.controller.gain_updates == []
 
 
 def test_graph_drag_uses_band_point_as_anchor_to_avoid_click_jump() -> None:
@@ -491,7 +509,6 @@ def test_graph_drag_uses_band_point_as_anchor_to_avoid_click_jump() -> None:
             core.EqBand(core.FILTER_TYPES["Hi-pass"], 1000.0, gain_db=3.0),
         ]
     )
-    window.graph_drag_edit_threshold = lambda: 4.0
     point_x, point_y = window.band_point(0)
     captured_x: list[float] = []
 
@@ -516,7 +533,6 @@ def test_graph_drag_preserves_solo_context_when_calculating_other_response() -> 
             core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, gain_db=6.0),
         ]
     )
-    window.graph_drag_edit_threshold = lambda: 4.0
     start_x, start_y = window.band_point(0)
     window.drag_band_index = 0
     window.drag_start_q = window.controller.bands[0].q

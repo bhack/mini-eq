@@ -45,7 +45,7 @@ GRAPH_PLOT_RIGHT = 62.0
 GRAPH_PLOT_TOP = 26.0
 GRAPH_PLOT_BOTTOM = 34.0
 SELECTED_BAND_PLACEHOLDER_FREQUENCY_HZ = 1000.0
-GRAPH_DRAG_EDIT_THRESHOLD_PX = 3.0
+GRAPH_DRAG_START_THRESHOLD_PX = 2.0
 GRAPH_POINT_HIT_RADIUS_PX = 32.0
 
 
@@ -400,15 +400,18 @@ class MiniEqWindowGraphMixin:
         self.drag_start_q = None
         self.drag_start_point_x = None
         self.drag_start_point_y = None
+        self.drag_edit_active = False
 
-    def graph_drag_edit_threshold(self) -> float:
-        return GRAPH_DRAG_EDIT_THRESHOLD_PX
+    def graph_drag_threshold_passed(
+        self,
+        offset_x: float,
+        offset_y: float,
+    ) -> bool:
+        return math.hypot(offset_x, offset_y) >= GRAPH_DRAG_START_THRESHOLD_PX
 
     def on_graph_drag_update(self, gesture: Gtk.GestureDrag, offset_x: float, offset_y: float) -> None:
         drag_index = getattr(self, "drag_band_index", None)
         if drag_index is None:
-            return
-        if math.hypot(offset_x, offset_y) < self.graph_drag_edit_threshold():
             return
 
         width = self.graph_area.get_allocated_width()
@@ -421,6 +424,10 @@ class MiniEqWindowGraphMixin:
         success, start_x, start_y = gesture.get_start_point()
         if not success:
             return
+        if not getattr(self, "drag_edit_active", False):
+            if not self.graph_drag_threshold_passed(offset_x, offset_y):
+                return
+            self.drag_edit_active = True
 
         state = gesture.get_current_event_state()
         is_shift = (state & Gdk.ModifierType.SHIFT_MASK) != 0
