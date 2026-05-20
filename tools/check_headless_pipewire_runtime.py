@@ -222,6 +222,12 @@ def pw_record_supports_raw(help_text: str | None = None) -> bool:
     return "--raw" in (help_text if help_text is not None else pw_record_help())
 
 
+def pw_record_capture_features(help_text: str) -> tuple[bool, bool]:
+    include_sample_count = pw_record_supports_sample_count(help_text)
+    raw_output = include_sample_count and pw_record_supports_raw(help_text)
+    return include_sample_count, raw_output
+
+
 def build_pw_record_capture_command(
     path: Path,
     *,
@@ -259,6 +265,33 @@ def build_pw_record_capture_command(
     return command
 
 
+def decode_process_output(payload: bytes | None) -> str:
+    if not payload:
+        return ""
+    return payload.decode("utf-8", errors="replace").strip()
+
+
+def signal_capture_output_text(
+    stdout: bytes | None,
+    stderr: bytes | None,
+    *,
+    raw_stdout: bool,
+) -> str:
+    parts: list[str] = []
+    if not raw_stdout:
+        parts.append(decode_process_output(stdout))
+    parts.append(decode_process_output(stderr))
+    return "\n".join(part for part in parts if part)
+
+
+def materialize_raw_stdout_capture(capture_path: Path, stdout: bytes | None) -> None:
+    if not stdout:
+        return
+    if capture_path.exists() and capture_path.stat().st_size > 0:
+        return
+    capture_path.write_bytes(stdout)
+
+
 def capture_sink_monitor_rms(
     sink_name: str,
     path: Path,
@@ -271,8 +304,7 @@ def capture_sink_monitor_rms(
     sample_width_bytes = 2
     expected_capture_bytes = sample_count * channels * sample_width_bytes
     help_text = pw_record_help()
-    include_sample_count = pw_record_supports_sample_count(help_text)
-    raw_output = pw_record_supports_raw(help_text)
+    include_sample_count, raw_output = pw_record_capture_features(help_text)
     capture_path = path if raw_output else path.with_suffix(".wav")
     capture_path.unlink(missing_ok=True)
     command = build_pw_record_capture_command(
@@ -282,12 +314,15 @@ def capture_sink_monitor_rms(
         raw_output=raw_output,
     )
     print(f"$ {format_command(command)}", flush=True)
-    recorder = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    recorder = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
 
         def capture_node() -> Any:
             if recorder.poll() is not None:
-                output = recorder.stdout.read().strip() if recorder.stdout is not None else ""
+                stdout, stderr = recorder.communicate()
+                if raw_output:
+                    materialize_raw_stdout_capture(capture_path, stdout)
+                output = signal_capture_output_text(stdout, stderr, raw_stdout=raw_output)
                 detail = f": {output}" if output else ""
                 raise RuntimeError(f"signal capture exited before stream appeared{detail}")
             return live.node_by_name(CAPTURE_NODE_NAME)
@@ -302,18 +337,32 @@ def capture_sink_monitor_rms(
 
         if include_sample_count:
             try:
-                output, _stderr = recorder.communicate(timeout=timeout_seconds)
+                stdout, stderr = recorder.communicate(timeout=timeout_seconds)
             except subprocess.TimeoutExpired as exc:
                 recorder.kill()
-                output, _stderr = recorder.communicate(timeout=2.0)
+                stdout, stderr = recorder.communicate(timeout=2.0)
+                if raw_output:
+                    materialize_raw_stdout_capture(capture_path, stdout)
+                output = signal_capture_output_text(stdout, stderr, raw_stdout=raw_output)
                 raise RuntimeError(f"timed out waiting for signal capture to finish: {output.strip()}") from exc
+            if raw_output:
+                materialize_raw_stdout_capture(capture_path, stdout)
+            output = signal_capture_output_text(stdout, stderr, raw_stdout=raw_output)
         else:
             dispatch_until(
                 "Mini EQ signal capture data",
                 lambda: capture_path.exists() and capture_path.stat().st_size >= expected_capture_bytes,
                 timeout_seconds,
             )
-            output = live.terminate_process(recorder, "pw-record signal capture")
+            recorder.terminate()
+            try:
+                stdout, stderr = recorder.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                recorder.kill()
+                stdout, stderr = recorder.communicate(timeout=5.0)
+            if raw_output:
+                materialize_raw_stdout_capture(capture_path, stdout)
+            output = signal_capture_output_text(stdout, stderr, raw_stdout=raw_output)
 
         if output:
             print(f"Mini EQ signal capture output:\n{output.rstrip()}", flush=True)
@@ -330,7 +379,12 @@ def capture_sink_monitor_rms(
         return wav_s16le_rms(capture_path, skip_frames=sample_count // 4, channels=channels)
     finally:
         if recorder.poll() is None:
-            live.terminate_process(recorder, "pw-record signal capture")
+            recorder.terminate()
+            try:
+                recorder.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                recorder.kill()
+                recorder.communicate(timeout=5.0)
 
 
 def assert_signal_is_attenuated(label: str, *, baseline_rms: float, measured_rms: float) -> None:

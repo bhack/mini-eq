@@ -112,6 +112,16 @@ def test_raw_s16le_rms_skips_initial_frames(tmp_path) -> None:
     assert headless.raw_s16le_rms(raw_path, skip_frames=4, channels=2) == pytest.approx(1000 / 32768.0)
 
 
+def test_raw_stdout_capture_is_binary_safe(tmp_path) -> None:
+    capture_path = tmp_path / "capture.raw"
+    payload = b"\xff\x7f\x00\x80"
+
+    headless.materialize_raw_stdout_capture(capture_path, payload)
+
+    assert capture_path.read_bytes() == payload
+    assert headless.signal_capture_output_text(payload, b"status ok\n", raw_stdout=True) == "status ok"
+
+
 def test_wav_s16le_rms_skips_initial_frames(tmp_path) -> None:
     samples = array.array("h", [0, 0] * 4 + [1000, -1000] * 4)
     if sys.byteorder != "little":
@@ -136,6 +146,11 @@ def test_pw_record_sample_count_support_detection(monkeypatch) -> None:
     monkeypatch.setattr(headless.subprocess, "run", fake_run)
 
     assert headless.pw_record_supports_sample_count() is True
+
+
+def test_pw_record_capture_uses_raw_only_with_sample_count() -> None:
+    assert headless.pw_record_capture_features("usage\n--raw\n--sample-count COUNT\n") == (True, True)
+    assert headless.pw_record_capture_features("usage\n--raw\n") == (False, False)
 
 
 def test_pw_record_capture_command_omits_sample_count_for_old_pipewire() -> None:
