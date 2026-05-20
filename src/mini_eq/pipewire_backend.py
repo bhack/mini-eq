@@ -19,6 +19,7 @@ PIPEWIRE_LINK_INTERFACE = "PipeWire:Interface:Link"
 STREAM_OUTPUT_AUDIO = "Stream/Output/Audio"
 AUDIO_SINK = "Audio/Sink"
 LINK_STATE_ACTIVE = "active"
+NODE_PROPS_PARAM_NAME = "Props"
 FILTER_CHAIN_MODULE_NAME = "libpipewire-module-filter-chain"
 PIPEWIRE_APPLICATION_NAME_KEY = "application.name"
 PIPEWIRE_MEDIA_CATEGORY_KEY = "media.category"
@@ -165,8 +166,12 @@ class PipeWireBackend(PipeWireRouteMixin):
         self._metadata: Any = None
         self._metadata_signal_objects: dict[int, Any] = {}
         self._node_signal_objects: dict[int, Any] = {}
+        self._node_state_signal_objects: dict[int, Any] = {}
+        self._node_param_signal_objects: dict[int, Any] = {}
         self._link_signal_objects: dict[int, Any] = {}
         self._device_signal_objects: dict[int, Any] = {}
+        self._node_state_related_signal_handler_ids: dict[int, list[int]] = {}
+        self._node_param_related_signal_handler_ids: dict[int, list[int]] = {}
         self._device_related_signal_handler_ids: dict[int, list[int]] = {}
         self._node_proxies: dict[int, Any] = {}
         self._link_proxies: dict[int, Any] = {}
@@ -222,6 +227,12 @@ class PipeWireBackend(PipeWireRouteMixin):
             except Exception:
                 pass
         self._node_signal_objects.clear()
+
+        for handler_id in list(self._node_state_signal_objects):
+            self.disconnect_node_state_handler(handler_id)
+
+        for handler_id in list(self._node_param_signal_objects):
+            self.disconnect_node_param_handler(handler_id)
 
         for handler_id, obj in list(self._link_signal_objects.items()):
             try:
@@ -502,6 +513,128 @@ class PipeWireBackend(PipeWireRouteMixin):
         except Exception:
             pass
 
+    def connect_node_state_changed(
+        self,
+        node_bound_id: int,
+        callback: Callable[[str | None, str | None], None],
+    ) -> int:
+        self._ensure_connected()
+
+        if not self._has_node_state_api():
+            return 0
+
+        node = self._node_proxy_by_bound_id(node_bound_id)
+        if node is None:
+            return 0
+
+        def current_state(changed_node) -> tuple[str | None, str | None]:
+            return changed_node.get_state(), changed_node.dup_error()
+
+        def on_state_changed(changed_node, _pspec) -> None:
+            callback(*current_state(changed_node))
+
+        handler_id = self._GObject.Object.connect(node, "notify::state", on_state_changed)
+        related_handler_ids = [
+            self._GObject.Object.connect(node, "notify::error", on_state_changed),
+        ]
+        self._node_state_signal_objects[handler_id] = node
+        self._node_state_related_signal_handler_ids[handler_id] = related_handler_ids
+        callback(*current_state(node))
+        return handler_id
+
+    def disconnect_node_state_handler(self, handler_id: int) -> None:
+        if handler_id <= 0:
+            return
+
+        node = self._node_state_signal_objects.pop(handler_id, None)
+        related_handler_ids = self._node_state_related_signal_handler_ids.pop(handler_id, [])
+        if node is None:
+            return
+
+        for related_handler_id in related_handler_ids:
+            try:
+                node.disconnect(related_handler_id)
+            except Exception:
+                pass
+
+        try:
+            node.disconnect(handler_id)
+        except Exception:
+            pass
+
+    def connect_node_param_changed(
+        self,
+        node_bound_id: int,
+        param_name: str,
+        callback: Callable[[], None],
+    ) -> int:
+        self._ensure_connected()
+
+        if not self._has_node_param_subscription_api():
+            return 0
+
+        node = self._node_proxy_by_bound_id(node_bound_id)
+        if node is None:
+            return 0
+
+        param_id = self._node_param_id_by_name(node, param_name)
+        if param_id is None:
+            self._sync_proxy(node, "node")
+            param_id = self._node_param_id_by_name(node, param_name)
+        if param_id is None:
+            return 0
+
+        def on_node_param(_node, param) -> None:
+            try:
+                changed_param_id = int(param.get_id())
+            except Exception:
+                return
+
+            if changed_param_id == param_id:
+                callback()
+
+        def on_node_param_infos_changed(_node, _pspec) -> None:
+            callback()
+
+        handler_id = self._GObject.Object.connect(node, "param", on_node_param)
+        related_handler_ids = [self._GObject.Object.connect(node, "notify::param-infos", on_node_param_infos_changed)]
+        self._node_param_signal_objects[handler_id] = node
+        self._node_param_related_signal_handler_ids[handler_id] = related_handler_ids
+
+        try:
+            node.subscribe_params(self._GLib.Variant("au", [param_id]))
+        except Exception:
+            self.disconnect_node_param_handler(handler_id)
+            return 0
+
+        return handler_id
+
+    def disconnect_node_param_handler(self, handler_id: int) -> None:
+        if handler_id <= 0:
+            return
+
+        node = self._node_param_signal_objects.pop(handler_id, None)
+        related_handler_ids = self._node_param_related_signal_handler_ids.pop(handler_id, [])
+        if node is None:
+            return
+
+        try:
+            if self._GLib is not None and hasattr(node, "subscribe_params"):
+                node.subscribe_params(self._GLib.Variant("au", []))
+        except Exception:
+            pass
+
+        for related_handler_id in related_handler_ids:
+            try:
+                node.disconnect(related_handler_id)
+            except Exception:
+                pass
+
+        try:
+            node.disconnect(handler_id)
+        except Exception:
+            pass
+
     def connect_metadata_changed(self, callback) -> int:
         metadata = self._default_metadata()
         handler_id = self._GObject.Object.connect(metadata, "changed", callback)
@@ -773,6 +906,54 @@ class PipeWireBackend(PipeWireRouteMixin):
         param = build_props_controls_param(self._Pwg, self._GLib, controls)
         if not node.set_param(param):
             raise PipeWireBackendError(f"failed to set node params: {node_bound_id}")
+
+    def node_state(self, node_bound_id: int) -> tuple[str | None, str | None] | None:
+        self._ensure_connected()
+
+        if not self._has_node_state_api():
+            return None
+
+        node = self._node_proxy_by_bound_id(node_bound_id)
+        if node is None:
+            return None
+
+        return node.get_state(), node.dup_error()
+
+    def _has_node_state_api(self) -> bool:
+        return (
+            self._Pwg is not None
+            and hasattr(self._Pwg, "Node")
+            and hasattr(self._Pwg.Node, "get_state")
+            and hasattr(self._Pwg.Node, "dup_error")
+        )
+
+    def _has_node_param_subscription_api(self) -> bool:
+        return (
+            self._Pwg is not None
+            and hasattr(self._Pwg, "Node")
+            and hasattr(self._Pwg.Node, "enum_params_sync")
+            and hasattr(self._Pwg.Node, "new")
+            and hasattr(self._Pwg.Node, "subscribe_params")
+            and hasattr(self._Pwg.Node, "sync")
+        )
+
+    def _node_param_id_by_name(self, node, name: str) -> int | None:
+        try:
+            param_infos = node.get_param_infos()
+        except Exception:
+            return None
+
+        for param_info in self._iterate_model(param_infos):
+            try:
+                param_name = param_info.dup_name()
+                param_id = int(param_info.get_id())
+            except Exception:
+                continue
+
+            if param_name == name:
+                return param_id
+
+        return None
 
     def load_filter_chain_module(self, arguments: str):
         self._ensure_connected()

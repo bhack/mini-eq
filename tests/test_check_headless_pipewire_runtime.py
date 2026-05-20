@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import array
+import subprocess
+import sys
+import wave
+from pathlib import Path
+
+import pytest
+
 from tools import check_headless_pipewire_runtime as headless
 
 
@@ -91,6 +99,71 @@ def test_headless_runtime_rejects_stale_virtual_route(monkeypatch) -> None:
     monkeypatch.setattr(headless.live, "metadata_targets", lambda: {42: ("old-serial", "Spa:Id")})
 
     assert headless.route_to_current_virtual(42, "mini_eq_sink") is None
+
+
+def test_raw_s16le_rms_skips_initial_frames(tmp_path) -> None:
+    samples = array.array("h", [0, 0] * 4 + [1000, -1000] * 4)
+    if sys.byteorder != "little":
+        samples.byteswap()
+
+    raw_path = tmp_path / "capture.raw"
+    raw_path.write_bytes(samples.tobytes())
+
+    assert headless.raw_s16le_rms(raw_path, skip_frames=4, channels=2) == pytest.approx(1000 / 32768.0)
+
+
+def test_wav_s16le_rms_skips_initial_frames(tmp_path) -> None:
+    samples = array.array("h", [0, 0] * 4 + [1000, -1000] * 4)
+    if sys.byteorder != "little":
+        samples.byteswap()
+
+    wav_path = tmp_path / "capture.wav"
+    with wave.open(str(wav_path), "wb") as wav_file:
+        wav_file.setnchannels(2)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(48_000)
+        wav_file.writeframes(samples.tobytes())
+
+    assert headless.wav_s16le_rms(wav_path, skip_frames=4, channels=2) == pytest.approx(1000 / 32768.0)
+
+
+def test_pw_record_sample_count_support_detection(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        assert command == ["pw-record", "--help"]
+        assert kwargs["check"] is False
+        return subprocess.CompletedProcess(command, 0, stdout="usage\n  --sample-count 24000\n")
+
+    monkeypatch.setattr(headless.subprocess, "run", fake_run)
+
+    assert headless.pw_record_supports_sample_count() is True
+
+
+def test_pw_record_capture_command_omits_sample_count_for_old_pipewire() -> None:
+    command = headless.build_pw_record_capture_command(
+        Path("/tmp/capture.raw"),
+        sample_count=24000,
+        include_sample_count=False,
+        raw_output=False,
+    )
+
+    assert "--sample-count" not in command
+    assert "--raw" not in command
+    assert command[-1:] == ["/tmp/capture.raw"]
+
+
+def test_signal_processing_check_rejects_unattenuated_resume() -> None:
+    headless.assert_signal_is_attenuated(
+        "attenuated",
+        baseline_rms=0.10,
+        measured_rms=0.012,
+    )
+
+    with pytest.raises(RuntimeError, match="signal processing check failed"):
+        headless.assert_signal_is_attenuated(
+            "unattenuated",
+            baseline_rms=0.10,
+            measured_rms=0.09,
+        )
 
 
 def test_dynamic_sink_properties_create_hotplug_audio_sink() -> None:

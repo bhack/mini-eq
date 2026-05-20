@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import array
+import math
 import os
 import shutil
 import signal
@@ -9,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import wave
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -22,6 +25,14 @@ HELPER_SKIP_EXIT_CODE = live.HELPER_SKIP_EXIT_CODE
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOTPLUG_SINK_NAME = "ci_hotplug_sink"
 ALSA_NULL_SINK_NAME = "ci_alsa_null_sink"
+CAPTURE_APPLICATION_NAME = "mini-eq-headless-capture"
+CAPTURE_NODE_NAME = "mini-eq-headless-capture"
+CAPTURE_SAMPLE_RATE = 48_000
+CAPTURE_SAMPLE_COUNT = 24_000
+SIGNAL_CHECK_PREAMP_DB = -18.0
+MIN_BASELINE_RMS = 0.04
+MIN_ATTENUATED_RATIO = 0.03
+MAX_ATTENUATED_RATIO = 0.35
 MAX_CONTEXT_DRAIN_ITERATIONS = 250
 
 
@@ -124,6 +135,215 @@ def wait_for_processing_path_active(
         lambda: processing_path_has_active_links(virtual_sink_name, filter_output_name),
         timeout_seconds,
     )
+
+
+def raw_s16le_rms(path: Path, *, skip_frames: int = 0, channels: int = 2) -> float:
+    payload = path.read_bytes()
+    if not payload:
+        raise RuntimeError(f"captured signal is empty: {path}")
+
+    samples = array.array("h")
+    samples.frombytes(payload[: len(payload) - (len(payload) % samples.itemsize)])
+    if sys.byteorder != "little":
+        samples.byteswap()
+
+    skip_samples = min(max(0, skip_frames * channels), len(samples))
+    measured_samples = samples[skip_samples:]
+    if not measured_samples:
+        raise RuntimeError(f"captured signal has no samples after skipping {skip_frames} frame(s): {path}")
+
+    return (
+        math.sqrt(sum(float(sample) * float(sample) for sample in measured_samples) / len(measured_samples)) / 32768.0
+    )
+
+
+def wav_s16le_rms(path: Path, *, skip_frames: int = 0, channels: int = 2) -> float:
+    with wave.open(str(path), "rb") as wav_file:
+        if wav_file.getsampwidth() != 2:
+            raise RuntimeError(f"captured WAV signal is not signed 16-bit PCM: {path}")
+        if wav_file.getnchannels() != channels:
+            raise RuntimeError(
+                f"captured WAV signal has {wav_file.getnchannels()} channel(s), expected {channels}: {path}"
+            )
+        frame_count = wav_file.getnframes()
+        if frame_count <= 0:
+            raise RuntimeError(f"captured WAV signal is empty: {path}")
+        skip = min(max(0, skip_frames), frame_count)
+        wav_file.setpos(skip)
+        payload = wav_file.readframes(frame_count - skip)
+
+    samples = array.array("h")
+    samples.frombytes(payload[: len(payload) - (len(payload) % samples.itemsize)])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        raise RuntimeError(f"captured WAV signal has no samples after skipping {skip_frames} frame(s): {path}")
+    return math.sqrt(sum(float(sample) * float(sample) for sample in samples) / len(samples)) / 32768.0
+
+
+def link_pipewire_ports(output_port: str, input_port: str, timeout_seconds: float) -> None:
+    last_output = ""
+
+    def try_link() -> bool:
+        nonlocal last_output
+        result = subprocess.run(
+            ["pw-link", output_port, input_port],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        last_output = result.stdout.strip()
+        return result.returncode == 0
+
+    try:
+        dispatch_until(f"PipeWire link {output_port} -> {input_port}", try_link, timeout_seconds)
+    except RuntimeError as exc:
+        detail = f": {last_output}" if last_output else ""
+        raise RuntimeError(f"{exc}{detail}") from exc
+
+
+def pw_record_help() -> str:
+    result = subprocess.run(
+        ["pw-record", "--help"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    return result.stdout
+
+
+def pw_record_supports_sample_count(help_text: str | None = None) -> bool:
+    return "--sample-count" in (help_text if help_text is not None else pw_record_help())
+
+
+def pw_record_supports_raw(help_text: str | None = None) -> bool:
+    return "--raw" in (help_text if help_text is not None else pw_record_help())
+
+
+def build_pw_record_capture_command(
+    path: Path,
+    *,
+    sample_count: int,
+    include_sample_count: bool,
+    raw_output: bool,
+) -> list[str]:
+    command = [
+        "pw-record",
+        "--target",
+        "0",
+        "--properties",
+        ",".join(
+            [
+                f"application.name={CAPTURE_APPLICATION_NAME}",
+                f"node.name={CAPTURE_NODE_NAME}",
+                "state.restore-props=false",
+                "state.restore-target=false",
+            ]
+        ),
+        "--format",
+        "s16",
+        "--rate",
+        str(CAPTURE_SAMPLE_RATE),
+        "--channels",
+        "2",
+        "--channel-map",
+        "FL,FR",
+    ]
+    if include_sample_count:
+        command.extend(["--sample-count", str(sample_count)])
+    if raw_output:
+        command.append("--raw")
+    command.append(str(path))
+    return command
+
+
+def capture_sink_monitor_rms(
+    sink_name: str,
+    path: Path,
+    timeout_seconds: float,
+    *,
+    sample_count: int = CAPTURE_SAMPLE_COUNT,
+) -> float:
+    path.unlink(missing_ok=True)
+    channels = 2
+    sample_width_bytes = 2
+    expected_capture_bytes = sample_count * channels * sample_width_bytes
+    help_text = pw_record_help()
+    include_sample_count = pw_record_supports_sample_count(help_text)
+    raw_output = pw_record_supports_raw(help_text)
+    capture_path = path if raw_output else path.with_suffix(".wav")
+    capture_path.unlink(missing_ok=True)
+    command = build_pw_record_capture_command(
+        capture_path,
+        sample_count=sample_count,
+        include_sample_count=include_sample_count,
+        raw_output=raw_output,
+    )
+    print(f"$ {format_command(command)}", flush=True)
+    recorder = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+
+        def capture_node() -> Any:
+            if recorder.poll() is not None:
+                output = recorder.stdout.read().strip() if recorder.stdout is not None else ""
+                detail = f": {output}" if output else ""
+                raise RuntimeError(f"signal capture exited before stream appeared{detail}")
+            return live.node_by_name(CAPTURE_NODE_NAME)
+
+        dispatch_until(
+            "Mini EQ signal capture stream",
+            capture_node,
+            timeout_seconds,
+        )
+        link_pipewire_ports(f"{sink_name}:monitor_FL", f"{CAPTURE_NODE_NAME}:input_FL", timeout_seconds)
+        link_pipewire_ports(f"{sink_name}:monitor_FR", f"{CAPTURE_NODE_NAME}:input_FR", timeout_seconds)
+
+        if include_sample_count:
+            try:
+                output, _stderr = recorder.communicate(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                recorder.kill()
+                output, _stderr = recorder.communicate(timeout=2.0)
+                raise RuntimeError(f"timed out waiting for signal capture to finish: {output.strip()}") from exc
+        else:
+            dispatch_until(
+                "Mini EQ signal capture data",
+                lambda: capture_path.exists() and capture_path.stat().st_size >= expected_capture_bytes,
+                timeout_seconds,
+            )
+            output = live.terminate_process(recorder, "pw-record signal capture")
+
+        if output:
+            print(f"Mini EQ signal capture output:\n{output.rstrip()}", flush=True)
+        if not capture_path.exists() or capture_path.stat().st_size == 0:
+            raise RuntimeError(f"signal capture did not produce audio data: {capture_path}")
+        captured_bytes = capture_path.stat().st_size
+        if raw_output and include_sample_count and captured_bytes != expected_capture_bytes:
+            raise RuntimeError(
+                f"signal capture wrote {captured_bytes} byte(s), expected {expected_capture_bytes}: {capture_path}"
+            )
+        if raw_output:
+            return raw_s16le_rms(capture_path, skip_frames=sample_count // 4)
+
+        return wav_s16le_rms(capture_path, skip_frames=sample_count // 4, channels=channels)
+    finally:
+        if recorder.poll() is None:
+            live.terminate_process(recorder, "pw-record signal capture")
+
+
+def assert_signal_is_attenuated(label: str, *, baseline_rms: float, measured_rms: float) -> None:
+    if baseline_rms < MIN_BASELINE_RMS:
+        raise RuntimeError(f"Mini EQ signal processing baseline is too low: rms={baseline_rms:.5f}")
+
+    ratio = measured_rms / baseline_rms
+    if not MIN_ATTENUATED_RATIO <= ratio <= MAX_ATTENUATED_RATIO:
+        raise RuntimeError(
+            f"Mini EQ signal processing check failed {label}: "
+            f"baseline_rms={baseline_rms:.5f}, measured_rms={measured_rms:.5f}, ratio={ratio:.3f}; "
+            f"expected current {SIGNAL_CHECK_PREAMP_DB:.0f} dB preamp to remain active"
+        )
 
 
 def dynamic_sink_properties(sink_name: str) -> str:
@@ -575,6 +795,37 @@ def run_controller_flow(
         virtual_serial = wait_for_smoke_routed(smoke_id, virtual_sink_name, timeout_seconds)
         wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
 
+        if controller.filter_node_id is not None:
+            filter_node_state = controller.output_backend.node_state(controller.filter_node_id)
+            if filter_node_state is not None:
+                state, error = filter_node_state
+                print(f"Mini EQ filter node state: {state or 'unknown'}", flush=True)
+                if getattr(controller, "filter_node_state_handler_id", 0) <= 0:
+                    raise RuntimeError("Pwg node state API is available but Mini EQ did not monitor the filter node")
+                if state == "error":
+                    detail = f": {error}" if error else ""
+                    raise RuntimeError(f"Mini EQ filter node entered PipeWire error state{detail}")
+
+        controller.set_analyzer_enabled(False)
+        print("## headless signal processing check with monitor off", flush=True)
+        baseline_rms = capture_sink_monitor_rms(
+            controller.output_sink,
+            tmp_dir / "mini-eq-headless-baseline.raw",
+            timeout_seconds,
+        )
+        controller.preamp_db = SIGNAL_CHECK_PREAMP_DB
+        controller.apply_state_to_engine()
+        attenuated_rms = capture_sink_monitor_rms(
+            controller.output_sink,
+            tmp_dir / "mini-eq-headless-attenuated.raw",
+            timeout_seconds,
+        )
+        assert_signal_is_attenuated(
+            "after applying preamp",
+            baseline_rms=baseline_rms,
+            measured_rms=attenuated_rms,
+        )
+
         print("## headless idle stream recreation", flush=True)
         stop_smoke_stream(smoke, timeout_seconds)
         smoke = None
@@ -597,6 +848,88 @@ def run_controller_flow(
             filter_output_name,
             timeout_seconds,
             "after paused resume",
+        )
+        resumed_rms = capture_sink_monitor_rms(
+            controller.output_sink,
+            tmp_dir / "mini-eq-headless-resumed.raw",
+            timeout_seconds,
+        )
+        assert_signal_is_attenuated(
+            "after paused stream resume",
+            baseline_rms=baseline_rms,
+            measured_rms=resumed_rms,
+        )
+        print("## headless external filter control reset recovery", flush=True)
+        from mini_eq.filter_chain import builtin_biquad_preamp_control_values
+
+        if controller.filter_node_id is None:
+            raise RuntimeError("Mini EQ filter node is missing during external control reset check")
+
+        def wait_for_filter_control_reapply(label: str, action: Callable[[], None]) -> None:
+            reapply_observed = {"done": False}
+            original_reapply_idle = controller.on_filter_control_reapply_idle
+
+            def observe_reapply_idle() -> bool:
+                result = original_reapply_idle()
+                reapply_observed["done"] = True
+                return result
+
+            controller.on_filter_control_reapply_idle = observe_reapply_idle
+            try:
+                action()
+                dispatch_until(label, lambda: reapply_observed["done"], timeout_seconds)
+            finally:
+                controller.on_filter_control_reapply_idle = original_reapply_idle
+
+        def reset_filter_controls_to_flat() -> None:
+            controller.output_backend.set_node_params(
+                controller.filter_node_id,
+                builtin_biquad_preamp_control_values(0.0, controller.eq_enabled),
+            )
+
+        wait_for_filter_control_reapply(
+            "Mini EQ filter controls to reapply after external reset",
+            reset_filter_controls_to_flat,
+        )
+
+        reset_recovered_rms = capture_sink_monitor_rms(
+            controller.output_sink,
+            tmp_dir / "mini-eq-headless-reset-recovered.raw",
+            timeout_seconds,
+        )
+        assert_signal_is_attenuated(
+            "after external filter control reset",
+            baseline_rms=baseline_rms,
+            measured_rms=reset_recovered_rms,
+        )
+        print("## headless echo-overlap filter control reset recovery", flush=True)
+
+        def write_then_reset_filter_controls_to_flat() -> None:
+            controller.apply_state_to_engine()
+            reset_filter_controls_to_flat()
+
+        wait_for_filter_control_reapply(
+            "Mini EQ filter controls to verify after echo-overlap reset",
+            write_then_reset_filter_controls_to_flat,
+        )
+        echo_reset_recovered_rms = capture_sink_monitor_rms(
+            controller.output_sink,
+            tmp_dir / "mini-eq-headless-echo-reset-recovered.raw",
+            timeout_seconds,
+        )
+        assert_signal_is_attenuated(
+            "after echo-overlap filter control reset",
+            baseline_rms=baseline_rms,
+            measured_rms=echo_reset_recovered_rms,
+        )
+        print(
+            "Mini EQ signal processing RMS: "
+            f"baseline={baseline_rms:.5f}, "
+            f"attenuated={attenuated_rms:.5f}, "
+            f"resumed={resumed_rms:.5f}, "
+            f"reset-recovered={reset_recovered_rms:.5f}, "
+            f"echo-reset-recovered={echo_reset_recovered_rms:.5f}",
+            flush=True,
         )
 
         print("## headless tracked stream relink recovery", flush=True)
@@ -771,7 +1104,9 @@ def run_controller_flow(
 
         print(
             "Headless PipeWire runtime smoke passed: synthetic stream routing, route toggles, "
-            "idle stream recreation, paused stream resume, tracked stream relink recovery, "
+            "signal processing after idle resume, idle stream recreation, paused stream resume, "
+            "external filter control reset recovery, echo-overlap filter control reset recovery, "
+            "tracked stream relink recovery, "
             "paused default-output moves with monitor off, dynamic output hotplug recovery, "
             f"{optional_phases}active processing links, "
             "monitor toggles, and stream cleanup verified."
@@ -799,7 +1134,7 @@ def start_pipewire_session(
 
 def run_helper(_args: argparse.Namespace) -> int:
     try:
-        for tool in ("pipewire", "wireplumber", "wpctl", "pw-cat", "pw-cli", "pw-dump", "pw-metadata"):
+        for tool in ("pipewire", "wireplumber", "wpctl", "pw-cat", "pw-record", "pw-cli", "pw-dump", "pw-metadata"):
             require_tool(tool)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
