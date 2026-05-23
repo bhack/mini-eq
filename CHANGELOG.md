@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.4 - 2026-05-23
+
+- Fix system-wide EQ not being applied automatically at login when PipeWire
+  outputs appear after Mini EQ starts.
+
 ## 0.8.3 - 2026-05-20
 
 - Recover EQ controls after PipeWire filter-chain resets.
