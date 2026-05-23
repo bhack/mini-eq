@@ -59,56 +59,60 @@ FILTER_CONTROL_PARAM_ECHO_GRACE_USEC = 500_000
 class SystemWideEqController:
     def __init__(self, output_sink: str | None) -> None:
         self.output_backend = PipeWireBackend()
-        self.output_backend.connect()
-        self.virtual_sink_name = self.pick_virtual_sink_name()
-        self.original_default_sink = self.resolve_default_output_sink_name()
-        self.follow_default_output = output_sink is None
-        self.output_sink = output_sink or self.original_default_sink
-        self._output_preset_target_sink: str | None = None
-        self._output_preset_target: PipeWireOutputPresetTarget | None = None
-        self.filter_output_name = f"{self.virtual_sink_name}{FILTER_OUTPUT_SUFFIX}"
-        self.engine_module = None
-        self.engine_start_watch = None
-        self.engine_start_pending = False
-        self.filter_node_id: int | None = None
-        self.output_event_source_id = 0
-        self.pending_followed_output_sink: str | None = None
-        self.pending_current_output_sink_refresh = False
-        self.output_object_added_handler_id = 0
-        self.output_object_removed_handler_id = 0
-        self.output_metadata_changed_handler_id = 0
-        self.output_route_param_handler_id = 0
-        self.output_route_param_device_id = 0
-        self.filter_node_state_handler_id = 0
-        self.filter_control_param_handler_id = 0
-        self.filter_control_reapply_source_id = 0
-        self.filter_control_reapply_source_is_verification = False
-        self.applying_filter_control_verification = False
-        self.ignored_filter_control_param_events = 0
-        self.ignored_filter_control_param_events_to_verify = 0
-        self.ignored_filter_control_param_events_deadline_us = 0
-        self.accept_output_events = False
-        self.routed = False
-        self.running = False
-        self.shutting_down = False
-        self.status_callback: Callable[[str], None] | None = None
-        self.outputs_changed_callback: Callable[[], None] | None = None
-        self.analyzer_levels_callback: Callable[[list[float]], None] | None = None
-        self.analyzer_loudness_callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None = None
-        self.eq_enabled = True
-        self.eq_mode = next(iter(EQ_MODES.values()))
-        self.preamp_db = 0.0
-        self.default_bands: list[EqBand] = self.build_default_bands()
-        self.bands: list[EqBand] = [replace(band) for band in self.default_bands]
-        self.stream_router: PipeWireStreamRouter | None = None
-        self.output_analyzer: OutputSpectrumAnalyzer | None = None
-        self.analyzer_response_speed = ANALYZER_RESPONSE_DEFAULT
+        try:
+            self.output_backend.connect()
+            self.virtual_sink_name = self.pick_virtual_sink_name()
+            self.original_default_sink = self.resolve_default_output_sink_name()
+            self.follow_default_output = output_sink is None
+            self.output_sink = output_sink or self.original_default_sink
+            self._output_preset_target_sink: str | None = None
+            self._output_preset_target: PipeWireOutputPresetTarget | None = None
+            self.filter_output_name = f"{self.virtual_sink_name}{FILTER_OUTPUT_SUFFIX}"
+            self.engine_module = None
+            self.engine_start_watch = None
+            self.engine_start_pending = False
+            self.filter_node_id: int | None = None
+            self.output_event_source_id = 0
+            self.pending_followed_output_sink: str | None = None
+            self.pending_current_output_sink_refresh = False
+            self.output_object_added_handler_id = 0
+            self.output_object_removed_handler_id = 0
+            self.output_metadata_changed_handler_id = 0
+            self.output_route_param_handler_id = 0
+            self.output_route_param_device_id = 0
+            self.filter_node_state_handler_id = 0
+            self.filter_control_param_handler_id = 0
+            self.filter_control_reapply_source_id = 0
+            self.filter_control_reapply_source_is_verification = False
+            self.applying_filter_control_verification = False
+            self.ignored_filter_control_param_events = 0
+            self.ignored_filter_control_param_events_to_verify = 0
+            self.ignored_filter_control_param_events_deadline_us = 0
+            self.accept_output_events = False
+            self.routed = False
+            self.running = False
+            self.shutting_down = False
+            self.status_callback: Callable[[str], None] | None = None
+            self.outputs_changed_callback: Callable[[], None] | None = None
+            self.analyzer_levels_callback: Callable[[list[float]], None] | None = None
+            self.analyzer_loudness_callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None = None
+            self.eq_enabled = True
+            self.eq_mode = next(iter(EQ_MODES.values()))
+            self.preamp_db = 0.0
+            self.default_bands: list[EqBand] = self.build_default_bands()
+            self.bands: list[EqBand] = [replace(band) for band in self.default_bands]
+            self.stream_router: PipeWireStreamRouter | None = None
+            self.output_analyzer: OutputSpectrumAnalyzer | None = None
+            self.analyzer_response_speed = ANALYZER_RESPONSE_DEFAULT
 
-        if not self.is_valid_output_sink(self.output_sink):
-            raise AudioBackendError("output sink cannot be a Mini EQ virtual sink")
+            if not self.is_valid_output_sink(self.output_sink):
+                raise AudioBackendError("output sink cannot be a Mini EQ virtual sink")
 
-        if not self.output_sink or self.get_sink(self.output_sink) is None:
-            raise AudioBackendError(f"output sink not found: {self.output_sink}")
+            if not self.output_sink or self.get_sink(self.output_sink) is None:
+                raise AudioBackendError(f"output sink not found: {self.output_sink}")
+        except Exception:
+            self.output_backend.close()
+            raise
 
     def emit_status(self, message: str) -> None:
         if getattr(self, "shutting_down", False):

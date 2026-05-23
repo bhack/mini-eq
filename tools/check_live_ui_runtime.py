@@ -327,7 +327,10 @@ def write_settings(config_dir: Path) -> None:
     )
 
 
-def write_pipewire_config(config_dir: Path) -> None:
+def write_pipewire_config(config_dir: Path, *, include_static_sinks: bool = True) -> None:
+    if not include_static_sinks:
+        return
+
     conf_dir = config_dir / "pipewire" / "pipewire.conf.d"
     conf_dir.mkdir(parents=True, exist_ok=True)
     (conf_dir / "10-mini-eq-live-ui-null-sinks.conf").write_text(
@@ -366,6 +369,31 @@ context.objects = [
         + "\n",
         encoding="utf-8",
     )
+
+
+def dynamic_sink_properties(sink_name: str, description: str) -> str:
+    return (
+        "{ "
+        "factory.name = support.null-audio-sink "
+        f'node.name = "{sink_name}" '
+        f'node.description = "{description}" '
+        'media.class = "Audio/Sink" '
+        "object.linger = true "
+        'audio.position = "FL,FR" '
+        "adapter.auto-port-config = { "
+        "mode = dsp "
+        "monitor = true "
+        "position = preserve "
+        "} "
+        "}"
+    )
+
+
+def create_dynamic_sink(sink_name: str, description: str, timeout_seconds: float) -> dict[str, Any]:
+    command = ["pw-cli", "create-node", "adapter", dynamic_sink_properties(sink_name, description)]
+    print(f"$ {format_command(command)}", flush=True)
+    subprocess.run(command, check=True, text=True, stdout=subprocess.DEVNULL)
+    return wait_for(sink_name, lambda: node_by_name(sink_name), timeout_seconds)
 
 
 def create_sine_wav(path: Path, duration_seconds: float) -> Path:
@@ -906,7 +934,12 @@ def start_nested_shell(runtime_dir: Path, wayland_name: str, log_path: Path) -> 
     return process
 
 
-def start_app(repo_root: Path, wayland_name: str, app_log_path: Path) -> subprocess.Popen[str]:
+def start_app(
+    repo_root: Path,
+    wayland_name: str,
+    app_log_path: Path,
+    app_args: list[str] | None = None,
+) -> subprocess.Popen[str]:
     env = os.environ.copy()
     src_path = str(repo_root / "src")
     env["PYTHONPATH"] = f"{src_path}{os.pathsep}{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
@@ -917,7 +950,7 @@ def start_app(repo_root: Path, wayland_name: str, app_log_path: Path) -> subproc
     env.pop("DISPLAY", None)
     app_log = app_log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
-        [sys.executable, "-m", "mini_eq", "--auto-route"],
+        [sys.executable, "-m", "mini_eq", *(app_args if app_args is not None else ["--auto-route"])],
         cwd=repo_root,
         env=env,
         stdout=app_log,
@@ -1316,6 +1349,111 @@ def run_ui_flow(
         terminate_process(shell, "nested GNOME Shell")
 
 
+def run_startup_routing_race_simulation(
+    *,
+    pyatspi,
+    repo_root: Path,
+    runtime_dir: Path,
+    tmp_dir: Path,
+    timeout_seconds: float,
+    audio_duration: float,
+) -> None:
+    shell_log_path = tmp_dir / "gnome-shell.log"
+    autostart_log_path = tmp_dir / "mini-eq-autostart.log"
+    present_log_path = tmp_dir / "mini-eq-present.log"
+    wayland_name = f"mini-eq-startup-race-{os.getpid()}"
+    shell: subprocess.Popen[str] | None = None
+    autostart_app: subprocess.Popen[str] | None = None
+    smoke: subprocess.Popen[str] | None = None
+    event_thread: threading.Thread | None = None
+
+    try:
+        wait_for("PipeWire default metadata service", default_metadata_is_ready, timeout_seconds)
+        shell = start_nested_shell(runtime_dir, wayland_name, shell_log_path)
+
+        autostart_app = start_app(
+            repo_root,
+            wayland_name,
+            autostart_log_path,
+            app_args=["--background", "--auto-route", "--output-sink", PRIMARY_SINK_NAME],
+        )
+        try:
+            autostart_app.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            raise AssertionError(
+                "Mini EQ startup-race autostart exited before the sink appeared:\n"
+                f"returncode={autostart_app.returncode}\n{autostart_log_path.read_text(errors='replace')}"
+            )
+
+        create_dynamic_sink(PRIMARY_SINK_NAME, "CI Null Sink", timeout_seconds)
+        create_dynamic_sink(ALT_SINK_NAME, "CI Alt Sink", timeout_seconds)
+
+        wait_for(
+            "Mini EQ hidden autostart to recover and route after output appears",
+            lambda: state if (state := control_state(timeout_seconds)).get("routed") is True else None,
+            timeout_seconds,
+        )
+
+        audio_file = create_sine_wav(tmp_dir / "mini-eq-startup-race-smoke.wav", audio_duration)
+        smoke = start_smoke_stream(audio_file)
+        smoke_node = wait_for(
+            "synthetic PipeWire playback stream after startup-race recovery",
+            lambda: smoke_stream_node() if smoke is not None and smoke.poll() is None else None,
+            timeout_seconds,
+        )
+        smoke_id = node_id(smoke_node)
+
+        present_process = start_app(repo_root, wayland_name, present_log_path, app_args=[])
+        try:
+            present_process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            terminate_process(present_process, "Mini EQ startup-race present request")
+            raise AssertionError("Mini EQ present request did not return after startup-race recovery") from exc
+        if present_process.returncode != 0:
+            raise AssertionError(
+                "Mini EQ present request failed after startup-race recovery:\n"
+                f"returncode={present_process.returncode}\n{present_log_path.read_text(errors='replace')}"
+            )
+
+        event_thread = start_accessible_event_loop(pyatspi)
+        driver = UiDriver(pyatspi, autostart_app, autostart_log_path, shell_log_path)
+
+        frame = driver.wait_for_accessible(
+            "Mini EQ frame after startup-race recovery",
+            lambda: driver.find(driver.desktop(), name=APP_FRAME_NAME, role="frame", showing=True),
+            timeout_seconds,
+        )
+        route_switch = driver.wait_for_accessible(
+            "System-wide EQ switch to turn on after startup-race recovery",
+            lambda: driver.visible_switch_with_state(frame, name="System-wide EQ", expected_checked=True),
+            timeout_seconds,
+        )
+        del route_switch
+        state = control_state(timeout_seconds)
+        if state.get("routed") is not True:
+            raise AssertionError(f"Mini EQ D-Bus state should be routed after startup-race recovery: {state!r}")
+
+        virtual_sink = wait_for_sink(VIRTUAL_SINK_NAME, timeout_seconds)
+        virtual_serial = object_serial(virtual_sink)
+        wait_for_route_to_virtual(smoke_id, virtual_serial, timeout_seconds)
+        wait_for_processing_path_active(timeout_seconds)
+        if not no_traceback(autostart_log_path):
+            raise AssertionError(f"Mini EQ logged a traceback:\n{autostart_log_path.read_text(errors='replace')}")
+
+        print(
+            "Live UI startup-race simulation passed: "
+            "the hidden --auto-route launch stayed alive before the requested sink existed, "
+            "then recovered and routed system audio after the sink appeared."
+        )
+    finally:
+        stop_accessible_event_loop(pyatspi, event_thread)
+        terminate_process(autostart_app, "Mini EQ startup-race autostart")
+        terminate_process(smoke, "pw-cat synthetic stream")
+        terminate_process(shell, "nested GNOME Shell")
+
+
 def start_pipewire_processes(tmp_dir: Path) -> tuple[subprocess.Popen[str], subprocess.Popen[str]]:
     pipewire_log = (tmp_dir / "pipewire.log").open("w", encoding="utf-8")
     wireplumber_log = (tmp_dir / "wireplumber.log").open("w", encoding="utf-8")
@@ -1333,8 +1471,13 @@ def run_helper(_args: argparse.Namespace) -> int:
         print(f"pyatspi unavailable: {exc}", file=sys.stderr)
         return HELPER_SKIP_EXIT_CODE
 
+    simulate_startup_race = os.environ.get("MINI_EQ_LIVE_UI_SIMULATE_STARTUP_ROUTING_RACE") == "1"
+    required_tools = ["pipewire", "wireplumber", "wpctl", "pw-cat", "pw-dump", "pw-metadata", "gnome-shell"]
+    if simulate_startup_race:
+        required_tools.append("pw-cli")
+
     try:
-        for tool in ("pipewire", "wireplumber", "wpctl", "pw-cat", "pw-dump", "pw-metadata", "gnome-shell"):
+        for tool in required_tools:
             require_tool(tool)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
@@ -1356,7 +1499,7 @@ def run_helper(_args: argparse.Namespace) -> int:
             directory.mkdir(parents=True, exist_ok=True)
         runtime_dir.chmod(0o700)
         write_settings(config_dir)
-        write_pipewire_config(config_dir)
+        write_pipewire_config(config_dir, include_static_sinks=not simulate_startup_race)
 
         os.environ["XDG_RUNTIME_DIR"] = str(runtime_dir)
         os.environ["XDG_CONFIG_HOME"] = str(config_dir)
@@ -1365,18 +1508,28 @@ def run_helper(_args: argparse.Namespace) -> int:
         os.environ["GSETTINGS_BACKEND"] = "memory"
 
         pipewire, wireplumber = start_pipewire_processes(tmp_dir)
-        wait_for_sink(PRIMARY_SINK_NAME, timeout_seconds)
-        wait_for_sink(ALT_SINK_NAME, timeout_seconds)
-        wait_for("WirePlumber default output metadata", default_output_metadata_is_ready, timeout_seconds)
-        run_ui_flow(
-            pyatspi=pyatspi,
-            repo_root=REPO_ROOT,
-            runtime_dir=runtime_dir,
-            tmp_dir=tmp_dir,
-            timeout_seconds=timeout_seconds,
-            cycles=cycles,
-            audio_duration=audio_duration,
-        )
+        if simulate_startup_race:
+            run_startup_routing_race_simulation(
+                pyatspi=pyatspi,
+                repo_root=REPO_ROOT,
+                runtime_dir=runtime_dir,
+                tmp_dir=tmp_dir,
+                timeout_seconds=timeout_seconds,
+                audio_duration=audio_duration,
+            )
+        else:
+            wait_for_sink(PRIMARY_SINK_NAME, timeout_seconds)
+            wait_for_sink(ALT_SINK_NAME, timeout_seconds)
+            wait_for("WirePlumber default output metadata", default_output_metadata_is_ready, timeout_seconds)
+            run_ui_flow(
+                pyatspi=pyatspi,
+                repo_root=REPO_ROOT,
+                runtime_dir=runtime_dir,
+                tmp_dir=tmp_dir,
+                timeout_seconds=timeout_seconds,
+                cycles=cycles,
+                audio_duration=audio_duration,
+            )
     finally:
         terminate_process(wireplumber, "WirePlumber")
         terminate_process(pipewire, "PipeWire")
@@ -1398,6 +1551,7 @@ def run_parent(args: argparse.Namespace) -> int:
         env["MINI_EQ_LIVE_UI_TIMEOUT"] = str(args.timeout)
         env["MINI_EQ_LIVE_UI_CYCLES"] = str(args.cycles)
         env["MINI_EQ_LIVE_UI_AUDIO_DURATION"] = str(args.audio_duration)
+        env["MINI_EQ_LIVE_UI_SIMULATE_STARTUP_ROUTING_RACE"] = "1" if args.simulate_startup_routing_race else "0"
         env["PYTHONUNBUFFERED"] = "1"
         env.pop("DISPLAY", None)
         env.pop("WAYLAND_DISPLAY", None)
@@ -1433,6 +1587,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=float,
         default=120.0,
         help="Duration of the generated sine-wave playback stream.",
+    )
+    parser.add_argument(
+        "--simulate-startup-routing-race",
+        action="store_true",
+        help="Launch hidden --auto-route before the requested output sink exists, then verify routed recovery.",
     )
     return parser.parse_args(argv)
 

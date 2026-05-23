@@ -99,8 +99,24 @@ def bind_control_refresh_methods(fake_window: SimpleNamespace) -> None:
         window.MiniEqWindow.refresh_after_eq_state_changed,
         fake_window,
     )
+    fake_window.schedule_startup_auto_route = MethodType(
+        window.MiniEqWindow.schedule_startup_auto_route,
+        fake_window,
+    )
+    fake_window.is_startup_auto_route_retryable_error = MethodType(
+        window.MiniEqWindow.is_startup_auto_route_retryable_error,
+        fake_window,
+    )
+    fake_window.schedule_startup_auto_route_retry_after_error = MethodType(
+        window.MiniEqWindow.schedule_startup_auto_route_retry_after_error,
+        fake_window,
+    )
     fake_window.apply_startup_auto_route = MethodType(
         window.MiniEqWindow.apply_startup_auto_route,
+        fake_window,
+    )
+    fake_window.on_startup_auto_route_idle = MethodType(
+        window.MiniEqWindow.on_startup_auto_route_idle,
         fake_window,
     )
 
@@ -464,6 +480,76 @@ def test_startup_auto_route_idle_routes_after_startup_work() -> None:
     assert fake_window.route_switch.get_state() is True
     assert calls == [
         ("route", True),
+        ("power", True),
+        ("info", True),
+        ("summary", True),
+        "focus",
+        "notify",
+    ]
+
+
+def test_startup_auto_route_retries_until_filter_chain_is_ready(monkeypatch) -> None:
+    calls: list[object] = []
+    scheduled_callbacks = []
+    controller = SimpleNamespace(eq_enabled=True, routed=False)
+    attempts = 0
+
+    def route_system_audio(enabled: bool) -> None:
+        nonlocal attempts
+        attempts += 1
+        calls.append(("route", attempts, enabled))
+        if attempts == 1:
+            raise RuntimeError("filter-chain PipeWire EQ is not ready")
+        controller.routed = enabled
+
+    def timeout_add_seconds(interval_seconds: int, callback):
+        scheduled_callbacks.append(callback)
+        calls.append(("timeout", interval_seconds))
+        return 777
+
+    controller.route_system_audio = route_system_audio
+    monkeypatch.setattr(window.GLib, "get_monotonic_time", lambda: 1_000)
+    monkeypatch.setattr(window.GLib, "timeout_add_seconds", timeout_add_seconds)
+
+    fake_window = SimpleNamespace(
+        startup_auto_route_source_id=0,
+        startup_auto_route_deadline_us=0,
+        ui_shutting_down=False,
+        auto_route_on_startup=True,
+        updating_ui=False,
+        route_switch=FakeSwitch(False),
+        bypass_switch=FakeSwitch(True),
+        controller=controller,
+        update_eq_power_indicator=lambda: calls.append(("power", fake_window.route_switch.get_active())),
+        update_info_label=lambda: calls.append(("info", fake_window.route_switch.get_active())),
+        update_status_summary=lambda: calls.append(("summary", fake_window.route_switch.get_active())),
+        update_focus_summary=lambda: calls.append("focus"),
+        set_status=lambda message: calls.append(("status", message)),
+        notify_control_state_changed=lambda: calls.append("notify"),
+    )
+    bind_control_refresh_methods(fake_window)
+
+    window.MiniEqWindow.apply_startup_auto_route(fake_window)
+
+    assert fake_window.startup_auto_route_source_id == 777
+    assert fake_window.route_switch.get_active() is False
+    assert ("status", "filter-chain PipeWire EQ is not ready") not in calls
+
+    assert scheduled_callbacks[0]() is False
+
+    assert fake_window.startup_auto_route_source_id == 0
+    assert fake_window.startup_auto_route_deadline_us == 0
+    assert fake_window.route_switch.get_active() is True
+    assert fake_window.route_switch.get_state() is True
+    assert calls == [
+        ("route", 1, True),
+        ("timeout", window.STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS),
+        ("power", False),
+        ("info", False),
+        ("summary", False),
+        "focus",
+        "notify",
+        ("route", 2, True),
         ("power", True),
         ("info", True),
         ("summary", True),

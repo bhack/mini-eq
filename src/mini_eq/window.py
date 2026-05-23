@@ -32,12 +32,13 @@ from .core import (
     EQ_MODES,
     MODE_ORDER,
     SAMPLE_RATE,
+    AudioBackendError,
     ensure_preset_storage_dir,
     estimate_response_peak_db,
 )
 from .glib_utils import destroy_glib_source
 from .gtk_utils import create_dropdown_from_strings
-from .pipewire_backend import PipeWireNode, node_sample_rate, parse_positive_int
+from .pipewire_backend import PipeWireBackendError, PipeWireNode, node_sample_rate, parse_positive_int
 from .routing import SystemWideEqController
 from .settings import load_monitor_enabled
 from .window_analyzer import MiniEqWindowAnalyzerMixin
@@ -58,6 +59,8 @@ DEFAULT_WINDOW_WIDTH = 1360
 DEFAULT_WINDOW_HEIGHT = 720
 DEFAULT_WINDOW_SCREEN_MARGIN = 32
 ROUTING_CLOSE_SETTLE_MS = 300
+STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS = 1
+STARTUP_AUTO_ROUTE_RETRY_TIMEOUT_US = 30_000_000
 TOAST_IGNORED_PREFIXES = (
     "filter-chain PipeWire EQ ready:",
     "filter-chain PipeWire EQ stopped",
@@ -185,6 +188,7 @@ class MiniEqWindow(
         self.auto_route_on_startup = auto_route
         self.startup_ready_source_id = 0
         self.startup_auto_route_source_id = 0
+        self.startup_auto_route_deadline_us = 0
         self.startup_ready = False
         self.present_when_ready = True
         self.responsive_layout_source_id = 0
@@ -369,18 +373,52 @@ class MiniEqWindow(
         self.notify_control_state_changed()
         return False
 
-    def schedule_startup_auto_route(self) -> None:
+    def schedule_startup_auto_route(self, *, retry: bool = False) -> None:
         if self.startup_auto_route_source_id != 0:
             return
 
+        if retry:
+            self.startup_auto_route_source_id = GLib.timeout_add_seconds(
+                STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS,
+                self.on_startup_auto_route_idle,
+            )
+            return
+
         self.startup_auto_route_source_id = GLib.idle_add(self.on_startup_auto_route_idle)
+
+    def is_startup_auto_route_retryable_error(self, exc: Exception) -> bool:
+        if isinstance(exc, PipeWireBackendError | AudioBackendError):
+            return True
+
+        return str(exc) == "filter-chain PipeWire EQ is not ready"
+
+    def schedule_startup_auto_route_retry_after_error(self, exc: Exception) -> bool:
+        if (
+            self.ui_shutting_down
+            or not self.auto_route_on_startup
+            or not self.is_startup_auto_route_retryable_error(exc)
+        ):
+            return False
+
+        deadline_us = getattr(self, "startup_auto_route_deadline_us", 0)
+        if deadline_us <= 0:
+            deadline_us = GLib.get_monotonic_time() + STARTUP_AUTO_ROUTE_RETRY_TIMEOUT_US
+            self.startup_auto_route_deadline_us = deadline_us
+        if GLib.get_monotonic_time() >= deadline_us:
+            return False
+
+        self.schedule_startup_auto_route(retry=True)
+        return True
 
     def apply_startup_auto_route(self) -> None:
         eq_was_enabled = self.controller.eq_enabled
         try:
             self.controller.route_system_audio(True)
         except Exception as exc:
-            self.set_status(str(exc))
+            if not self.schedule_startup_auto_route_retry_after_error(exc):
+                self.set_status(str(exc))
+        else:
+            self.startup_auto_route_deadline_us = 0
         self.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled)
 
     def on_startup_auto_route_idle(self) -> bool:
