@@ -57,3 +57,18 @@ def test_live_ui_runtime_rejects_inactive_processing_path(monkeypatch) -> None:
     )
 
     assert check_live_ui_runtime.processing_path_has_active_links() is False
+
+
+def test_live_ui_runtime_can_skip_static_sink_config(tmp_path) -> None:
+    check_live_ui_runtime.write_pipewire_config(tmp_path, include_static_sinks=False)
+
+    assert not (tmp_path / "pipewire" / "pipewire.conf.d" / "10-mini-eq-live-ui-null-sinks.conf").exists()
+
+
+def test_live_ui_runtime_dynamic_sink_properties_create_null_audio_sink() -> None:
+    properties = check_live_ui_runtime.dynamic_sink_properties("ci_null_sink", "CI Null Sink")
+
+    assert "factory.name = support.null-audio-sink" in properties
+    assert 'node.name = "ci_null_sink"' in properties
+    assert 'node.description = "CI Null Sink"' in properties
+    assert 'media.class = "Audio/Sink"' in properties

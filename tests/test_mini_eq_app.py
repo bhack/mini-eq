@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from importlib.resources import files
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
+
+import pytest
 
 from tests._mini_eq_imports import import_mini_eq_module
 
@@ -354,6 +356,313 @@ def test_start_active_at_login_can_be_saved_when_start_at_login_is_enabled(monke
     assert application.start_active_at_login is True
     assert saved_active == [True]
     assert calls == ["state"]
+
+
+def bind_window_start_methods(application: SimpleNamespace) -> None:
+    for name in (
+        "begin_window_start",
+        "release_window_start_hold",
+        "should_retry_startup_auto_route",
+        "is_startup_auto_route_retryable_error",
+        "retry_startup_auto_route_after_error",
+        "on_window_start_retry_timeout",
+        "fail_window_start",
+        "raise_window_start_error",
+        "start_window_controller",
+    ):
+        setattr(application, name, MethodType(getattr(app.MiniEqApplication, name), application))
+
+
+def test_hidden_auto_route_startup_retries_until_output_is_ready(monkeypatch) -> None:
+    calls: list[object] = []
+    scheduled_callbacks = []
+    attempts = 0
+
+    class FakeController:
+        def __init__(self, output_sink: str | None) -> None:
+            nonlocal attempts
+            attempts += 1
+            calls.append(("controller", attempts, output_sink))
+            if attempts == 1:
+                raise app.AudioBackendError("output sink not found: ci_null_sink")
+
+        def start(self, *, on_ready=None, on_error=None) -> None:
+            del on_error
+            calls.append("start")
+            on_ready()
+
+        def shutdown(self) -> None:
+            calls.append("shutdown")
+
+    class FakeMiniEqWindow:
+        def __init__(self, application, controller, auto_route, initial_curve_label=None) -> None:
+            del application, controller, initial_curve_label
+            self.auto_route = auto_route
+            self.startup_ready = False
+            self.ui_shutting_down = False
+            calls.append(("window", auto_route))
+
+        def set_icon_name(self, icon_name: str) -> None:
+            calls.append(("icon", icon_name))
+
+        def set_visible(self, visible: bool) -> None:
+            calls.append(("visible", visible))
+
+        def schedule_startup_ready(self) -> None:
+            calls.append("ready")
+
+    def timeout_add_seconds(interval_seconds: int, callback):
+        scheduled_callbacks.append(callback)
+        calls.append(("timeout", interval_seconds))
+        return 123
+
+    monkeypatch.setattr(app, "install_app_icon", lambda: calls.append("icon-install"))
+    monkeypatch.setattr(app, "SystemWideEqController", FakeController)
+    monkeypatch.setattr(app, "MiniEqWindow", FakeMiniEqWindow)
+    monkeypatch.setattr(app.GLib, "get_monotonic_time", lambda: 1_000)
+    monkeypatch.setattr(app.GLib, "timeout_add_seconds", timeout_add_seconds)
+
+    application = SimpleNamespace(
+        args=SimpleNamespace(output_sink="ci_null_sink", import_apo=None, background=True, auto_route=True),
+        controller=None,
+        window=None,
+        window_starting=False,
+        window_start_hold=False,
+        window_start_retry_source_id=0,
+        window_start_retry_deadline_us=0,
+        pending_present_when_ready=False,
+        hold=lambda: calls.append("hold"),
+        release=lambda: calls.append("release"),
+        quit=lambda: calls.append("quit"),
+        queue_startup_notification_id=lambda _startup_id: None,
+        update_background_status=lambda: calls.append("background-status"),
+        emit_control_state_changed=lambda: calls.append("state"),
+    )
+    bind_window_start_methods(application)
+
+    app.MiniEqApplication.ensure_window(application, present=False)
+
+    assert application.window is None
+    assert application.window_starting is True
+    assert application.window_start_retry_source_id == 123
+    assert calls == [
+        "icon-install",
+        "hold",
+        ("controller", 1, "ci_null_sink"),
+        ("timeout", app.STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS),
+    ]
+
+    assert scheduled_callbacks[0]() is False
+
+    assert application.window is not None
+    assert application.window.auto_route is True
+    assert application.window_starting is False
+    assert application.window_start_retry_source_id == 0
+    assert calls[-9:] == [
+        ("controller", 2, "ci_null_sink"),
+        "start",
+        ("window", True),
+        ("icon", app.APP_ICON_NAME),
+        ("visible", False),
+        "ready",
+        "background-status",
+        "state",
+        "release",
+    ]
+    assert calls[-1] == "release"
+    assert "quit" not in calls
+
+
+def test_visible_auto_route_startup_retries_until_output_is_ready(monkeypatch) -> None:
+    calls: list[object] = []
+    scheduled_callbacks = []
+    attempts = 0
+
+    class FakeController:
+        def __init__(self, output_sink: str | None) -> None:
+            nonlocal attempts
+            attempts += 1
+            calls.append(("controller", attempts, output_sink))
+            if attempts == 1:
+                raise app.PipeWireBackendError("PipeWire core sync failed: PipeWire core sync timed out")
+
+        def start(self, *, on_ready=None, on_error=None) -> None:
+            del on_error
+            calls.append("start")
+            on_ready()
+
+        def shutdown(self) -> None:
+            calls.append("shutdown")
+
+    class FakeMiniEqWindow:
+        def __init__(self, application, controller, auto_route, initial_curve_label=None) -> None:
+            del application, controller, initial_curve_label
+            self.auto_route = auto_route
+            self.startup_ready = False
+            self.ui_shutting_down = False
+            calls.append(("window", auto_route))
+
+        def set_icon_name(self, icon_name: str) -> None:
+            calls.append(("icon", icon_name))
+
+        def set_visible(self, visible: bool) -> None:
+            calls.append(("visible", visible))
+
+        def schedule_startup_ready(self) -> None:
+            calls.append("ready")
+
+    def timeout_add_seconds(interval_seconds: int, callback):
+        scheduled_callbacks.append(callback)
+        calls.append(("timeout", interval_seconds))
+        return 123
+
+    monkeypatch.setattr(app, "install_app_icon", lambda: calls.append("icon-install"))
+    monkeypatch.setattr(app, "SystemWideEqController", FakeController)
+    monkeypatch.setattr(app, "MiniEqWindow", FakeMiniEqWindow)
+    monkeypatch.setattr(app.GLib, "get_monotonic_time", lambda: 1_000)
+    monkeypatch.setattr(app.GLib, "timeout_add_seconds", timeout_add_seconds)
+
+    application = SimpleNamespace(
+        args=SimpleNamespace(output_sink=None, import_apo=None, background=False, auto_route=True),
+        controller=None,
+        window=None,
+        window_starting=False,
+        window_start_hold=False,
+        window_start_retry_source_id=0,
+        window_start_retry_deadline_us=0,
+        pending_present_when_ready=False,
+        hold=lambda: calls.append("hold"),
+        release=lambda: calls.append("release"),
+        quit=lambda: calls.append("quit"),
+        queue_startup_notification_id=lambda _startup_id: None,
+        update_background_status=lambda: calls.append("background-status"),
+        emit_control_state_changed=lambda: calls.append("state"),
+    )
+    bind_window_start_methods(application)
+
+    app.MiniEqApplication.ensure_window(application, present=True)
+
+    assert application.window is None
+    assert application.window_starting is True
+    assert application.window_start_retry_source_id == 123
+    assert calls == [
+        "icon-install",
+        "hold",
+        ("controller", 1, None),
+        ("timeout", app.STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS),
+    ]
+
+    assert scheduled_callbacks[0]() is False
+
+    assert application.window is not None
+    assert application.window.auto_route is True
+    assert application.window_starting is False
+    assert application.window_start_retry_source_id == 0
+    assert calls[-7:] == [
+        ("controller", 2, None),
+        "start",
+        ("window", True),
+        ("icon", app.APP_ICON_NAME),
+        ("visible", False),
+        "ready",
+        "release",
+    ]
+    assert "quit" not in calls
+
+
+def test_visible_startup_constructor_error_raises_system_exit(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeController:
+        def __init__(self, output_sink: str | None) -> None:
+            calls.append(f"controller:{output_sink}")
+            raise RuntimeError("output sink not found: missing")
+
+    monkeypatch.setattr(app, "install_app_icon", lambda: calls.append("icon-install"))
+    monkeypatch.setattr(app, "SystemWideEqController", FakeController)
+
+    application = SimpleNamespace(
+        args=SimpleNamespace(output_sink="missing", import_apo=None, background=False, auto_route=False),
+        controller=None,
+        window=None,
+        window_starting=False,
+        window_start_hold=False,
+        window_start_retry_source_id=0,
+        window_start_retry_deadline_us=0,
+        pending_present_when_ready=False,
+        hold=lambda: calls.append("hold"),
+        release=lambda: calls.append("release"),
+        quit=lambda: calls.append("quit"),
+        queue_startup_notification_id=lambda _startup_id: None,
+    )
+    bind_window_start_methods(application)
+
+    with pytest.raises(SystemExit, match="output sink not found: missing"):
+        app.MiniEqApplication.ensure_window(application, present=True)
+
+    assert application.window is None
+    assert application.window_starting is False
+    assert application.pending_present_when_ready is False
+    assert calls == ["icon-install", "hold", "controller:missing", "release"]
+
+
+def test_auto_route_import_error_does_not_retry(monkeypatch) -> None:
+    calls: list[object] = []
+
+    class FakeController:
+        def __init__(self, output_sink: str | None) -> None:
+            calls.append(("controller", output_sink))
+
+        def import_apo_preset(self, path: str) -> int:
+            calls.append(("import", path))
+            raise ValueError("invalid APO preset")
+
+        def shutdown(self) -> None:
+            calls.append("shutdown")
+
+    def timeout_add_seconds(_interval_seconds: int, _callback):
+        raise AssertionError("permanent startup errors should not schedule a retry")
+
+    monkeypatch.setattr(app, "install_app_icon", lambda: calls.append("icon-install"))
+    monkeypatch.setattr(app, "SystemWideEqController", FakeController)
+    monkeypatch.setattr(app.GLib, "get_monotonic_time", lambda: 1_000)
+    monkeypatch.setattr(app.GLib, "timeout_add_seconds", timeout_add_seconds)
+
+    application = SimpleNamespace(
+        args=SimpleNamespace(
+            output_sink="ci_null_sink",
+            import_apo="/tmp/broken.txt",
+            background=False,
+            auto_route=True,
+        ),
+        controller=None,
+        window=None,
+        window_starting=False,
+        window_start_hold=False,
+        window_start_retry_source_id=0,
+        window_start_retry_deadline_us=0,
+        pending_present_when_ready=False,
+        hold=lambda: calls.append("hold"),
+        release=lambda: calls.append("release"),
+        quit=lambda: calls.append("quit"),
+        queue_startup_notification_id=lambda _startup_id: None,
+    )
+    bind_window_start_methods(application)
+
+    with pytest.raises(SystemExit, match="invalid APO preset"):
+        app.MiniEqApplication.ensure_window(application, present=True)
+
+    assert application.window_starting is False
+    assert application.window_start_retry_source_id == 0
+    assert application.pending_present_when_ready is False
+    assert calls == [
+        "icon-install",
+        "hold",
+        ("controller", "ci_null_sink"),
+        ("import", "/tmp/broken.txt"),
+        "shutdown",
+        "release",
+    ]
 
 
 def test_second_normal_launch_presents_running_instance(monkeypatch, capsys) -> None:

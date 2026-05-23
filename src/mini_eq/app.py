@@ -23,15 +23,28 @@ from .background import (
     set_background_status,
 )
 from .cli import parse_args
+from .core import AudioBackendError
 from .dbus_control import MiniEqDbusControl, call_present_window
 from .desktop_integration import APP_ICON_NAME, APP_ID, install_app_icon, install_desktop_integration
 from .glib_utils import destroy_glib_source
 from .instance import MiniEqAlreadyRunningError, MiniEqInstanceGuard
+from .pipewire_backend import PipeWireBackendError
 from .routing import SystemWideEqController
 from .window import MiniEqWindow
 from .window_presets import imported_apo_curve_label
 
 STARTUP_NOTIFICATION_ENV_KEYS = ("XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID")
+STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS = 1
+STARTUP_AUTO_ROUTE_RETRY_TIMEOUT_US = 30_000_000
+STARTUP_AUTO_ROUTE_RETRYABLE_PIPEWIRE_PREFIXES = (
+    "failed to connect to PipeWire",
+    "failed to start PipeWire registry discovery",
+    "failed to start PipeWire default metadata discovery",
+    "PipeWire registry sync failed",
+    "PipeWire metadata sync failed",
+    "PipeWire core sync failed",
+    "PipeWire initialization did not report:",
+)
 
 
 class MiniEqApplication(Adw.Application):
@@ -45,6 +58,9 @@ class MiniEqApplication(Adw.Application):
         self.window_present_source_id = 0
         self.window_starting = False
         self.window_start_hold = False
+        self.window_start_retry_source_id = 0
+        self.window_start_retry_deadline_us = 0
+        self.window_start_last_error: Exception | None = None
         self.pending_present_when_ready = False
         self.pending_startup_notification_id = (
             None if bool(getattr(args, "background", False)) else startup_notification_id
@@ -107,6 +123,77 @@ class MiniEqApplication(Adw.Application):
             self.pending_present_when_ready = self.pending_present_when_ready or present
             return
 
+        self.begin_window_start(present)
+        self.start_window_controller()
+
+    def begin_window_start(self, present: bool) -> None:
+        self.window_starting = True
+        self.window_start_hold = True
+        self.pending_present_when_ready = present
+        if self.should_retry_startup_auto_route():
+            self.window_start_retry_deadline_us = GLib.get_monotonic_time() + STARTUP_AUTO_ROUTE_RETRY_TIMEOUT_US
+        else:
+            self.window_start_retry_deadline_us = 0
+        self.hold()
+
+    def release_window_start_hold(self) -> None:
+        if not self.window_start_hold:
+            return
+
+        self.window_start_hold = False
+        self.release()
+
+    def should_retry_startup_auto_route(self) -> bool:
+        return bool(getattr(self.args, "auto_route", False))
+
+    def is_startup_auto_route_retryable_error(self, exc: Exception) -> bool:
+        message = str(exc)
+        if isinstance(exc, AudioBackendError):
+            return message.startswith("output sink not found:")
+
+        if isinstance(exc, PipeWireBackendError):
+            return message.startswith(STARTUP_AUTO_ROUTE_RETRYABLE_PIPEWIRE_PREFIXES)
+
+        return False
+
+    def retry_startup_auto_route_after_error(self, exc: Exception) -> bool:
+        if not self.should_retry_startup_auto_route() or not self.is_startup_auto_route_retryable_error(exc):
+            return False
+
+        deadline_us = getattr(self, "window_start_retry_deadline_us", 0)
+        if deadline_us <= 0 or GLib.get_monotonic_time() >= deadline_us:
+            return False
+
+        self.window_start_last_error = exc
+        if self.window_start_retry_source_id == 0:
+            self.window_start_retry_source_id = GLib.timeout_add_seconds(
+                STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS,
+                self.on_window_start_retry_timeout,
+            )
+        return True
+
+    def on_window_start_retry_timeout(self) -> bool:
+        self.window_start_retry_source_id = 0
+        if not self.window_starting or self.window is not None:
+            return False
+
+        self.start_window_controller()
+        return False
+
+    def fail_window_start(self, exc: Exception) -> None:
+        self.window_starting = False
+        self.pending_present_when_ready = False
+        print(str(exc), file=sys.stderr)
+        self.release_window_start_hold()
+        self.quit()
+
+    def raise_window_start_error(self, exc: Exception) -> None:
+        self.window_starting = False
+        self.pending_present_when_ready = False
+        self.release_window_start_hold()
+        raise SystemExit(str(exc)) from exc
+
+    def start_window_controller(self) -> None:
         controller: SystemWideEqController | None = None
         initial_curve_label: str | None = None
 
@@ -118,20 +205,15 @@ class MiniEqApplication(Adw.Application):
         except Exception as exc:
             if controller is not None:
                 controller.shutdown()
-            raise SystemExit(str(exc)) from exc
+            if self.retry_startup_auto_route_after_error(exc):
+                return
+            if self.should_retry_startup_auto_route() and self.is_startup_auto_route_retryable_error(exc):
+                self.fail_window_start(exc)
+                return
+            self.raise_window_start_error(exc)
+            return
 
         self.controller = controller
-        self.window_starting = True
-        self.window_start_hold = True
-        self.pending_present_when_ready = present
-        self.hold()
-
-        def release_start_hold() -> None:
-            if not self.window_start_hold:
-                return
-
-            self.window_start_hold = False
-            self.release()
 
         def on_ready() -> None:
             if self.controller is not controller:
@@ -152,19 +234,17 @@ class MiniEqApplication(Adw.Application):
                     self.update_background_status()
                     self.emit_control_state_changed()
             finally:
-                release_start_hold()
+                self.release_window_start_hold()
 
         def on_error(exc: Exception) -> None:
-            self.window_starting = False
-            self.pending_present_when_ready = False
             try:
                 controller.shutdown()
             finally:
                 if self.controller is controller:
                     self.controller = None
-            print(str(exc), file=sys.stderr)
-            release_start_hold()
-            self.quit()
+            if self.retry_startup_auto_route_after_error(exc):
+                return
+            self.fail_window_start(exc)
 
         controller.start(on_ready=on_ready, on_error=on_error)
 
@@ -248,6 +328,9 @@ class MiniEqApplication(Adw.Application):
         for source_id in self.signal_source_ids:
             destroy_glib_source(source_id)
         self.signal_source_ids = []
+        if self.window_start_retry_source_id > 0:
+            destroy_glib_source(self.window_start_retry_source_id)
+        self.window_start_retry_source_id = 0
         if self.window_present_source_id > 0:
             destroy_glib_source(self.window_present_source_id)
         self.window_present_source_id = 0

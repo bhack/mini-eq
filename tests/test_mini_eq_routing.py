@@ -64,6 +64,31 @@ class FakeDefaultOutputBackend(FakeOutputBackend):
         return self.refreshed_defaults
 
 
+def test_constructor_closes_backend_when_output_sink_validation_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class FakeBackend(FakeDefaultOutputBackend):
+        def __init__(self) -> None:
+            super().__init__(
+                [make_node(1, "speakers")],
+                cached_defaults=pw_backend.PipeWireDefaults("speakers", None),
+                refreshed_defaults=pw_backend.PipeWireDefaults("speakers", None),
+            )
+
+        def connect(self) -> None:
+            calls.append("connect")
+
+        def close(self) -> None:
+            calls.append("close")
+
+    monkeypatch.setattr(routing, "PipeWireBackend", FakeBackend)
+
+    with pytest.raises(core.AudioBackendError, match="output sink not found: missing"):
+        routing.SystemWideEqController("missing")
+
+    assert calls == ["connect", "close"]
+
+
 def test_list_output_sink_names_uses_wireplumber_sinks_and_filters_internal_nodes() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.output_backend = FakeOutputBackend(
