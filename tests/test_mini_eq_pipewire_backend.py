@@ -1346,7 +1346,7 @@ def test_connect_device_route_changed_subscribes_to_route_event_params(monkeypat
 
     device.emit_param(14, route_device=7, route_name="analog-output-speaker")
     assert calls == ["route", "route"]
-    assert 72 not in backend._device_active_output_routes
+    assert backend._device_active_output_routes[72][6].name == "analog-output-headphones"
 
     device.emit_param(13, route_device=7, route_name="analog-output-speaker")
     assert calls == ["route", "route", "route"]
@@ -1355,16 +1355,17 @@ def test_connect_device_route_changed_subscribes_to_route_event_params(monkeypat
 
     device.emit_param_infos_changed()
     assert calls == ["route", "route", "route", "route"]
-    assert 72 not in backend._device_active_output_routes
+    assert tuple(backend._device_active_output_routes[72]) == (7,)
+    assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 
     device.emit_param(13, route_device=7, route_name="analog-output-speaker")
-    assert calls == ["route", "route", "route", "route", "route"]
+    assert calls == ["route", "route", "route", "route"]
     assert tuple(backend._device_active_output_routes[72]) == (7,)
 
     backend._device_route_refreshing_bound_ids.add(72)
     device.emit_param(13, route_device=6, route_name="analog-output-headphones")
     device.emit_param_infos_changed()
-    assert calls == ["route", "route", "route", "route", "route"]
+    assert calls == ["route", "route", "route", "route"]
     assert tuple(backend._device_active_output_routes[72]) == (7,)
     assert backend._device_active_output_routes[72][7].name == "analog-output-speaker"
 

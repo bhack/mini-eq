@@ -685,14 +685,19 @@ class PipeWireBackend(PipeWireRouteMixin):
                     callback()
                 return
 
-            self._device_active_output_routes.pop(int(device_bound_id), None)
+            # EnumRoute describes the route catalog/availability, not the
+            # active port. Keep the last active Route until a Route event
+            # replaces it so transient availability updates do not collapse
+            # auto-preset scope back to output-wide.
             callback()
 
         def on_device_param_infos_changed(_device, _pspec) -> None:
             if int(device_bound_id) in self._device_route_refreshing_bound_ids:
                 return
 
-            self._device_active_output_routes.pop(int(device_bound_id), None)
+            # Param-info changes can accompany EnumRoute/catalog churn. They
+            # still warrant a UI refresh, but they do not invalidate the last
+            # active Route by themselves.
             callback()
 
         handler_id = self._GObject.Object.connect(device, "param", on_device_param)
