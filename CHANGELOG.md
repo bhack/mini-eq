@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.5 - 2026-05-31
+
+- Fixed auto presets sometimes resetting to Neutral when PipeWire route
+  metadata changed.
+
 ## 0.8.4 - 2026-05-23
 
 - Fix system-wide EQ not being applied automatically at login when PipeWire

@@ -33,11 +33,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.4/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.5/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.4/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.5/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -45,6 +45,11 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.8.5" date="2026-05-31">
+      <description>
+        <p>Fixed auto presets sometimes resetting to Neutral when PipeWire route metadata changed.</p>
+      </description>
+    </release>
     <release version="0.8.4" date="2026-05-23">
       <description>
         <p>Fix system-wide EQ not being applied automatically at login when PipeWire outputs appear after Mini EQ starts.</p>
