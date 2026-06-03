@@ -664,6 +664,8 @@ def test_switch_output_sink_retargets_recreated_same_name_sink_without_restart()
 
     controller.output_backend = FakeBackend([make_node(2, "hdmi")])
     controller.output_sink = "hdmi"
+    controller._output_preset_target_sink = "hdmi"
+    controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("hdmi", None, ("hdmi",))
     controller.follow_default_output = True
     controller.running = True
     controller.filter_node_id = 42
@@ -681,6 +683,8 @@ def test_switch_output_sink_retargets_recreated_same_name_sink_without_restart()
 
     assert controller.output_sink == "hdmi"
     assert controller.follow_default_output is True
+    assert controller._output_preset_target_sink is None
+    assert controller._output_preset_target is None
     assert calls == [
         "route-param-monitor",
         ("router-target", "hdmi"),
@@ -714,6 +718,8 @@ def test_switch_output_sink_skips_same_name_retarget_when_filter_output_already_
 
     controller.output_backend = FakeBackend([sink])
     controller.output_sink = "hdmi"
+    controller._output_preset_target_sink = "hdmi"
+    controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("hdmi", None, ("hdmi",))
     controller.follow_default_output = True
     controller.running = True
     controller.filter_node_id = 42
@@ -729,6 +735,8 @@ def test_switch_output_sink_skips_same_name_retarget_when_filter_output_already_
     routing.SystemWideEqController.switch_output_sink(controller, "hdmi", explicit=False)
 
     assert calls == ["route-param-monitor", ("router-target", "hdmi")]
+    assert controller._output_preset_target_sink is None
+    assert controller._output_preset_target is None
 
 
 def test_explicit_output_change_schedules_coalesced_output_refresh(monkeypatch: pytest.MonkeyPatch) -> None:

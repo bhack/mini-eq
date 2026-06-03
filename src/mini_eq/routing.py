@@ -310,6 +310,7 @@ class SystemWideEqController:
             if explicit:
                 self.follow_default_output = False
 
+            self.invalidate_output_preset_target()
             output_sink = self.get_sink(sink_name)
             if output_sink is None:
                 return
