@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.6 - 2026-06-04
+
+- Fix auto presets at login for outputs where PipeWire restores the selected
+  speaker sink before reporting the active port route.
+
 ## 0.8.5 - 2026-05-31
 
 - Fixed auto presets sometimes resetting to Neutral when PipeWire route
