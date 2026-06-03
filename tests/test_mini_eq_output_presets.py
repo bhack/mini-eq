@@ -605,6 +605,65 @@ def test_initial_output_preset_auto_loads_linked_preset(monkeypatch, tmp_path) -
     assert test_window.output_preset_switch.active is True
 
 
+def test_auto_apply_remembers_route_identity_for_followup_refresh(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Headphones", 2.5)
+    route_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=8"
+    core.set_output_preset_link(route_key, "Headphones")
+    controller = make_controller("alsa_output.internal")
+    route = SimpleNamespace(
+        description="Headphones",
+        name="analog-output-headphones",
+        output_preset_key=route_key,
+    )
+    target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=route,
+        keys=(route_key, controller.output_sink),
+        link_key=route_key,
+        has_route_key=True,
+    )
+    controller.output_preset_target = lambda: target
+    test_window = OutputPresetWindow(controller)
+    test_window.last_output_preset_sink_name = controller.output_sink
+    test_window.last_output_preset_target_identity = controller.output_sink
+
+    assert test_window.apply_output_preset_for_current_output() is True
+
+    assert test_window.current_preset_name == "Headphones"
+    assert test_window.output_preset_curve_auto_loaded is True
+    assert test_window.last_output_preset_sink_name == controller.output_sink
+    assert test_window.last_output_preset_target_identity == route_key
+
+    output_wide_target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=None,
+        keys=(controller.output_sink,),
+        link_key=controller.output_sink,
+        has_route_key=False,
+    )
+    controller.output_preset_target = lambda: output_wide_target
+    controller.follow_default_output = True
+    test_window.ui_shutting_down = False
+    test_window.startup_ready = True
+    test_window.list_visible_output_sinks = lambda: []
+    test_window.build_output_sink_labels = lambda _sinks: []
+    test_window.follow_default_output_label = lambda: "Follow system output"
+    test_window.output_sink_names = []
+    test_window.output_sink_labels = []
+    test_window.output_sink_model = FakeModel()
+    test_window.output_combo = FakeCombo()
+    test_window.update_info_label = lambda: None
+    test_window.update_status_summary = lambda: None
+
+    window.MiniEqWindow.refresh_output_sinks(test_window)
+
+    assert test_window.current_preset_name is None
+    assert controller.state_signature() == controller.default_state_signature()
+    assert test_window.statuses[-1] == "Unmatched output bypassed"
+
+
 def test_output_preset_auto_apply_protects_unsaved_edits(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
