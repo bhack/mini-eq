@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from tests._mini_eq_imports import core, import_mini_eq_module, routing
 
+diagnostics = import_mini_eq_module("diagnostics")
 window = import_mini_eq_module("window")
 window_presets = import_mini_eq_module("window_presets")
 
@@ -94,6 +96,33 @@ class FakeCombo:
 
     def set_sensitive(self, sensitive: bool) -> None:
         self.sensitive = sensitive
+
+
+class FakeOutputTransitionController(SimpleNamespace):
+    def __init__(
+        self,
+        *,
+        output_sink: str,
+        observed_identity: str | None,
+        current_identity: str,
+        follow_default_output: bool = True,
+    ) -> None:
+        super().__init__(
+            output_sink=output_sink,
+            follow_default_output=follow_default_output,
+            get_default_output_sink_name=lambda: output_sink,
+            get_sink=lambda _sink_name: None,
+        )
+        self.observed_identity = observed_identity
+        self.current_identity = current_identity
+        self.transition_consumes: list[bool] = []
+
+    def output_preset_target_transition(self, *, consume: bool = True) -> SimpleNamespace:
+        self.transition_consumes.append(consume)
+        changed = self.observed_identity is not None and self.observed_identity != self.current_identity
+        if consume or self.observed_identity is None:
+            self.observed_identity = self.current_identity
+        return SimpleNamespace(changed=changed)
 
 
 class FakeDeleteDialog:
@@ -605,6 +634,88 @@ def test_initial_output_preset_auto_loads_linked_preset(monkeypatch, tmp_path) -
     assert test_window.output_preset_switch.active is True
 
 
+def test_output_preset_auto_load_trace_records_linked_decision(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(diagnostics.STARTUP_TRACE_ENV, "1")
+    trace_path = tmp_path / "state" / "mini-eq" / "startup-trace.log"
+    monkeypatch.setattr(diagnostics, "startup_trace_path", lambda: trace_path)
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Headphones", 2.5)
+    core.set_output_preset_link("alsa_output.headphones", "Headphones")
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    assert test_window.apply_output_preset_for_current_output() is True
+
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["event"] for event in events] == [
+        "output-preset-apply-start",
+        "output-preset-link-selected",
+        "output-preset-linked-applied",
+    ]
+    assert events[0]["output_sink"] == "alsa_output.headphones"
+    assert events[0]["target_keys"] == ["alsa_output.headphones"]
+    assert events[1]["linked_preset"] == "Headphones"
+    assert events[2]["current_preset_after"] == "Headphones"
+
+
+def test_auto_apply_remembers_route_identity_for_followup_refresh(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Headphones", 2.5)
+    route_key = "pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=8"
+    core.set_output_preset_link(route_key, "Headphones")
+    controller = make_controller("alsa_output.internal")
+    route = SimpleNamespace(
+        description="Headphones",
+        name="analog-output-headphones",
+        output_preset_key=route_key,
+    )
+    target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=route,
+        keys=(route_key, controller.output_sink),
+        link_key=route_key,
+        has_route_key=True,
+    )
+    controller.output_preset_target = lambda *, refresh=False: target
+    test_window = OutputPresetWindow(controller)
+
+    assert test_window.apply_output_preset_for_current_output() is True
+
+    assert test_window.current_preset_name == "Headphones"
+    assert test_window.output_preset_curve_auto_loaded is True
+    assert controller._observed_output_preset_target_snapshot.sink_name == controller.output_sink
+    assert controller._observed_output_preset_target_snapshot.identity == route_key
+
+    output_wide_target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=None,
+        keys=(controller.output_sink,),
+        link_key=controller.output_sink,
+        has_route_key=False,
+    )
+    controller.output_preset_target = lambda *, refresh=False: output_wide_target
+    controller.follow_default_output = True
+    test_window.ui_shutting_down = False
+    test_window.startup_ready = True
+    test_window.list_visible_output_sinks = lambda: []
+    test_window.build_output_sink_labels = lambda _sinks: []
+    test_window.follow_default_output_label = lambda: "Follow system output"
+    test_window.output_sink_names = []
+    test_window.output_sink_labels = []
+    test_window.output_sink_model = FakeModel()
+    test_window.output_combo = FakeCombo()
+    test_window.update_info_label = lambda: None
+    test_window.update_status_summary = lambda: None
+
+    window.MiniEqWindow.refresh_output_sinks(test_window)
+
+    assert test_window.current_preset_name is None
+    assert controller.state_signature() == controller.default_state_signature()
+    assert test_window.statuses[-1] == "Unmatched output bypassed"
+
+
 def test_output_preset_auto_apply_protects_unsaved_edits(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
@@ -676,6 +787,66 @@ def test_fallback_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path
     assert test_window.current_preset_name == "Neutral"
     assert controller.bands[0].gain_db == -1.5
     assert test_window.statuses[-1] == "Fallback preset applied"
+
+
+def test_auto_apply_uses_saved_route_device_link_when_route_key_is_missing(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    speaker_route_key = (
+        "pipewire-route:v1:device=alsa_card.usb-Generic_USB_Audio-00;route=%5BOut%5D%20Speaker;route-device=11"
+    )
+    write_test_preset("Speakers Profile", -1.5)
+    write_test_preset("Headset Profile", 2.5)
+    core.set_output_preset_link(speaker_route_key, "Speakers Profile")
+    controller = make_controller("alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink")
+    target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=None,
+        keys=(controller.output_sink,),
+        link_key=controller.output_sink,
+        has_route_key=False,
+        device_name="alsa_card.usb-Generic_USB_Audio-00",
+        route_device=11,
+    )
+    controller.output_preset_target = lambda *, refresh=False: target
+    test_window = OutputPresetWindow(controller)
+    test_window.refresh_preset_list()
+    test_window.load_library_preset("Headset Profile")
+
+    assert test_window.apply_output_preset_for_current_output() is True
+
+    assert test_window.current_preset_name == "Speakers Profile"
+    assert controller.bands[0].gain_db == -1.5
+    assert test_window.output_preset_auto_applied is True
+    assert test_window.output_preset_curve_auto_loaded is True
+    assert test_window.statuses[-1] == "Auto preset applied"
+
+
+def test_clear_output_preset_removes_recovered_route_device_link(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    speaker_route_key = (
+        "pipewire-route:v1:device=alsa_card.usb-Generic_USB_Audio-00;route=%5BOut%5D%20Speaker;route-device=11"
+    )
+    write_test_preset("Speakers Profile", -1.5)
+    core.set_output_preset_link(speaker_route_key, "Speakers Profile")
+    controller = make_controller("alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink")
+    target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=None,
+        keys=(controller.output_sink,),
+        link_key=controller.output_sink,
+        has_route_key=False,
+        device_name="alsa_card.usb-Generic_USB_Audio-00",
+        route_device=11,
+    )
+    controller.output_preset_target = lambda *, refresh=False: target
+    test_window = OutputPresetWindow(controller)
+
+    test_window.on_clear_output_preset_link_clicked(FakeButton())
+
+    assert core.get_output_preset_link(speaker_route_key) is None
+    assert test_window.statuses[-1] == "Auto preset cleared"
 
 
 def test_missing_fallback_preset_reports_unavailable(monkeypatch, tmp_path) -> None:
@@ -794,7 +965,7 @@ def test_output_preset_actions_use_route_key_when_available(monkeypatch, tmp_pat
         link_key=route_key,
         has_route_key=True,
     )
-    controller.output_preset_target = lambda: target
+    controller.output_preset_target = lambda *, refresh=False: target
     controller.output_preset_keys = lambda: (route_key, controller.output_sink)
     controller.output_preset_link_key = lambda: route_key
     test_window = OutputPresetWindow(controller)
@@ -1170,13 +1341,11 @@ def test_pipewire_observed_output_change_runs_output_preset_handling() -> None:
     calls: list[object] = []
     fake_window = SimpleNamespace(
         ui_shutting_down=False,
-        controller=SimpleNamespace(
+        controller=FakeOutputTransitionController(
             output_sink="alsa_output.usb",
-            follow_default_output=True,
-            get_default_output_sink_name=lambda: "alsa_output.usb",
-            get_sink=lambda _sink_name: None,
+            observed_identity="alsa_output.speakers",
+            current_identity="alsa_output.usb",
         ),
-        last_output_preset_sink_name="alsa_output.speakers",
         output_preset_auto_applied=True,
         output_preset_curve_auto_loaded=True,
         startup_ready=True,
@@ -1202,7 +1371,8 @@ def test_pipewire_observed_output_change_runs_output_preset_handling() -> None:
         "summary",
         ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
     ]
-    assert fake_window.last_output_preset_sink_name == "alsa_output.usb"
+    assert fake_window.controller.observed_identity == "alsa_output.usb"
+    assert fake_window.controller.transition_consumes == [True]
 
 
 def test_pipewire_observed_port_scope_change_runs_output_preset_handling() -> None:
@@ -1215,14 +1385,11 @@ def test_pipewire_observed_port_scope_change_runs_output_preset_handling() -> No
     )
     fake_window = SimpleNamespace(
         ui_shutting_down=False,
-        controller=SimpleNamespace(
+        controller=FakeOutputTransitionController(
             output_sink="alsa_output.internal",
-            follow_default_output=True,
-            get_default_output_sink_name=lambda: "alsa_output.internal",
-            get_sink=lambda _sink_name: None,
+            observed_identity=old_route_key,
+            current_identity=new_route_key,
         ),
-        last_output_preset_sink_name="alsa_output.internal",
-        last_output_preset_target_identity=old_route_key,
         output_preset_auto_applied=True,
         output_preset_curve_auto_loaded=True,
         startup_ready=True,
@@ -1249,21 +1416,20 @@ def test_pipewire_observed_port_scope_change_runs_output_preset_handling() -> No
         "summary",
         ("auto", {"reset_auto_preset_without_link": True, "announce_no_output_preset": True}),
     ]
-    assert fake_window.last_output_preset_sink_name == "alsa_output.internal"
-    assert fake_window.last_output_preset_target_identity == new_route_key
+    assert fake_window.controller.observed_identity == new_route_key
+    assert fake_window.controller.transition_consumes == [True]
 
 
 def test_manual_output_refresh_updates_selector_without_handling_observed_output_change() -> None:
     calls: list[object] = []
     fake_window = SimpleNamespace(
         ui_shutting_down=False,
-        controller=SimpleNamespace(
+        controller=FakeOutputTransitionController(
             output_sink="alsa_output.usb",
+            observed_identity="alsa_output.speakers",
+            current_identity="alsa_output.usb",
             follow_default_output=False,
-            get_default_output_sink_name=lambda: "alsa_output.usb",
-            get_sink=lambda _sink_name: None,
         ),
-        last_output_preset_sink_name="alsa_output.speakers",
         output_preset_auto_applied=True,
         output_preset_curve_auto_loaded=False,
         startup_ready=True,
@@ -1287,7 +1453,8 @@ def test_manual_output_refresh_updates_selector_without_handling_observed_output
     )
 
     assert calls == ["preset-state", "info", "summary"]
-    assert fake_window.last_output_preset_sink_name == "alsa_output.speakers"
+    assert fake_window.controller.observed_identity == "alsa_output.speakers"
+    assert fake_window.controller.transition_consumes == [False]
 
     calls.clear()
     window.MiniEqWindow.refresh_output_sinks(fake_window)
@@ -1298,7 +1465,8 @@ def test_manual_output_refresh_updates_selector_without_handling_observed_output
         "summary",
         ("auto", {"reset_auto_preset_without_link": False, "announce_no_output_preset": True}),
     ]
-    assert fake_window.last_output_preset_sink_name == "alsa_output.usb"
+    assert fake_window.controller.observed_identity == "alsa_output.usb"
+    assert fake_window.controller.transition_consumes == [False, True]
 
 
 def test_missing_manual_output_stays_visible_in_selector() -> None:
@@ -1306,13 +1474,12 @@ def test_missing_manual_output_stays_visible_in_selector() -> None:
     visible_sink = SimpleNamespace(node_name="alsa_output.usb")
     fake_window = SimpleNamespace(
         ui_shutting_down=False,
-        controller=SimpleNamespace(
+        controller=FakeOutputTransitionController(
             output_sink="alsa_output.missing",
+            observed_identity=None,
+            current_identity="alsa_output.missing",
             follow_default_output=False,
-            get_default_output_sink_name=lambda: "alsa_output.usb",
-            get_sink=lambda _sink_name: None,
         ),
-        last_output_preset_sink_name=None,
         output_preset_auto_applied=False,
         output_preset_curve_auto_loaded=False,
         startup_ready=True,

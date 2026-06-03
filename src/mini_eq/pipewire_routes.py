@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
@@ -9,6 +10,29 @@ DEVICE_ROUTE_PARAM_NAME = "Route"
 DEVICE_ENUM_ROUTE_PARAM_NAME = "EnumRoute"
 DEVICE_ROUTE_EVENT_PARAM_NAMES = (DEVICE_ROUTE_PARAM_NAME, DEVICE_ENUM_ROUTE_PARAM_NAME)
 DEVICE_LABEL_PROPERTY_KEYS = ("device.description", "device.nick", "device.name")
+ROUTE_LABEL_TOKEN_STOP_WORDS = frozenset(
+    {
+        "alsa",
+        "analog",
+        "audio",
+        "card",
+        "device",
+        "fi",
+        "generic",
+        "hi",
+        "hifi",
+        "in",
+        "input",
+        "out",
+        "output",
+        "pci",
+        "profile",
+        "sink",
+        "source",
+        "stereo",
+        "usb",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +59,8 @@ class PipeWireOutputPresetTarget:
     output_key: str | None
     route: PipeWireOutputRoute | None
     keys: tuple[str, ...]
+    device_name: str | None = None
+    route_device: int = 0
 
     @property
     def link_key(self) -> str:
@@ -44,6 +70,18 @@ class PipeWireOutputPresetTarget:
     def has_route_key(self) -> bool:
         route_key = self.route.output_preset_key if self.route is not None else None
         return route_key is not None and route_key in self.keys
+
+    @property
+    def route_device_identity(self) -> str | None:
+        if self.has_route_key:
+            return None
+
+        device = str(self.device_name or "").strip()
+        if not device or self.route_device <= 0:
+            return None
+
+        encoded_device = quote(device, safe="")
+        return f"pipewire-route-device:v1:device={encoded_device};route-device={int(self.route_device)}"
 
 
 def build_output_route_preset_key(device_name: str | None, route_name: str | None, route_device: int) -> str | None:
@@ -55,6 +93,58 @@ def build_output_route_preset_key(device_name: str | None, route_name: str | Non
     encoded_device = quote(device, safe="")
     encoded_route = quote(route, safe="")
     return f"{OUTPUT_PRESET_ROUTE_KEY_PREFIX}device={encoded_device};route={encoded_route};route-device={int(route_device)}"
+
+
+def _route_label_tokens(value: str | None) -> tuple[str, ...]:
+    text = str(value or "").strip()
+    if not text:
+        return ()
+
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text).casefold()
+    tokens: list[str] = []
+    for route_part in re.findall(r"[a-z0-9]+", text):
+        if route_part.isdigit() or route_part in ROUTE_LABEL_TOKEN_STOP_WORDS:
+            continue
+        if len(route_part) > 3 and route_part.endswith("s") and not route_part.endswith("ss"):
+            route_part = route_part[:-1]
+        if route_part and route_part not in ROUTE_LABEL_TOKEN_STOP_WORDS and route_part not in tokens:
+            tokens.append(route_part)
+    return tuple(tokens)
+
+
+def route_matches_sink_label(route: PipeWireOutputRoute, sink) -> bool:
+    sink_labels = (
+        getattr(sink, "node_name", None),
+        getattr(sink, "node_description", None),
+    )
+    sink_tokens: set[str] = set()
+    sink_compacts: list[str] = []
+    for label in sink_labels:
+        tokens = _route_label_tokens(label)
+        sink_tokens.update(tokens)
+        compact = "".join(tokens)
+        if compact:
+            sink_compacts.append(compact)
+
+    if not sink_tokens and not sink_compacts:
+        return False
+
+    route_labels = (
+        route.description,
+        route.name,
+    )
+    for label in route_labels:
+        route_tokens = _route_label_tokens(label)
+        if not route_tokens:
+            continue
+        if set(route_tokens).issubset(sink_tokens):
+            return True
+
+        route_compact = "".join(route_tokens)
+        if len(route_compact) >= 4 and any(route_compact in compact for compact in sink_compacts):
+            return True
+
+    return False
 
 
 class PipeWireRouteMixin:
@@ -69,12 +159,28 @@ class PipeWireRouteMixin:
         keys: list[str] = []
         sink = self.audio_sink_by_name(node_name)
         route = self.output_route_for_sink(sink)
+        device_name = None
+        route_device = 0
+        if route is not None:
+            device_name = route.device_name
+            route_device = route.route_device
+        elif sink is not None:
+            device_name = str(sink.properties.get("device.name") or "").strip() or self._device_name_by_bound_id(
+                sink.device_id
+            )
+            route_device = int(sink.card_profile_device)
         route_key = route.output_preset_key if route is not None else None
         if route_key:
             keys.append(route_key)
         keys.append(node_name)
 
-        return PipeWireOutputPresetTarget(node_name, route, tuple(dict.fromkeys(keys)))
+        return PipeWireOutputPresetTarget(
+            node_name,
+            route,
+            tuple(dict.fromkeys(keys)),
+            device_name=device_name,
+            route_device=route_device,
+        )
 
     def output_route_for_sink(self, sink) -> PipeWireOutputRoute | None:
         if sink is None or sink.device_id <= 0:
@@ -91,14 +197,27 @@ class PipeWireRouteMixin:
         if device is None:
             return None
 
-        routes = self._enumerate_device_routes(device, sink.device_id)
-        output_routes = [
+        routes = self._output_routes_from_device(device, sink.device_id, DEVICE_ROUTE_PARAM_NAME)
+        route = self._select_output_route_for_sink(sink, routes)
+        if route is not None:
+            return route
+
+        enum_routes = self._output_routes_from_device(device, sink.device_id, DEVICE_ENUM_ROUTE_PARAM_NAME)
+        return self._select_output_route_for_sink(sink, enum_routes)
+
+    def _output_routes_from_device(
+        self,
+        device,
+        device_bound_id: int,
+        param_name: str,
+    ) -> list[PipeWireOutputRoute]:
+        routes = self._enumerate_device_routes(device, device_bound_id, param_name)
+        return [
             route
             for route in routes
             if str(route.direction or "").casefold() == OUTPUT_ROUTE_DIRECTION
             and (route.availability or "unknown").casefold() != "no"
         ]
-        return self._select_output_route_for_sink(sink, output_routes)
 
     def _cached_output_route_for_sink(self, sink) -> PipeWireOutputRoute | None:
         try:
@@ -121,6 +240,12 @@ class PipeWireRouteMixin:
                 return matching_device_routes[0]
             if len(matching_device_routes) > 1:
                 return None
+
+        matching_label_routes = [route for route in output_routes if route_matches_sink_label(route, sink)]
+        if len(matching_label_routes) == 1:
+            return matching_label_routes[0]
+        if len(matching_label_routes) > 1:
+            return None
 
         if len(output_routes) == 1:
             return output_routes[0]
@@ -218,8 +343,13 @@ class PipeWireRouteMixin:
 
         return self._properties_dict(global_)
 
-    def _enumerate_device_routes(self, device, device_bound_id: int) -> list[PipeWireOutputRoute]:
-        route_param_id = self._device_route_param_id(device)
+    def _enumerate_device_routes(
+        self,
+        device,
+        device_bound_id: int,
+        route_param_name: str = DEVICE_ROUTE_PARAM_NAME,
+    ) -> list[PipeWireOutputRoute]:
+        route_param_id = self._device_route_param_id(device, route_param_name)
         if route_param_id is None:
             return []
 
@@ -234,10 +364,10 @@ class PipeWireRouteMixin:
             routes: list[PipeWireOutputRoute] = []
             for param in self._iterate_model(params):
                 try:
-                    param_name = param.dup_name()
+                    copied_param_name = param.dup_name()
                 except Exception:
-                    param_name = None
-                if param_name != DEVICE_ROUTE_PARAM_NAME:
+                    copied_param_name = None
+                if copied_param_name != route_param_name:
                     continue
 
                 try:
@@ -256,11 +386,11 @@ class PipeWireRouteMixin:
         finally:
             self._device_route_refreshing_bound_ids.discard(bound_id)
 
-    def _device_route_param_id(self, device) -> int | None:
-        route_param_id = self._device_param_id_by_name(device, DEVICE_ROUTE_PARAM_NAME)
+    def _device_route_param_id(self, device, param_name: str = DEVICE_ROUTE_PARAM_NAME) -> int | None:
+        route_param_id = self._device_param_id_by_name(device, param_name)
         if route_param_id is None:
             self._sync_proxy(device, "device")
-            route_param_id = self._device_param_id_by_name(device, DEVICE_ROUTE_PARAM_NAME)
+            route_param_id = self._device_param_id_by_name(device, param_name)
         return route_param_id
 
     def _device_route_event_param_ids(self, device) -> dict[str, int]:

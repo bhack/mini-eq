@@ -126,6 +126,49 @@ def test_output_preset_link_uses_first_matching_output_key(monkeypatch: pytest.M
     assert core.get_output_preset_link(("missing", "alsa_output.speakers")) == "Speakers"
 
 
+def test_output_preset_route_key_parser_decodes_device_route_identity() -> None:
+    route_key = "pipewire-route:v1:device=alsa_card.usb-Generic_USB_Audio-00;route=%5BOut%5D%20Speaker;route-device=11"
+
+    assert core.parse_output_preset_route_key(route_key) == {
+        "device": "alsa_card.usb-Generic_USB_Audio-00",
+        "route": "[Out] Speaker",
+        "route_device": 11,
+    }
+    assert core.parse_output_preset_route_key("alsa_output.speakers") is None
+    assert core.parse_output_preset_route_key("pipewire-route:v1:device=card;route=headphones") is None
+
+
+def test_output_preset_route_device_link_matches_single_saved_route(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    route_key = "pipewire-route:v1:device=alsa_card.usb-Generic_USB_Audio-00;route=%5BOut%5D%20Speaker;route-device=11"
+    core.write_output_preset_links(
+        {
+            "alsa_output.speakers": "Output Wide",
+            route_key: "Speakers",
+        }
+    )
+
+    assert core.get_output_preset_route_device_link_match("alsa_card.usb-Generic_USB_Audio-00", 11) == (
+        route_key,
+        "Speakers",
+    )
+    assert core.get_output_preset_route_device_link_match("alsa_card.usb-Generic_USB_Audio-00", 12) is None
+
+
+def test_output_preset_route_device_link_does_not_guess_between_saved_routes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    core.write_output_preset_links(
+        {
+            "pipewire-route:v1:device=alsa_card.test;route=analog-output-a;route-device=8": "A",
+            "pipewire-route:v1:device=alsa_card.test;route=analog-output-b;route-device=8": "B",
+        }
+    )
+
+    assert core.get_output_preset_route_device_link_match("alsa_card.test", 8) is None
+
+
 def test_output_preset_links_missing_file_returns_empty(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "missing.json")
 

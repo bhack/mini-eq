@@ -911,7 +911,9 @@ def test_output_preset_keys_prefer_matching_active_route(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
     monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: object())
-    monkeypatch.setattr(backend, "_enumerate_device_routes", lambda _device, _bound_id: [line_out, headphones])
+    monkeypatch.setattr(
+        backend, "_enumerate_device_routes", lambda _device, _bound_id, _param_name="Route": [line_out, headphones]
+    )
 
     assert backend.output_preset_keys_for_sink_name("alsa_output.test") == (
         "pipewire-route:v1:device=alsa_card.test;route=analog-output-headphones;route-device=8",
@@ -950,7 +952,7 @@ def test_output_preset_keys_use_single_route_even_when_profile_device_is_stale(
 
     monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
     monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: object())
-    monkeypatch.setattr(backend, "_enumerate_device_routes", lambda _device, _bound_id: [speakers])
+    monkeypatch.setattr(backend, "_enumerate_device_routes", lambda _device, _bound_id, _param_name="Route": [speakers])
 
     assert backend.output_preset_keys_for_sink_name("alsa_output.test") == (
         "pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=6",
@@ -1001,7 +1003,9 @@ def test_output_preset_keys_do_not_guess_between_routes_sharing_profile_device(
 
     monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
     monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: object())
-    monkeypatch.setattr(backend, "_enumerate_device_routes", lambda _device, _bound_id: [speakers, headphones])
+    monkeypatch.setattr(
+        backend, "_enumerate_device_routes", lambda _device, _bound_id, _param_name="Route": [speakers, headphones]
+    )
 
     assert backend.output_preset_keys_for_sink_name("alsa_output.test") == ("alsa_output.test",)
 
@@ -1024,6 +1028,136 @@ def test_output_preset_keys_fall_back_to_sink_name_without_route_api(monkeypatch
     monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
 
     assert backend.output_preset_keys_for_sink_name("alsa_output.test") == ("alsa_output.test",)
+
+
+def test_output_preset_keys_use_enum_route_when_active_route_is_missing_and_label_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeParam:
+        def __init__(
+            self,
+            name: str,
+            *,
+            route_device: int,
+            route_name: str,
+            description: str,
+        ) -> None:
+            self.name = name
+            self.route_device = route_device
+            self.route_name = route_name
+            self.description = description
+
+        def dup_name(self) -> str:
+            return self.name
+
+    class FakeParamInfo:
+        def __init__(self, param_id: int, name: str) -> None:
+            self.param_id = param_id
+            self.name = name
+
+        def get_id(self) -> int:
+            return self.param_id
+
+        def dup_name(self) -> str:
+            return self.name
+
+    class FakeModel:
+        def __init__(self, items: list[object]) -> None:
+            self.items = items
+
+        def get_n_items(self) -> int:
+            return len(self.items)
+
+        def get_item(self, index: int) -> object:
+            return self.items[index]
+
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.param_infos = FakeModel([FakeParamInfo(13, "Route"), FakeParamInfo(14, "EnumRoute")])
+            self.enum_calls: list[int] = []
+
+        def get_param_infos(self) -> FakeModel:
+            return self.param_infos
+
+        def enum_params_sync(self, param_id: int, _start: int, _num: int, _timeout_ms: int) -> FakeModel:
+            self.enum_calls.append(param_id)
+            if param_id == 13:
+                return FakeModel([])
+            if param_id == 14:
+                return FakeModel(
+                    [
+                        FakeParam(
+                            "EnumRoute",
+                            route_device=11,
+                            route_name="[Out] Speaker",
+                            description="Speakers",
+                        ),
+                        FakeParam(
+                            "EnumRoute",
+                            route_device=12,
+                            route_name="[Out] Headset",
+                            description="Headset",
+                        ),
+                    ]
+                )
+            raise AssertionError(f"unexpected param id: {param_id}")
+
+    class FakeRouteInfo:
+        def __init__(self, param: FakeParam) -> None:
+            self.param = param
+
+        def get_index(self) -> int:
+            return 1
+
+        def get_device(self) -> int:
+            return self.param.route_device
+
+        def get_profile(self) -> int:
+            return 0
+
+        def get_priority(self) -> int:
+            return 200
+
+        def dup_direction(self) -> str:
+            return "output"
+
+        def dup_name(self) -> str:
+            return self.param.route_name
+
+        def dup_description(self) -> str:
+            return self.param.description
+
+        def dup_availability(self) -> str:
+            return "yes"
+
+        def get_info(self) -> dict[str, str]:
+            return {}
+
+    backend = pw_backend.PipeWireBackend()
+    backend._Pwg = SimpleNamespace(Device=FakeDeviceApi, RouteInfo=SimpleNamespace(new_from_param=FakeRouteInfo))
+    sink_name = "alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink"
+    sink = pw_backend.PipeWireNode(
+        bound_id=39,
+        object_serial="67",
+        media_class=pw_backend.AUDIO_SINK,
+        node_name=sink_name,
+        node_description=None,
+        application_name=None,
+        node_dont_move=False,
+        device_id=72,
+        card_profile_device=0,
+    )
+    device = FakeDevice()
+
+    monkeypatch.setattr(backend, "audio_sink_by_name", lambda _name: sink)
+    monkeypatch.setattr(backend, "_device_proxy_by_bound_id", lambda _bound_id: device)
+    monkeypatch.setattr(backend, "_device_name_by_bound_id", lambda _bound_id: "alsa_card.usb-Generic_USB_Audio-00")
+
+    assert backend.output_preset_keys_for_sink_name(sink_name) == (
+        "pipewire-route:v1:device=alsa_card.usb-Generic_USB_Audio-00;route=%5BOut%5D%20Speaker;route-device=11",
+        sink_name,
+    )
+    assert device.enum_calls == [13, 14]
 
 
 def test_enumerate_device_routes_ignores_enum_route_params(monkeypatch: pytest.MonkeyPatch) -> None:

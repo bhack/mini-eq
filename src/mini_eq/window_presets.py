@@ -21,7 +21,8 @@ from .core import (
     ensure_json_suffix,
     fader_band_count_for_profile,
     get_output_preset_fallback_name,
-    get_output_preset_link,
+    get_output_preset_link_match,
+    get_output_preset_route_device_link_match,
     list_preset_names,
     load_mini_eq_preset_file,
     preset_path_for_name,
@@ -31,6 +32,7 @@ from .core import (
     set_output_preset_link,
     write_mini_eq_preset_file,
 )
+from .diagnostics import describe_output_preset_target, trace_startup_event
 from .window_utils import requested_switch_state, set_accessible_label, set_switch_confirmed_state
 
 APO_IMPORT_LABEL_PREFIX = "Imported APO: "
@@ -107,6 +109,11 @@ class MiniEqWindowPresetMixin:
         except Exception:
             return getattr(self.controller, "output_sink", "") or ""
 
+    def remember_output_preset_target(self, target=None) -> None:
+        remember_target = getattr(self.controller, "remember_output_preset_target", None)
+        if callable(remember_target):
+            remember_target(target)
+
     def output_preset_has_route(self, target=None) -> bool:
         return bool(getattr(target, "has_route_key", False))
 
@@ -155,9 +162,23 @@ class MiniEqWindowPresetMixin:
     def output_preset_link_name(self) -> str | None:
         try:
             target = self.output_preset_target()
-            return get_output_preset_link(self.output_preset_keys(target))
+            match = self.output_preset_link_match(target)
+            return match[1] if match is not None else None
         except Exception:
             return None
+
+    def output_preset_link_match(self, target=None) -> tuple[str, str] | None:
+        match = get_output_preset_link_match(self.output_preset_keys(target))
+        if match is not None:
+            return match
+
+        if target is None or getattr(target, "route", None) is not None:
+            return None
+
+        return get_output_preset_route_device_link_match(
+            getattr(target, "device_name", None),
+            getattr(target, "route_device", 0),
+        )
 
     def fallback_preset_name(self) -> str | None:
         try:
@@ -503,7 +524,7 @@ class MiniEqWindowPresetMixin:
             switch.set_tooltip_text(tooltip)
 
         try:
-            linked_preset = get_output_preset_link(self.output_preset_keys(target))
+            link_match = self.output_preset_link_match(target)
         except Exception as exc:
             sync_output_preset_switch(
                 active=False,
@@ -514,6 +535,7 @@ class MiniEqWindowPresetMixin:
             )
             return
 
+        linked_preset = link_match[1] if link_match is not None else None
         has_output = bool(self.controller.output_sink)
         current_signature = self.controller.state_signature()
         has_named_preset = self.current_preset_name is not None
@@ -922,14 +944,50 @@ class MiniEqWindowPresetMixin:
         reset_auto_preset_without_link: bool = False,
         announce_no_output_preset: bool = False,
     ) -> bool:
+        current_preset_before = getattr(self, "current_preset_name", None)
+        auto_loaded_before = bool(getattr(self, "output_preset_curve_auto_loaded", False))
+        auto_applied_before = bool(getattr(self, "output_preset_auto_applied", False))
         target = self.output_preset_target()
+        self.remember_output_preset_target(target)
+        keys = self.output_preset_keys(target)
+        trace_startup_event(
+            "output-preset-apply-start",
+            announce_no_output_preset=announce_no_output_preset,
+            auto_applied_before=auto_applied_before,
+            auto_loaded_before=auto_loaded_before,
+            current_preset_before=current_preset_before,
+            output_sink=getattr(self.controller, "output_sink", None),
+            reset_auto_preset_without_link=reset_auto_preset_without_link,
+            target=describe_output_preset_target(target),
+            target_keys=keys,
+        )
         try:
-            linked_preset = get_output_preset_link(self.output_preset_keys(target))
+            link_match = self.output_preset_link_match(target)
         except Exception as exc:
             self.update_preset_state()
             self.set_status(str(exc))
+            trace_startup_event(
+                "output-preset-link-error",
+                current_preset_after=getattr(self, "current_preset_name", None),
+                error=str(exc),
+                output_sink=getattr(self.controller, "output_sink", None),
+                target=describe_output_preset_target(target),
+                target_keys=keys,
+            )
             self.notify_control_state_changed()
             return True
+
+        linked_key = link_match[0] if link_match is not None else None
+        linked_preset = link_match[1] if link_match is not None else None
+        trace_startup_event(
+            "output-preset-link-selected",
+            current_preset_before=current_preset_before,
+            linked_key=linked_key,
+            linked_preset=linked_preset,
+            output_sink=getattr(self.controller, "output_sink", None),
+            target=describe_output_preset_target(target),
+            target_keys=keys,
+        )
 
         if not linked_preset:
             if self.has_unsaved_curve_changes():
@@ -938,6 +996,14 @@ class MiniEqWindowPresetMixin:
                 self.update_preset_state()
                 if announce_no_output_preset:
                     self.set_status("Current curve kept")
+                trace_startup_event(
+                    "output-preset-no-link-unsaved-kept",
+                    announce_no_output_preset=announce_no_output_preset,
+                    current_preset_after=getattr(self, "current_preset_name", None),
+                    output_sink=getattr(self.controller, "output_sink", None),
+                    target=describe_output_preset_target(target),
+                    target_keys=keys,
+                )
                 self.notify_control_state_changed()
                 return announce_no_output_preset
 
@@ -958,17 +1024,47 @@ class MiniEqWindowPresetMixin:
                     self.output_preset_curve_auto_loaded = False
                     self.update_preset_state()
                     self.set_status("Fallback preset unavailable")
+                    trace_startup_event(
+                        "output-preset-fallback-unavailable",
+                        current_preset_after=getattr(self, "current_preset_name", None),
+                        fallback_preset=default_preset,
+                        output_sink=getattr(self.controller, "output_sink", None),
+                        target=describe_output_preset_target(target),
+                        target_keys=keys,
+                    )
                     self.notify_control_state_changed()
                 else:
+                    trace_startup_event(
+                        "output-preset-fallback-applied",
+                        current_preset_after=getattr(self, "current_preset_name", None),
+                        fallback_preset=default_preset,
+                        output_sink=getattr(self.controller, "output_sink", None),
+                        target=describe_output_preset_target(target),
+                        target_keys=keys,
+                    )
                     return True
 
             if reset_auto_preset_without_link:
                 self.reset_curve_to_neutral("Unmatched output bypassed")
+                trace_startup_event(
+                    "output-preset-no-link-reset-neutral",
+                    current_preset_after=getattr(self, "current_preset_name", None),
+                    output_sink=getattr(self.controller, "output_sink", None),
+                    target=describe_output_preset_target(target),
+                    target_keys=keys,
+                )
                 return True
 
             self.output_preset_auto_applied = False
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
+            trace_startup_event(
+                "output-preset-no-link",
+                current_preset_after=getattr(self, "current_preset_name", None),
+                output_sink=getattr(self.controller, "output_sink", None),
+                target=describe_output_preset_target(target),
+                target_keys=keys,
+            )
             self.notify_control_state_changed()
             return False
 
@@ -977,6 +1073,14 @@ class MiniEqWindowPresetMixin:
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
             self.set_status("Current curve kept")
+            trace_startup_event(
+                "output-preset-linked-unsaved-kept",
+                current_preset_after=getattr(self, "current_preset_name", None),
+                linked_preset=linked_preset,
+                output_sink=getattr(self.controller, "output_sink", None),
+                target=describe_output_preset_target(target),
+                target_keys=keys,
+            )
             self.notify_control_state_changed()
             return True
 
@@ -987,11 +1091,27 @@ class MiniEqWindowPresetMixin:
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()
             self.set_status("Auto preset unavailable")
+            trace_startup_event(
+                "output-preset-linked-unavailable",
+                current_preset_after=getattr(self, "current_preset_name", None),
+                linked_preset=linked_preset,
+                output_sink=getattr(self.controller, "output_sink", None),
+                target=describe_output_preset_target(target),
+                target_keys=keys,
+            )
             self.notify_control_state_changed()
             return True
 
         self.output_preset_auto_applied = True
         self.update_output_preset_state()
+        trace_startup_event(
+            "output-preset-linked-applied",
+            current_preset_after=getattr(self, "current_preset_name", None),
+            linked_preset=linked_preset,
+            output_sink=getattr(self.controller, "output_sink", None),
+            target=describe_output_preset_target(target),
+            target_keys=keys,
+        )
         self.notify_control_state_changed()
         return True
 
@@ -1200,7 +1320,11 @@ class MiniEqWindowPresetMixin:
     def on_clear_output_preset_link_clicked(self, _button: Gtk.Widget) -> None:
         target = self.output_preset_target()
         try:
-            removed = clear_output_preset_link(self.output_preset_keys(target))
+            keys = list(self.output_preset_keys(target))
+            link_match = self.output_preset_link_match(target)
+            if link_match is not None and link_match[0] not in keys:
+                keys.insert(0, link_match[0])
+            removed = clear_output_preset_link(keys)
             self.output_preset_auto_applied = False
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()

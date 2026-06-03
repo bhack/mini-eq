@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from tests._mini_eq_imports import pipewire_routes as pw_routes
 
 
@@ -39,3 +41,52 @@ def test_output_preset_target_falls_back_to_output_key_without_route() -> None:
 
     assert target.link_key == "alsa_output.test"
     assert target.has_route_key is False
+
+
+def test_output_preset_target_records_sink_route_device_without_route_key() -> None:
+    class FakeRouteBackend(pw_routes.PipeWireRouteMixin):
+        def audio_sink_by_name(self, _sink_name: str):
+            return SimpleNamespace(
+                device_id=72,
+                card_profile_device=11,
+                properties={},
+            )
+
+        def output_route_for_sink(self, _sink):
+            return None
+
+        def _device_name_by_bound_id(self, _bound_id: int) -> str:
+            return "alsa_card.usb-Generic_USB_Audio-00"
+
+    target = FakeRouteBackend().output_preset_target_for_sink_name(
+        "alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink"
+    )
+
+    assert target.keys == ("alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink",)
+    assert target.device_name == "alsa_card.usb-Generic_USB_Audio-00"
+    assert target.route_device == 11
+    assert (
+        target.route_device_identity
+        == "pipewire-route-device:v1:device=alsa_card.usb-Generic_USB_Audio-00;route-device=11"
+    )
+
+
+def test_route_matches_route_specific_ucm_sink_label() -> None:
+    route = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.usb-Generic_USB_Audio-00",
+        index=1,
+        route_device=11,
+        profile=0,
+        priority=200,
+        direction="Output",
+        name="[Out] Speaker",
+        description="Speakers",
+        availability="yes",
+    )
+    sink = SimpleNamespace(
+        node_name="alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink",
+        node_description=None,
+    )
+
+    assert pw_routes.route_matches_sink_label(route, sink) is True
