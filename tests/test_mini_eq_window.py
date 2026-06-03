@@ -54,6 +54,29 @@ class FakeFile:
         return self.path
 
 
+class FakeModel:
+    def __init__(self) -> None:
+        self.items: list[str] = []
+
+    def get_n_items(self) -> int:
+        return len(self.items)
+
+    def splice(self, position: int, removed: int, added: list[str]) -> None:
+        self.items[position : position + removed] = added
+
+
+class FakeCombo:
+    def __init__(self) -> None:
+        self.selected = 0
+        self.sensitive = True
+
+    def set_selected(self, selected: int) -> None:
+        self.selected = selected
+
+    def set_sensitive(self, sensitive: bool) -> None:
+        self.sensitive = sensitive
+
+
 class FakeOpenDialog:
     def __init__(self, path: str) -> None:
         self.path = path
@@ -375,6 +398,7 @@ def test_startup_ready_applies_startup_state_before_presenting() -> None:
         controller=controller,
         start_preset_monitoring=lambda: calls.append("preset-monitor"),
         apply_output_preset_for_current_output=lambda: calls.append("output-preset"),
+        schedule_startup_output_preset_refresh=lambda: calls.append("output-preset-refresh"),
         update_eq_power_indicator=lambda: calls.append(("power", fake_window.route_switch.get_active())),
         update_info_label=lambda: calls.append(("info", fake_window.route_switch.get_active())),
         update_status_summary=lambda: calls.append(("summary", fake_window.route_switch.get_active())),
@@ -406,6 +430,7 @@ def test_startup_ready_applies_startup_state_before_presenting() -> None:
         ("summary", True),
         "focus",
         "notify",
+        "output-preset-refresh",
         "startup-id",
         ("visible", True),
         "present",
@@ -428,6 +453,7 @@ def test_startup_ready_without_presenting_does_not_force_startup_notification() 
         present_when_ready=False,
         start_preset_monitoring=lambda: calls.append("preset-monitor"),
         apply_output_preset_for_current_output=lambda: calls.append("output-preset"),
+        schedule_startup_output_preset_refresh=lambda: calls.append("output-preset-refresh"),
         start_analyzer_preview=lambda: calls.append("monitor"),
         notify_control_state_changed=lambda: calls.append("notify"),
         get_application=lambda: application,
@@ -441,6 +467,7 @@ def test_startup_ready_without_presenting_does_not_force_startup_notification() 
         "preset-monitor",
         "output-preset",
         "monitor",
+        "output-preset-refresh",
         "notify",
     ]
 
@@ -542,6 +569,122 @@ def test_startup_auto_route_reapplies_preset_when_followed_output_changes() -> N
         ("summary", True),
         "focus",
         "notify",
+    ]
+
+
+def test_startup_output_preset_refresh_rechecks_stale_output_wide_target() -> None:
+    calls: list[object] = []
+    target = SimpleNamespace(
+        link_key="pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=7",
+        keys=("pipewire-route:v1:device=alsa_card.test;route=analog-output-speaker;route-device=7",),
+        has_route_key=True,
+    )
+    controller = SimpleNamespace(
+        output_sink="alsa_output.speakers",
+        follow_default_output=True,
+        invalidate_output_preset_target=lambda: calls.append("invalidate"),
+        get_default_output_sink_name=lambda: "alsa_output.speakers",
+        get_sink=lambda _sink_name: None,
+    )
+    fake_window = SimpleNamespace(
+        ui_shutting_down=False,
+        startup_ready=True,
+        startup_output_preset_refresh_source_id=88,
+        startup_output_preset_refresh_deadline_us=999_999,
+        controller=controller,
+        last_output_preset_sink_name="alsa_output.speakers",
+        last_output_preset_target_identity="alsa_output.speakers",
+        output_preset_curve_auto_loaded=True,
+        list_visible_output_sinks=lambda: [],
+        build_output_sink_labels=lambda _sinks: [],
+        follow_default_output_label=lambda: "Follow system output",
+        output_sink_names=[],
+        output_sink_labels=[],
+        output_sink_model=FakeModel(),
+        output_combo=FakeCombo(),
+        updating_output_combo=False,
+        output_preset_target=lambda: target,
+        output_preset_has_route=lambda current_target=None: bool(getattr(current_target, "has_route_key", False)),
+        update_preset_state=lambda: calls.append("preset-state"),
+        update_info_label=lambda: calls.append("info"),
+        update_status_summary=lambda: calls.append("summary"),
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("output-preset", kwargs)) or True,
+    )
+    fake_window.refresh_output_sinks = MethodType(window.MiniEqWindow.refresh_output_sinks, fake_window)
+
+    keep_source = window.MiniEqWindow.on_startup_output_preset_refresh_timeout(fake_window)
+
+    assert keep_source is False
+    assert fake_window.startup_output_preset_refresh_source_id == 0
+    assert fake_window.startup_output_preset_refresh_deadline_us == 0
+    assert calls == [
+        "invalidate",
+        "preset-state",
+        "info",
+        "summary",
+        (
+            "output-preset",
+            {"reset_auto_preset_without_link": True, "announce_no_output_preset": True},
+        ),
+    ]
+    assert fake_window.last_output_preset_target_identity == target.link_key
+
+
+def test_startup_output_preset_refresh_clears_stale_auto_curve_after_timeout(monkeypatch) -> None:
+    calls: list[object] = []
+    target = SimpleNamespace(
+        link_key="alsa_output.speakers",
+        keys=("alsa_output.speakers",),
+        has_route_key=False,
+    )
+    controller = SimpleNamespace(
+        output_sink="alsa_output.speakers",
+        follow_default_output=True,
+        invalidate_output_preset_target=lambda: calls.append("invalidate"),
+        get_default_output_sink_name=lambda: "alsa_output.speakers",
+        get_sink=lambda _sink_name: None,
+    )
+    fake_window = SimpleNamespace(
+        ui_shutting_down=False,
+        startup_ready=True,
+        startup_output_preset_refresh_source_id=88,
+        startup_output_preset_refresh_deadline_us=1_000,
+        controller=controller,
+        last_output_preset_sink_name="alsa_output.speakers",
+        last_output_preset_target_identity="alsa_output.speakers",
+        output_preset_curve_auto_loaded=True,
+        list_visible_output_sinks=lambda: [],
+        build_output_sink_labels=lambda _sinks: [],
+        follow_default_output_label=lambda: "Follow system output",
+        output_sink_names=[],
+        output_sink_labels=[],
+        output_sink_model=FakeModel(),
+        output_combo=FakeCombo(),
+        updating_output_combo=False,
+        output_preset_target=lambda: target,
+        output_preset_has_route=lambda current_target=None: bool(getattr(current_target, "has_route_key", False)),
+        update_preset_state=lambda: calls.append("preset-state"),
+        update_info_label=lambda: calls.append("info"),
+        update_status_summary=lambda: calls.append("summary"),
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("output-preset", kwargs)) or True,
+    )
+    fake_window.refresh_output_sinks = MethodType(window.MiniEqWindow.refresh_output_sinks, fake_window)
+    monkeypatch.setattr(window.GLib, "get_monotonic_time", lambda: 1_000)
+
+    keep_source = window.MiniEqWindow.on_startup_output_preset_refresh_timeout(fake_window)
+
+    assert keep_source is False
+    assert fake_window.startup_output_preset_refresh_source_id == 0
+    assert fake_window.startup_output_preset_refresh_deadline_us == 0
+    assert calls == [
+        "invalidate",
+        "preset-state",
+        "info",
+        "summary",
+        (
+            "output-preset",
+            {"reset_auto_preset_without_link": True, "announce_no_output_preset": True},
+        ),
     ]
 
 

@@ -61,6 +61,8 @@ DEFAULT_WINDOW_SCREEN_MARGIN = 32
 ROUTING_CLOSE_SETTLE_MS = 300
 STARTUP_AUTO_ROUTE_RETRY_INTERVAL_SECONDS = 1
 STARTUP_AUTO_ROUTE_RETRY_TIMEOUT_US = 30_000_000
+STARTUP_OUTPUT_PRESET_REFRESH_INTERVAL_MS = 750
+STARTUP_OUTPUT_PRESET_REFRESH_TIMEOUT_US = 10_000_000
 TOAST_IGNORED_PREFIXES = (
     "filter-chain PipeWire EQ ready:",
     "filter-chain PipeWire EQ stopped",
@@ -189,6 +191,8 @@ class MiniEqWindow(
         self.startup_ready_source_id = 0
         self.startup_auto_route_source_id = 0
         self.startup_auto_route_deadline_us = 0
+        self.startup_output_preset_refresh_source_id = 0
+        self.startup_output_preset_refresh_deadline_us = 0
         self.startup_ready = False
         self.present_when_ready = True
         self.responsive_layout_source_id = 0
@@ -361,6 +365,7 @@ class MiniEqWindow(
         self.start_analyzer_preview()
         if self.auto_route_on_startup:
             self.apply_startup_auto_route()
+        self.schedule_startup_output_preset_refresh()
 
         if not self.ui_shutting_down:
             if self.present_when_ready:
@@ -432,6 +437,44 @@ class MiniEqWindow(
                 )
         self.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled)
 
+    def schedule_startup_output_preset_refresh(self) -> None:
+        if self.ui_shutting_down or self.startup_output_preset_refresh_source_id != 0:
+            return
+
+        if self.startup_output_preset_refresh_deadline_us <= 0:
+            self.startup_output_preset_refresh_deadline_us = (
+                GLib.get_monotonic_time() + STARTUP_OUTPUT_PRESET_REFRESH_TIMEOUT_US
+            )
+        self.startup_output_preset_refresh_source_id = GLib.timeout_add(
+            STARTUP_OUTPUT_PRESET_REFRESH_INTERVAL_MS,
+            self.on_startup_output_preset_refresh_timeout,
+        )
+
+    def on_startup_output_preset_refresh_timeout(self) -> bool:
+        if self.ui_shutting_down or not self.startup_ready:
+            self.startup_output_preset_refresh_source_id = 0
+            self.startup_output_preset_refresh_deadline_us = 0
+            return False
+
+        self.refresh_output_sinks(refresh_output_preset_target=True)
+        target = self.output_preset_target()
+        if self.output_preset_has_route(target):
+            self.startup_output_preset_refresh_source_id = 0
+            self.startup_output_preset_refresh_deadline_us = 0
+            return False
+
+        if GLib.get_monotonic_time() < self.startup_output_preset_refresh_deadline_us:
+            return True
+
+        self.startup_output_preset_refresh_source_id = 0
+        self.startup_output_preset_refresh_deadline_us = 0
+        if self.output_preset_curve_auto_loaded:
+            self.apply_output_preset_for_current_output(
+                reset_auto_preset_without_link=True,
+                announce_no_output_preset=True,
+            )
+        return False
+
     def on_startup_auto_route_idle(self) -> bool:
         self.startup_auto_route_source_id = 0
 
@@ -453,6 +496,10 @@ class MiniEqWindow(
         if self.startup_auto_route_source_id > 0:
             destroy_glib_source(self.startup_auto_route_source_id)
             self.startup_auto_route_source_id = 0
+        if self.startup_output_preset_refresh_source_id > 0:
+            destroy_glib_source(self.startup_output_preset_refresh_source_id)
+            self.startup_output_preset_refresh_source_id = 0
+        self.startup_output_preset_refresh_deadline_us = 0
         if self.responsive_layout_source_id > 0:
             destroy_glib_source(self.responsive_layout_source_id)
             self.responsive_layout_source_id = 0
@@ -909,9 +956,19 @@ class MiniEqWindow(
             self.system_state_label.set_text("Standby")
             self.system_state_label.add_css_class("system-state-idle")
 
-    def refresh_output_sinks(self, *, handle_observed_output_change: bool = True) -> None:
+    def refresh_output_sinks(
+        self,
+        *,
+        handle_observed_output_change: bool = True,
+        refresh_output_preset_target: bool = False,
+    ) -> None:
         if self.ui_shutting_down:
             return
+
+        if refresh_output_preset_target:
+            invalidate_target = getattr(self.controller, "invalidate_output_preset_target", None)
+            if callable(invalidate_target):
+                invalidate_target()
 
         active = self.controller.output_sink
         previous_output = self.last_output_preset_sink_name
