@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import unquote
 
 import numpy as np
 
@@ -23,6 +24,7 @@ PRESET_VERSION = 1
 PRESET_FILE_SUFFIX = ".json"
 OUTPUT_PRESET_LINKS_VERSION = 1
 OUTPUT_PRESET_LINKS_FILE = "output-presets.json"
+OUTPUT_PRESET_ROUTE_KEY_PREFIX = "pipewire-route:v1:"
 EQ_MODE_APO = 6
 SAMPLE_RATE = 48000.0
 GRAPH_FREQ_MIN = 20.0
@@ -426,6 +428,35 @@ def normalize_output_preset_key_candidates(output_keys: str | Iterable[str | Non
     return normalized
 
 
+def parse_output_preset_route_key(output_key: str | None) -> dict[str, object] | None:
+    key = str(output_key or "").strip()
+    if not key.startswith(OUTPUT_PRESET_ROUTE_KEY_PREFIX):
+        return None
+
+    fields: dict[str, str] = {}
+    for part in key[len(OUTPUT_PRESET_ROUTE_KEY_PREFIX) :].split(";"):
+        if "=" not in part:
+            return None
+        name, value = part.split("=", 1)
+        fields[name] = unquote(value)
+
+    device_name = fields.get("device", "").strip()
+    route_name = fields.get("route", "").strip()
+    try:
+        route_device = int(fields.get("route-device", ""))
+    except ValueError:
+        return None
+
+    if not device_name or not route_name or route_device < 0:
+        return None
+
+    return {
+        "device": device_name,
+        "route": route_name,
+        "route_device": route_device,
+    }
+
+
 def load_output_preset_config() -> tuple[dict[str, str], str | None]:
     links_path = output_preset_links_path()
     if not links_path.exists():
@@ -489,6 +520,34 @@ def get_output_preset_link_match(output_keys: str | Iterable[str | None] | None)
 def get_output_preset_link(output_keys: str | Iterable[str | None] | None) -> str | None:
     match = get_output_preset_link_match(output_keys)
     return match[1] if match is not None else None
+
+
+def get_output_preset_route_device_link_match(
+    device_name: str | None,
+    route_device: int | None,
+) -> tuple[str, str] | None:
+    device = str(device_name or "").strip()
+    try:
+        route_device_id = int(route_device)
+    except (TypeError, ValueError):
+        return None
+
+    if not device or route_device_id < 0:
+        return None
+
+    links, _default_preset = load_output_preset_config()
+    matches: list[tuple[str, str]] = []
+    for output_key, preset_name in links.items():
+        route_key = parse_output_preset_route_key(output_key)
+        if route_key is None:
+            continue
+        if route_key["device"] == device and route_key["route_device"] == route_device_id:
+            matches.append((output_key, preset_name))
+
+    if len(matches) == 1:
+        return matches[0]
+
+    return None
 
 
 def get_default_preset_name() -> str | None:

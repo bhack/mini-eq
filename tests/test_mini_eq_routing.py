@@ -175,6 +175,21 @@ def test_output_preset_target_transition_tracks_controller_snapshot() -> None:
     assert calls == ["speakers", "hdmi"]
 
 
+def test_output_preset_target_identity_uses_route_device_when_route_key_is_missing() -> None:
+    target = pw_routes.PipeWireOutputPresetTarget(
+        "alsa_output.usb",
+        None,
+        ("alsa_output.usb",),
+        device_name="alsa_card.usb-Generic_USB_Audio-00",
+        route_device=11,
+    )
+
+    assert (
+        routing.output_preset_target_identity(target, "alsa_output.usb")
+        == "pipewire-route-device:v1:device=alsa_card.usb-Generic_USB_Audio-00;route-device=11"
+    )
+
+
 def test_remember_output_preset_target_distinguishes_missing_target_from_omitted_target() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     calls: list[str | None] = []

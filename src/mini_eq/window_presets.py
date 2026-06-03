@@ -21,7 +21,8 @@ from .core import (
     ensure_json_suffix,
     fader_band_count_for_profile,
     get_output_preset_fallback_name,
-    get_output_preset_link,
+    get_output_preset_link_match,
+    get_output_preset_route_device_link_match,
     list_preset_names,
     load_mini_eq_preset_file,
     preset_path_for_name,
@@ -161,9 +162,23 @@ class MiniEqWindowPresetMixin:
     def output_preset_link_name(self) -> str | None:
         try:
             target = self.output_preset_target()
-            return get_output_preset_link(self.output_preset_keys(target))
+            match = self.output_preset_link_match(target)
+            return match[1] if match is not None else None
         except Exception:
             return None
+
+    def output_preset_link_match(self, target=None) -> tuple[str, str] | None:
+        match = get_output_preset_link_match(self.output_preset_keys(target))
+        if match is not None:
+            return match
+
+        if target is None or getattr(target, "route", None) is not None:
+            return None
+
+        return get_output_preset_route_device_link_match(
+            getattr(target, "device_name", None),
+            getattr(target, "route_device", 0),
+        )
 
     def fallback_preset_name(self) -> str | None:
         try:
@@ -509,7 +524,7 @@ class MiniEqWindowPresetMixin:
             switch.set_tooltip_text(tooltip)
 
         try:
-            linked_preset = get_output_preset_link(self.output_preset_keys(target))
+            link_match = self.output_preset_link_match(target)
         except Exception as exc:
             sync_output_preset_switch(
                 active=False,
@@ -520,6 +535,7 @@ class MiniEqWindowPresetMixin:
             )
             return
 
+        linked_preset = link_match[1] if link_match is not None else None
         has_output = bool(self.controller.output_sink)
         current_signature = self.controller.state_signature()
         has_named_preset = self.current_preset_name is not None
@@ -946,7 +962,7 @@ class MiniEqWindowPresetMixin:
             target_keys=keys,
         )
         try:
-            linked_preset = get_output_preset_link(keys)
+            link_match = self.output_preset_link_match(target)
         except Exception as exc:
             self.update_preset_state()
             self.set_status(str(exc))
@@ -961,9 +977,12 @@ class MiniEqWindowPresetMixin:
             self.notify_control_state_changed()
             return True
 
+        linked_key = link_match[0] if link_match is not None else None
+        linked_preset = link_match[1] if link_match is not None else None
         trace_startup_event(
             "output-preset-link-selected",
             current_preset_before=current_preset_before,
+            linked_key=linked_key,
             linked_preset=linked_preset,
             output_sink=getattr(self.controller, "output_sink", None),
             target=describe_output_preset_target(target),
@@ -1301,7 +1320,11 @@ class MiniEqWindowPresetMixin:
     def on_clear_output_preset_link_clicked(self, _button: Gtk.Widget) -> None:
         target = self.output_preset_target()
         try:
-            removed = clear_output_preset_link(self.output_preset_keys(target))
+            keys = list(self.output_preset_keys(target))
+            link_match = self.output_preset_link_match(target)
+            if link_match is not None and link_match[0] not in keys:
+                keys.insert(0, link_match[0])
+            removed = clear_output_preset_link(keys)
             self.output_preset_auto_applied = False
             self.output_preset_curve_auto_loaded = False
             self.update_preset_state()

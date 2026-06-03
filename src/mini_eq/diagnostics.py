@@ -37,11 +37,13 @@ def describe_output_preset_target(target: object | None) -> dict[str, object] | 
         }
 
     return {
+        "device_name": _json_safe(getattr(target, "device_name", None)),
         "has_route_key": bool(getattr(target, "has_route_key", False)),
         "keys": _json_safe(tuple(getattr(target, "keys", ()) or ())),
         "link_key": _json_safe(getattr(target, "link_key", "")),
         "output_key": _json_safe(getattr(target, "output_key", None)),
         "route": route_info,
+        "route_device": _json_safe(getattr(target, "route_device", None)),
     }
 
 

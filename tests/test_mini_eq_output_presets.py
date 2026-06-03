@@ -789,6 +789,66 @@ def test_fallback_preset_loads_for_initial_unlinked_output(monkeypatch, tmp_path
     assert test_window.statuses[-1] == "Fallback preset applied"
 
 
+def test_auto_apply_uses_saved_route_device_link_when_route_key_is_missing(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    speaker_route_key = (
+        "pipewire-route:v1:device=alsa_card.usb-Generic_USB_Audio-00;route=%5BOut%5D%20Speaker;route-device=11"
+    )
+    write_test_preset("Speakers Profile", -1.5)
+    write_test_preset("Headset Profile", 2.5)
+    core.set_output_preset_link(speaker_route_key, "Speakers Profile")
+    controller = make_controller("alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink")
+    target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=None,
+        keys=(controller.output_sink,),
+        link_key=controller.output_sink,
+        has_route_key=False,
+        device_name="alsa_card.usb-Generic_USB_Audio-00",
+        route_device=11,
+    )
+    controller.output_preset_target = lambda *, refresh=False: target
+    test_window = OutputPresetWindow(controller)
+    test_window.refresh_preset_list()
+    test_window.load_library_preset("Headset Profile")
+
+    assert test_window.apply_output_preset_for_current_output() is True
+
+    assert test_window.current_preset_name == "Speakers Profile"
+    assert controller.bands[0].gain_db == -1.5
+    assert test_window.output_preset_auto_applied is True
+    assert test_window.output_preset_curve_auto_loaded is True
+    assert test_window.statuses[-1] == "Auto preset applied"
+
+
+def test_clear_output_preset_removes_recovered_route_device_link(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    speaker_route_key = (
+        "pipewire-route:v1:device=alsa_card.usb-Generic_USB_Audio-00;route=%5BOut%5D%20Speaker;route-device=11"
+    )
+    write_test_preset("Speakers Profile", -1.5)
+    core.set_output_preset_link(speaker_route_key, "Speakers Profile")
+    controller = make_controller("alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink")
+    target = SimpleNamespace(
+        output_key=controller.output_sink,
+        route=None,
+        keys=(controller.output_sink,),
+        link_key=controller.output_sink,
+        has_route_key=False,
+        device_name="alsa_card.usb-Generic_USB_Audio-00",
+        route_device=11,
+    )
+    controller.output_preset_target = lambda *, refresh=False: target
+    test_window = OutputPresetWindow(controller)
+
+    test_window.on_clear_output_preset_link_clicked(FakeButton())
+
+    assert core.get_output_preset_link(speaker_route_key) is None
+    assert test_window.statuses[-1] == "Auto preset cleared"
+
+
 def test_missing_fallback_preset_reports_unavailable(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
     monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")

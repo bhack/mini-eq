@@ -35,6 +35,8 @@ class PipeWireOutputPresetTarget:
     output_key: str | None
     route: PipeWireOutputRoute | None
     keys: tuple[str, ...]
+    device_name: str | None = None
+    route_device: int = 0
 
     @property
     def link_key(self) -> str:
@@ -44,6 +46,18 @@ class PipeWireOutputPresetTarget:
     def has_route_key(self) -> bool:
         route_key = self.route.output_preset_key if self.route is not None else None
         return route_key is not None and route_key in self.keys
+
+    @property
+    def route_device_identity(self) -> str | None:
+        if self.has_route_key:
+            return None
+
+        device = str(self.device_name or "").strip()
+        if not device or self.route_device <= 0:
+            return None
+
+        encoded_device = quote(device, safe="")
+        return f"pipewire-route-device:v1:device={encoded_device};route-device={int(self.route_device)}"
 
 
 def build_output_route_preset_key(device_name: str | None, route_name: str | None, route_device: int) -> str | None:
@@ -69,12 +83,28 @@ class PipeWireRouteMixin:
         keys: list[str] = []
         sink = self.audio_sink_by_name(node_name)
         route = self.output_route_for_sink(sink)
+        device_name = None
+        route_device = 0
+        if route is not None:
+            device_name = route.device_name
+            route_device = route.route_device
+        elif sink is not None:
+            device_name = str(sink.properties.get("device.name") or "").strip() or self._device_name_by_bound_id(
+                sink.device_id
+            )
+            route_device = int(sink.card_profile_device)
         route_key = route.output_preset_key if route is not None else None
         if route_key:
             keys.append(route_key)
         keys.append(node_name)
 
-        return PipeWireOutputPresetTarget(node_name, route, tuple(dict.fromkeys(keys)))
+        return PipeWireOutputPresetTarget(
+            node_name,
+            route,
+            tuple(dict.fromkeys(keys)),
+            device_name=device_name,
+            route_device=route_device,
+        )
 
     def output_route_for_sink(self, sink) -> PipeWireOutputRoute | None:
         if sink is None or sink.device_id <= 0:

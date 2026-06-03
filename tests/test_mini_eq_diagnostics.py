@@ -45,8 +45,10 @@ def test_describe_output_preset_target_records_route_identity() -> None:
         route_device=11,
     )
     target = SimpleNamespace(
+        device_name="alsa_card.test",
         output_key="alsa_output.speakers",
         route=route,
+        route_device=11,
         keys=("pipewire-route:v1:speakers", "alsa_output.speakers"),
         link_key="pipewire-route:v1:speakers",
         has_route_key=True,
@@ -55,6 +57,7 @@ def test_describe_output_preset_target_records_route_identity() -> None:
     description = diagnostics.describe_output_preset_target(target)
 
     assert description == {
+        "device_name": "alsa_card.test",
         "has_route_key": True,
         "keys": ["pipewire-route:v1:speakers", "alsa_output.speakers"],
         "link_key": "pipewire-route:v1:speakers",
@@ -66,4 +69,5 @@ def test_describe_output_preset_target_records_route_identity() -> None:
             "output_preset_key": "pipewire-route:v1:speakers",
             "route_device": 11,
         },
+        "route_device": 11,
     }

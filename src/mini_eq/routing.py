@@ -76,7 +76,15 @@ def output_preset_target_identity(
     fallback: str | None,
 ) -> str | None:
     if target is not None:
+        has_route_key = bool(getattr(target, "has_route_key", False))
         link_key = str(getattr(target, "link_key", "") or "").strip()
+        if has_route_key and link_key:
+            return link_key
+
+        route_device_identity = str(getattr(target, "route_device_identity", "") or "").strip()
+        if route_device_identity:
+            return route_device_identity
+
         if link_key:
             return link_key
 
