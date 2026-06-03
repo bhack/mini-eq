@@ -69,3 +69,24 @@ def test_output_preset_target_records_sink_route_device_without_route_key() -> N
         target.route_device_identity
         == "pipewire-route-device:v1:device=alsa_card.usb-Generic_USB_Audio-00;route-device=11"
     )
+
+
+def test_route_matches_route_specific_ucm_sink_label() -> None:
+    route = pw_routes.PipeWireOutputRoute(
+        device_bound_id=72,
+        device_name="alsa_card.usb-Generic_USB_Audio-00",
+        index=1,
+        route_device=11,
+        profile=0,
+        priority=200,
+        direction="Output",
+        name="[Out] Speaker",
+        description="Speakers",
+        availability="yes",
+    )
+    sink = SimpleNamespace(
+        node_name="alsa_output.usb-Generic_USB_Audio-00.HiFi__Speaker__sink",
+        node_description=None,
+    )
+
+    assert pw_routes.route_matches_sink_label(route, sink) is True
