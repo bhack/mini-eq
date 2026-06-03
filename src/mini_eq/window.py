@@ -79,57 +79,6 @@ def compact_warning_title(message: str) -> str:
     return COMPACT_WARNING_TITLES.get(message, message)
 
 
-def output_preset_target_identity(owner: object, fallback: str | None) -> str | None:
-    target = None
-    target_factory = getattr(owner, "output_preset_target", None)
-    if callable(target_factory):
-        try:
-            target = target_factory()
-        except Exception:
-            target = None
-
-    if target is not None:
-        try:
-            link_key = str(getattr(target, "link_key", "") or "").strip()
-        except Exception:
-            link_key = ""
-        if link_key:
-            return link_key
-
-        try:
-            keys = tuple(getattr(target, "keys", ()) or ())
-        except Exception:
-            keys = ()
-        for key in keys:
-            key_text = str(key or "").strip()
-            if key_text:
-                return key_text
-
-    controller = getattr(owner, "controller", None)
-    if controller is not None:
-        link_key_factory = getattr(controller, "output_preset_link_key", None)
-        if callable(link_key_factory):
-            try:
-                link_key = str(link_key_factory() or "").strip()
-            except Exception:
-                link_key = ""
-            if link_key:
-                return link_key
-
-        keys_factory = getattr(controller, "output_preset_keys", None)
-        if callable(keys_factory):
-            try:
-                keys = tuple(keys_factory() or ())
-            except Exception:
-                keys = ()
-            for key in keys:
-                key_text = str(key or "").strip()
-                if key_text:
-                    return key_text
-
-    return fallback
-
-
 def fit_window_default_size_to_monitor(
     width: int,
     height: int,
@@ -225,8 +174,6 @@ class MiniEqWindow(
         self.output_preset_auto_applied = False
         self.output_preset_curve_auto_loaded = False
         self.updating_output_preset_switch = False
-        self.last_output_preset_sink_name: str | None = None
-        self.last_output_preset_target_identity: str | None = None
         self.preset_monitor: Gio.FileMonitor | None = None
         self.preset_refresh_source_id = 0
         self.analyzer_enabled = load_monitor_enabled()
@@ -412,7 +359,6 @@ class MiniEqWindow(
 
     def apply_startup_auto_route(self) -> None:
         eq_was_enabled = self.controller.eq_enabled
-        previous_output_identity = output_preset_target_identity(self, getattr(self.controller, "output_sink", None))
         previous_output_preset_auto_loaded = bool(getattr(self, "output_preset_curve_auto_loaded", False))
         route_applied = False
         try:
@@ -424,8 +370,8 @@ class MiniEqWindow(
             route_applied = True
             self.startup_auto_route_deadline_us = 0
         if route_applied:
-            active_output_identity = output_preset_target_identity(self, getattr(self.controller, "output_sink", None))
-            if previous_output_identity != active_output_identity:
+            target_transition = self.controller.output_preset_target_transition()
+            if target_transition.changed:
                 self.apply_output_preset_for_current_output(
                     reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                     announce_no_output_preset=True,
@@ -914,9 +860,7 @@ class MiniEqWindow(
             return
 
         active = self.controller.output_sink
-        previous_output = self.last_output_preset_sink_name
-        previous_output_identity = getattr(self, "last_output_preset_target_identity", previous_output)
-        active_output_identity = output_preset_target_identity(self, active)
+        target_transition = self.controller.output_preset_target_transition(consume=handle_observed_output_change)
         previous_output_preset_auto_loaded = self.output_preset_curve_auto_loaded
         visible_sinks = self.list_visible_output_sinks()
         visible_sink_names = [sink.node_name for sink in visible_sinks if sink.node_name is not None]
@@ -943,17 +887,11 @@ class MiniEqWindow(
         finally:
             self.updating_output_combo = False
 
-        output_changed = previous_output_identity is not None and previous_output_identity != active_output_identity
-        # App-originated selector refreshes should not consume the output
-        # transition; the next PipeWire-observed refresh owns preset handling.
-        if handle_observed_output_change or previous_output is None:
-            self.last_output_preset_sink_name = active
-            self.last_output_preset_target_identity = active_output_identity
         self.update_preset_state()
         self.update_info_label()
         self.update_status_summary()
 
-        if self.startup_ready and handle_observed_output_change and output_changed:
+        if self.startup_ready and handle_observed_output_change and target_transition.changed:
             self.apply_output_preset_for_current_output(
                 reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                 announce_no_output_preset=True,

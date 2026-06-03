@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from gi.repository import GLib
 
@@ -54,6 +54,39 @@ from .pipewire_routes import PipeWireOutputPresetTarget
 from .pipewire_stream_router import PipeWireStreamRouter
 
 FILTER_CONTROL_PARAM_ECHO_GRACE_USEC = 500_000
+_OUTPUT_PRESET_TARGET_UNSET = object()
+
+
+@dataclass(frozen=True)
+class OutputPresetTargetSnapshot:
+    sink_name: str | None
+    identity: str | None
+    target: object | None
+
+
+@dataclass(frozen=True)
+class OutputPresetTargetTransition:
+    previous: OutputPresetTargetSnapshot | None
+    current: OutputPresetTargetSnapshot
+    changed: bool
+
+
+def output_preset_target_identity(
+    target: object | None,
+    fallback: str | None,
+) -> str | None:
+    if target is not None:
+        link_key = str(getattr(target, "link_key", "") or "").strip()
+        if link_key:
+            return link_key
+
+        for key in tuple(getattr(target, "keys", ()) or ()):
+            key_text = str(key or "").strip()
+            if key_text:
+                return key_text
+
+    fallback_text = str(fallback or "").strip()
+    return fallback_text or None
 
 
 class SystemWideEqController:
@@ -67,6 +100,7 @@ class SystemWideEqController:
             self.output_sink = output_sink or self.original_default_sink
             self._output_preset_target_sink: str | None = None
             self._output_preset_target: PipeWireOutputPresetTarget | None = None
+            self._observed_output_preset_target_snapshot: OutputPresetTargetSnapshot | None = None
             self.filter_output_name = f"{self.virtual_sink_name}{FILTER_OUTPUT_SUFFIX}"
             self.engine_module = None
             self.engine_start_watch = None
@@ -198,6 +232,35 @@ class SystemWideEqController:
         self._output_preset_target_sink = self.output_sink
         self._output_preset_target = target
         return target
+
+    def output_preset_target_snapshot(
+        self,
+        target: object | None = _OUTPUT_PRESET_TARGET_UNSET,
+        *,
+        refresh: bool = False,
+    ) -> OutputPresetTargetSnapshot:
+        if target is _OUTPUT_PRESET_TARGET_UNSET:
+            target = self.output_preset_target(refresh=refresh)
+        sink_name = getattr(self, "output_sink", None)
+        return OutputPresetTargetSnapshot(
+            sink_name=sink_name,
+            identity=output_preset_target_identity(target, sink_name),
+            target=target,
+        )
+
+    def remember_output_preset_target(self, target: object | None = _OUTPUT_PRESET_TARGET_UNSET) -> None:
+        self._observed_output_preset_target_snapshot = self.output_preset_target_snapshot(target)
+
+    def output_preset_target_transition(self, *, consume: bool = True) -> OutputPresetTargetTransition:
+        previous = getattr(self, "_observed_output_preset_target_snapshot", None)
+        try:
+            current = self.output_preset_target_snapshot()
+        except Exception:
+            current = self.output_preset_target_snapshot(None)
+        changed = previous is not None and previous.identity != current.identity
+        if consume or previous is None:
+            self._observed_output_preset_target_snapshot = current
+        return OutputPresetTargetTransition(previous, current, changed)
 
     def default_output_sink_candidates(self, *, refresh: bool = False, snapshot: bool = False) -> tuple[str, ...]:
         defaults = (

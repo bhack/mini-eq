@@ -107,26 +107,10 @@ class MiniEqWindowPresetMixin:
         except Exception:
             return getattr(self.controller, "output_sink", "") or ""
 
-    def output_preset_target_identity_for_target(self, target=None) -> str | None:
-        if target is not None:
-            link_key = str(getattr(target, "link_key", "") or "").strip()
-            if link_key:
-                return link_key
-
-            for key in tuple(getattr(target, "keys", ()) or ()):
-                key_text = str(key or "").strip()
-                if key_text:
-                    return key_text
-
-        output_sink = getattr(self.controller, "output_sink", None)
-        return str(output_sink).strip() if output_sink else None
-
     def remember_output_preset_target(self, target=None) -> None:
-        if not hasattr(self, "last_output_preset_target_identity"):
-            return
-
-        self.last_output_preset_sink_name = getattr(self.controller, "output_sink", None)
-        self.last_output_preset_target_identity = self.output_preset_target_identity_for_target(target)
+        remember_target = getattr(self.controller, "remember_output_preset_target", None)
+        if callable(remember_target):
+            remember_target(target)
 
     def output_preset_has_route(self, target=None) -> bool:
         return bool(getattr(target, "has_route_key", False))

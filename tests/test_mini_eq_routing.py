@@ -137,6 +137,87 @@ def test_output_preset_target_is_cached_until_output_changes() -> None:
     assert calls == ["speakers", "hdmi", "hdmi"]
 
 
+def test_output_preset_target_transition_tracks_controller_snapshot() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[str | None] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def output_preset_target_for_sink_name(self, sink_name: str | None) -> pw_routes.PipeWireOutputPresetTarget:
+            calls.append(sink_name)
+            return pw_routes.PipeWireOutputPresetTarget(sink_name, None, (sink_name,) if sink_name else ())
+
+    controller.output_backend = FakeBackend([make_node(1, "speakers"), make_node(2, "hdmi")])
+    controller.output_sink = "speakers"
+
+    first = routing.SystemWideEqController.output_preset_target_transition(controller)
+
+    assert first.previous is None
+    assert first.current.identity == "speakers"
+    assert first.changed is False
+    assert controller._observed_output_preset_target_snapshot.identity == "speakers"
+
+    controller.output_sink = "hdmi"
+    preview = routing.SystemWideEqController.output_preset_target_transition(controller, consume=False)
+
+    assert preview.previous.identity == "speakers"
+    assert preview.current.identity == "hdmi"
+    assert preview.changed is True
+    assert controller._observed_output_preset_target_snapshot.identity == "speakers"
+
+    consumed = routing.SystemWideEqController.output_preset_target_transition(controller)
+
+    assert consumed.changed is True
+    assert controller._observed_output_preset_target_snapshot.identity == "hdmi"
+
+    unchanged = routing.SystemWideEqController.output_preset_target_transition(controller)
+
+    assert unchanged.changed is False
+    assert calls == ["speakers", "hdmi"]
+
+
+def test_remember_output_preset_target_distinguishes_missing_target_from_omitted_target() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls: list[str | None] = []
+
+    class FakeBackend(FakeOutputBackend):
+        def output_preset_target_for_sink_name(self, sink_name: str | None) -> pw_routes.PipeWireOutputPresetTarget:
+            calls.append(sink_name)
+            return pw_routes.PipeWireOutputPresetTarget(sink_name, None, (sink_name,) if sink_name else ())
+
+    controller.output_backend = FakeBackend([make_node(1, "speakers")])
+    controller.output_sink = "speakers"
+
+    routing.SystemWideEqController.remember_output_preset_target(controller, None)
+
+    assert controller._observed_output_preset_target_snapshot.identity == "speakers"
+    assert controller._observed_output_preset_target_snapshot.target is None
+    assert calls == []
+
+    routing.SystemWideEqController.remember_output_preset_target(controller)
+
+    assert controller._observed_output_preset_target_snapshot.identity == "speakers"
+    assert isinstance(controller._observed_output_preset_target_snapshot.target, pw_routes.PipeWireOutputPresetTarget)
+    assert calls == ["speakers"]
+
+
+def test_output_preset_target_transition_falls_back_to_sink_when_target_lookup_fails() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+
+    class FailingBackend(FakeOutputBackend):
+        def output_preset_target_for_sink_name(self, sink_name: str | None) -> pw_routes.PipeWireOutputPresetTarget:
+            raise RuntimeError(f"route lookup failed for {sink_name}")
+
+    controller.output_backend = FailingBackend([make_node(1, "speakers")])
+    controller.output_sink = "speakers"
+
+    transition = routing.SystemWideEqController.output_preset_target_transition(controller)
+
+    assert transition.current.identity == "speakers"
+    assert transition.current.target is None
+    assert transition.changed is False
+    assert controller._observed_output_preset_target_snapshot.identity == "speakers"
+
+
 def test_get_default_output_sink_name_uses_cached_metadata_by_default() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     backend = FakeDefaultOutputBackend(
@@ -666,6 +747,11 @@ def test_switch_output_sink_retargets_recreated_same_name_sink_without_restart()
     controller.output_sink = "hdmi"
     controller._output_preset_target_sink = "hdmi"
     controller._output_preset_target = pw_routes.PipeWireOutputPresetTarget("hdmi", None, ("hdmi",))
+    controller._observed_output_preset_target_snapshot = routing.OutputPresetTargetSnapshot(
+        "hdmi",
+        "old-route",
+        controller._output_preset_target,
+    )
     controller.follow_default_output = True
     controller.running = True
     controller.filter_node_id = 42
@@ -685,6 +771,7 @@ def test_switch_output_sink_retargets_recreated_same_name_sink_without_restart()
     assert controller.follow_default_output is True
     assert controller._output_preset_target_sink is None
     assert controller._output_preset_target is None
+    assert controller._observed_output_preset_target_snapshot.identity == "old-route"
     assert calls == [
         "route-param-monitor",
         ("router-target", "hdmi"),

@@ -362,6 +362,7 @@ def test_startup_ready_applies_startup_state_before_presenting() -> None:
         controller.routed = enabled
 
     controller.route_system_audio = route_system_audio
+    controller.output_preset_target_transition = lambda: SimpleNamespace(changed=False)
 
     fake_window = SimpleNamespace(
         startup_ready_source_id=99,
@@ -454,6 +455,7 @@ def test_startup_auto_route_idle_routes_after_startup_work() -> None:
         controller.routed = enabled
 
     controller.route_system_audio = route_system_audio
+    controller.output_preset_target_transition = lambda: SimpleNamespace(changed=False)
 
     fake_window = SimpleNamespace(
         startup_auto_route_source_id=321,
@@ -495,10 +497,6 @@ def test_startup_auto_route_reapplies_preset_when_followed_output_changes() -> N
         routed=False,
         output_sink="alsa_output.headset",
     )
-    targets = {
-        "alsa_output.headset": SimpleNamespace(link_key="headset-route"),
-        "alsa_output.speakers": SimpleNamespace(link_key="speakers-route"),
-    }
 
     def route_system_audio(enabled: bool) -> None:
         calls.append(("route", enabled))
@@ -506,6 +504,7 @@ def test_startup_auto_route_reapplies_preset_when_followed_output_changes() -> N
         controller.output_sink = "alsa_output.speakers"
 
     controller.route_system_audio = route_system_audio
+    controller.output_preset_target_transition = lambda: SimpleNamespace(changed=True)
 
     fake_window = SimpleNamespace(
         startup_auto_route_source_id=0,
@@ -517,7 +516,6 @@ def test_startup_auto_route_reapplies_preset_when_followed_output_changes() -> N
         route_switch=FakeSwitch(False),
         bypass_switch=FakeSwitch(True),
         controller=controller,
-        output_preset_target=lambda: targets[controller.output_sink],
         apply_output_preset_for_current_output=lambda **kwargs: calls.append(("output-preset", kwargs)) or True,
         update_eq_power_indicator=lambda: calls.append(("power", fake_window.route_switch.get_active())),
         update_info_label=lambda: calls.append(("info", fake_window.route_switch.get_active())),
@@ -565,6 +563,7 @@ def test_startup_auto_route_retries_until_filter_chain_is_ready(monkeypatch) -> 
         return 777
 
     controller.route_system_audio = route_system_audio
+    controller.output_preset_target_transition = lambda: SimpleNamespace(changed=False)
     monkeypatch.setattr(window.GLib, "get_monotonic_time", lambda: 1_000)
     monkeypatch.setattr(window.GLib, "timeout_add_seconds", timeout_add_seconds)
 
