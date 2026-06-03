@@ -488,6 +488,63 @@ def test_startup_auto_route_idle_routes_after_startup_work() -> None:
     ]
 
 
+def test_startup_auto_route_reapplies_preset_when_followed_output_changes() -> None:
+    calls: list[object] = []
+    controller = SimpleNamespace(
+        eq_enabled=True,
+        routed=False,
+        output_sink="alsa_output.headset",
+    )
+    targets = {
+        "alsa_output.headset": SimpleNamespace(link_key="headset-route"),
+        "alsa_output.speakers": SimpleNamespace(link_key="speakers-route"),
+    }
+
+    def route_system_audio(enabled: bool) -> None:
+        calls.append(("route", enabled))
+        controller.routed = enabled
+        controller.output_sink = "alsa_output.speakers"
+
+    controller.route_system_audio = route_system_audio
+
+    fake_window = SimpleNamespace(
+        startup_auto_route_source_id=0,
+        startup_auto_route_deadline_us=123,
+        ui_shutting_down=False,
+        auto_route_on_startup=True,
+        updating_ui=False,
+        output_preset_curve_auto_loaded=True,
+        route_switch=FakeSwitch(False),
+        bypass_switch=FakeSwitch(True),
+        controller=controller,
+        output_preset_target=lambda: targets[controller.output_sink],
+        apply_output_preset_for_current_output=lambda **kwargs: calls.append(("output-preset", kwargs)) or True,
+        update_eq_power_indicator=lambda: calls.append(("power", fake_window.route_switch.get_active())),
+        update_info_label=lambda: calls.append(("info", fake_window.route_switch.get_active())),
+        update_status_summary=lambda: calls.append(("summary", fake_window.route_switch.get_active())),
+        update_focus_summary=lambda: calls.append("focus"),
+        set_status=lambda message: calls.append(("status", message)),
+        notify_control_state_changed=lambda: calls.append("notify"),
+    )
+    bind_control_refresh_methods(fake_window)
+
+    window.MiniEqWindow.apply_startup_auto_route(fake_window)
+
+    assert fake_window.startup_auto_route_deadline_us == 0
+    assert calls == [
+        ("route", True),
+        (
+            "output-preset",
+            {"reset_auto_preset_without_link": True, "announce_no_output_preset": True},
+        ),
+        ("power", True),
+        ("info", True),
+        ("summary", True),
+        "focus",
+        "notify",
+    ]
+
+
 def test_startup_auto_route_retries_until_filter_chain_is_ready(monkeypatch) -> None:
     calls: list[object] = []
     scheduled_callbacks = []

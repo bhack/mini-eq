@@ -412,13 +412,24 @@ class MiniEqWindow(
 
     def apply_startup_auto_route(self) -> None:
         eq_was_enabled = self.controller.eq_enabled
+        previous_output_identity = output_preset_target_identity(self, getattr(self.controller, "output_sink", None))
+        previous_output_preset_auto_loaded = bool(getattr(self, "output_preset_curve_auto_loaded", False))
+        route_applied = False
         try:
             self.controller.route_system_audio(True)
         except Exception as exc:
             if not self.schedule_startup_auto_route_retry_after_error(exc):
                 self.set_status(str(exc))
         else:
+            route_applied = True
             self.startup_auto_route_deadline_us = 0
+        if route_applied:
+            active_output_identity = output_preset_target_identity(self, getattr(self.controller, "output_sink", None))
+            if previous_output_identity != active_output_identity:
+                self.apply_output_preset_for_current_output(
+                    reset_auto_preset_without_link=previous_output_preset_auto_loaded,
+                    announce_no_output_preset=True,
+                )
         self.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled)
 
     def on_startup_auto_route_idle(self) -> bool:
