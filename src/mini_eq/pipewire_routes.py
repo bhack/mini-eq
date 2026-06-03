@@ -102,13 +102,13 @@ def _route_label_tokens(value: str | None) -> tuple[str, ...]:
 
     text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text).casefold()
     tokens: list[str] = []
-    for token in re.findall(r"[a-z0-9]+", text):
-        if token.isdigit() or token in ROUTE_LABEL_TOKEN_STOP_WORDS:
+    for route_part in re.findall(r"[a-z0-9]+", text):
+        if route_part.isdigit() or route_part in ROUTE_LABEL_TOKEN_STOP_WORDS:
             continue
-        if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
-            token = token[:-1]
-        if token and token not in ROUTE_LABEL_TOKEN_STOP_WORDS and token not in tokens:
-            tokens.append(token)
+        if len(route_part) > 3 and route_part.endswith("s") and not route_part.endswith("ss"):
+            route_part = route_part[:-1]
+        if route_part and route_part not in ROUTE_LABEL_TOKEN_STOP_WORDS and route_part not in tokens:
+            tokens.append(route_part)
     return tuple(tokens)
 
 
