@@ -36,6 +36,7 @@ from .core import (
     ensure_preset_storage_dir,
     estimate_response_peak_db,
 )
+from .diagnostics import describe_output_preset_transition, trace_startup_event
 from .glib_utils import destroy_glib_source
 from .gtk_utils import create_dropdown_from_strings
 from .pipewire_backend import PipeWireBackendError, PipeWireNode, node_sample_rate, parse_positive_int
@@ -298,15 +299,39 @@ class MiniEqWindow(
         if self.ui_shutting_down or self.startup_ready:
             return False
 
+        controller = getattr(self, "controller", None)
+        trace_startup_event(
+            "startup-ready-begin",
+            auto_route_on_startup=self.auto_route_on_startup,
+            current_preset=getattr(self, "current_preset_name", None),
+            output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+            output_preset_curve_auto_loaded=bool(getattr(self, "output_preset_curve_auto_loaded", False)),
+            output_sink=getattr(controller, "output_sink", None),
+        )
         self.startup_ready = True
         self.start_preset_monitoring()
-        self.apply_output_preset_for_current_output()
+        initial_output_preset_applied = self.apply_output_preset_for_current_output()
+        trace_startup_event(
+            "startup-ready-initial-output-preset-done",
+            applied=initial_output_preset_applied,
+            current_preset=getattr(self, "current_preset_name", None),
+            output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+            output_preset_curve_auto_loaded=bool(getattr(self, "output_preset_curve_auto_loaded", False)),
+            output_sink=getattr(controller, "output_sink", None),
+        )
 
         if self.ui_shutting_down:
             return False
 
         self.start_analyzer_preview()
         if self.auto_route_on_startup:
+            trace_startup_event(
+                "startup-ready-auto-route-begin",
+                current_preset=getattr(self, "current_preset_name", None),
+                output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+                output_preset_curve_auto_loaded=bool(getattr(self, "output_preset_curve_auto_loaded", False)),
+                output_sink=getattr(controller, "output_sink", None),
+            )
             self.apply_startup_auto_route()
 
         if not self.ui_shutting_down:
@@ -317,6 +342,13 @@ class MiniEqWindow(
                     prepare_startup_notification(self)
                 self.set_visible(True)
                 self.present()
+        trace_startup_event(
+            "startup-ready-complete",
+            current_preset=getattr(self, "current_preset_name", None),
+            output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+            output_preset_curve_auto_loaded=bool(getattr(self, "output_preset_curve_auto_loaded", False)),
+            output_sink=getattr(controller, "output_sink", None),
+        )
         self.notify_control_state_changed()
         return False
 
@@ -361,20 +393,61 @@ class MiniEqWindow(
         eq_was_enabled = self.controller.eq_enabled
         previous_output_preset_auto_loaded = bool(getattr(self, "output_preset_curve_auto_loaded", False))
         route_applied = False
+        trace_startup_event(
+            "startup-auto-route-start",
+            current_preset=getattr(self, "current_preset_name", None),
+            eq_enabled_before=eq_was_enabled,
+            output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+            output_preset_curve_auto_loaded=previous_output_preset_auto_loaded,
+            output_sink=getattr(self.controller, "output_sink", None),
+        )
         try:
             self.controller.route_system_audio(True)
         except Exception as exc:
-            if not self.schedule_startup_auto_route_retry_after_error(exc):
+            retry_scheduled = self.schedule_startup_auto_route_retry_after_error(exc)
+            trace_startup_event(
+                "startup-auto-route-error",
+                current_preset=getattr(self, "current_preset_name", None),
+                error=str(exc),
+                output_sink=getattr(self.controller, "output_sink", None),
+                retry_scheduled=retry_scheduled,
+            )
+            if not retry_scheduled:
                 self.set_status(str(exc))
         else:
             route_applied = True
             self.startup_auto_route_deadline_us = 0
+            trace_startup_event(
+                "startup-auto-route-routed",
+                current_preset=getattr(self, "current_preset_name", None),
+                output_sink=getattr(self.controller, "output_sink", None),
+            )
         if route_applied:
             target_transition = self.controller.output_preset_target_transition()
+            trace_startup_event(
+                "startup-auto-route-transition",
+                current_preset=getattr(self, "current_preset_name", None),
+                output_sink=getattr(self.controller, "output_sink", None),
+                transition=describe_output_preset_transition(target_transition),
+            )
             if target_transition.changed:
-                self.apply_output_preset_for_current_output(
+                applied = self.apply_output_preset_for_current_output(
                     reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                     announce_no_output_preset=True,
+                )
+                trace_startup_event(
+                    "startup-auto-route-reapply-done",
+                    applied=applied,
+                    current_preset=getattr(self, "current_preset_name", None),
+                    output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+                    output_preset_curve_auto_loaded=bool(getattr(self, "output_preset_curve_auto_loaded", False)),
+                    output_sink=getattr(self.controller, "output_sink", None),
+                )
+            else:
+                trace_startup_event(
+                    "startup-auto-route-reapply-skipped",
+                    current_preset=getattr(self, "current_preset_name", None),
+                    output_sink=getattr(self.controller, "output_sink", None),
                 )
         self.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled)
 
@@ -862,6 +935,16 @@ class MiniEqWindow(
         active = self.controller.output_sink
         target_transition = self.controller.output_preset_target_transition(consume=handle_observed_output_change)
         previous_output_preset_auto_loaded = self.output_preset_curve_auto_loaded
+        trace_startup_event(
+            "output-refresh-transition",
+            consume_transition=handle_observed_output_change,
+            current_preset=getattr(self, "current_preset_name", None),
+            output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+            output_preset_curve_auto_loaded=previous_output_preset_auto_loaded,
+            output_sink=active,
+            startup_ready=bool(getattr(self, "startup_ready", False)),
+            transition=describe_output_preset_transition(target_transition),
+        )
         visible_sinks = self.list_visible_output_sinks()
         visible_sink_names = [sink.node_name for sink in visible_sinks if sink.node_name is not None]
         visible_sink_labels = self.build_output_sink_labels(visible_sinks)
@@ -892,9 +975,17 @@ class MiniEqWindow(
         self.update_status_summary()
 
         if self.startup_ready and handle_observed_output_change and target_transition.changed:
-            self.apply_output_preset_for_current_output(
+            applied = self.apply_output_preset_for_current_output(
                 reset_auto_preset_without_link=previous_output_preset_auto_loaded,
                 announce_no_output_preset=True,
+            )
+            trace_startup_event(
+                "output-refresh-reapply-done",
+                applied=applied,
+                current_preset=getattr(self, "current_preset_name", None),
+                output_preset_auto_applied=bool(getattr(self, "output_preset_auto_applied", False)),
+                output_preset_curve_auto_loaded=bool(getattr(self, "output_preset_curve_auto_loaded", False)),
+                output_sink=getattr(self.controller, "output_sink", None),
             )
 
     def update_info_label(self) -> None:

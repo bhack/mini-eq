@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from tests._mini_eq_imports import core, import_mini_eq_module, routing
 
+diagnostics = import_mini_eq_module("diagnostics")
 window = import_mini_eq_module("window")
 window_presets = import_mini_eq_module("window_presets")
 
@@ -630,6 +632,31 @@ def test_initial_output_preset_auto_loads_linked_preset(monkeypatch, tmp_path) -
     assert test_window.output_preset_state_label.text == "Applied"
     assert test_window.output_scope_state_label.text == "Output-wide"
     assert test_window.output_preset_switch.active is True
+
+
+def test_output_preset_auto_load_trace_records_linked_decision(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(diagnostics.STARTUP_TRACE_ENV, "1")
+    trace_path = tmp_path / "state" / "mini-eq" / "startup-trace.log"
+    monkeypatch.setattr(diagnostics, "startup_trace_path", lambda: trace_path)
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    monkeypatch.setattr(core, "OUTPUT_PRESET_LINKS_PATH", tmp_path / "output-presets.json")
+    write_test_preset("Headphones", 2.5)
+    core.set_output_preset_link("alsa_output.headphones", "Headphones")
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    assert test_window.apply_output_preset_for_current_output() is True
+
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["event"] for event in events] == [
+        "output-preset-apply-start",
+        "output-preset-link-selected",
+        "output-preset-linked-applied",
+    ]
+    assert events[0]["output_sink"] == "alsa_output.headphones"
+    assert events[0]["target_keys"] == ["alsa_output.headphones"]
+    assert events[1]["linked_preset"] == "Headphones"
+    assert events[2]["current_preset_after"] == "Headphones"
 
 
 def test_auto_apply_remembers_route_identity_for_followup_refresh(monkeypatch, tmp_path) -> None:
