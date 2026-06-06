@@ -95,11 +95,37 @@ body:
       label: Actual behavior
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        Useful commands for logs:
+
+        For Flathub installs:
+
+        ```bash
+        flatpak run io.github.bhack.mini-eq --check-deps
+        flatpak run io.github.bhack.mini-eq
+        ```
+
+        For AUR, pipx, or source installs:
+
+        ```bash
+        mini-eq --check-deps
+        mini-eq
+        ```
+
+        For routing, startup, or audio-device issues, also include:
+
+        ```bash
+        pipewire --version
+        wireplumber --version
+        journalctl --user -b --no-pager | grep -Ei 'mini-eq|pipewire|wireplumber|xdg-desktop-portal'
+        ```
   - type: textarea
     id: logs
     attributes:
       label: Logs or terminal output
-      description: Redact usernames, hostnames, device names, Bluetooth device names, local paths, private preset names, and credentials.
+      description: Paste only the relevant output. Redact usernames, hostnames, device names, Bluetooth device names, local paths, private preset names, and credentials.
       render: shell
     validations:
       required: false

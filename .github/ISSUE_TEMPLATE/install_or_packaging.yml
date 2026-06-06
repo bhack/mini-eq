@@ -58,11 +58,29 @@ body:
       render: shell
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        Useful commands for dependency and launch failures:
+
+        For Flathub installs:
+
+        ```bash
+        flatpak run io.github.bhack.mini-eq --check-deps
+        flatpak run io.github.bhack.mini-eq
+        ```
+
+        For AUR, pipx, or source installs:
+
+        ```bash
+        mini-eq --check-deps
+        mini-eq
+        ```
   - type: textarea
     id: output
     attributes:
       label: Error output
-      description: Redact usernames, hostnames, device names, local paths, private preset names, and credentials.
+      description: Paste the relevant command output. Redact usernames, hostnames, device names, local paths, private preset names, and credentials.
       render: shell
     validations:
       required: true
