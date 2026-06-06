@@ -218,9 +218,9 @@ class EqBandFader(Gtk.DrawingArea):
             [
                 f"Band {self.index + 1} Gain",
                 description,
-                GAIN_MIN_DB,
-                GAIN_MAX_DB,
-                self.gain_db,
+                float(GAIN_MIN_DB),
+                float(GAIN_MAX_DB),
+                float(self.gain_db),
                 f"{self.gain_db:+.1f} dB",
             ],
         )

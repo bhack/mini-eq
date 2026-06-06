@@ -439,16 +439,8 @@ try:
         raise AssertionError("Monitor Off status is missing")
     if find_accessible(frame, name="EQ output", role="combo box", showing=True) is None:
         raise AssertionError("EQ output combo box is missing")
-    if (
-        find_accessible_with_roles(
-            frame,
-            name="Load Preset",
-            roles={"push button", "toggle button"},
-            showing=True,
-        )
-        is None
-    ):
-        raise AssertionError("Load Preset menu button is missing")
+    if find_accessible(frame, name="Load Preset", role="combo box", showing=True) is None:
+        raise AssertionError("Load Preset combo box is missing")
 
     verify_dropdown_exposes_options(frame, combo_name="Type", required_options=("Notch", "Bell"))
 

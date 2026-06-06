@@ -9,6 +9,7 @@ from gi.repository import Adw, Gtk, Pango
 
 from .window_utils import (
     bind_label_to_control,
+    make_ellipsizing_string_list_factory,
     set_accessible_description,
     set_accessible_label,
 )
@@ -49,29 +50,20 @@ class MiniEqWindowUtilityPaneMixin:
         self.current_curve_row.append(self.current_curve_state_label)
         preset_section.append(self.current_curve_row)
 
-        self.preset_library_popover = Gtk.Popover()
-        self.preset_library_popover.add_css_class("preset-library-popover")
-        self.preset_library_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self.preset_library_box.add_css_class("preset-library-list")
-        self.preset_library_box.set_margin_top(6)
-        self.preset_library_box.set_margin_bottom(6)
-        self.preset_library_box.set_margin_start(6)
-        self.preset_library_box.set_margin_end(6)
-        self.preset_library_popover.set_child(self.preset_library_box)
-
-        self.preset_load_button = Gtk.MenuButton(label="Choose…")
-        self.preset_load_button.set_can_shrink(True)
-        self.preset_load_button.set_hexpand(True)
-        self.preset_load_button.add_css_class("toolbar-button")
-        self.preset_load_button.set_popover(self.preset_library_popover)
-        set_accessible_label(self.preset_load_button, "Load Preset")
+        self.preset_combo.set_hexpand(True)
+        self.preset_combo.set_enable_search(True)
+        self.preset_combo.add_css_class("toolbar-select")
+        self.preset_combo.set_factory(make_ellipsizing_string_list_factory(28))
+        self.preset_combo.set_list_factory(make_ellipsizing_string_list_factory(42))
+        set_accessible_label(self.preset_combo, "Load Preset")
+        set_accessible_description(self.preset_combo, "Load a saved preset")
 
         preset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         preset_row.add_css_class("utility-row")
         preset_label = Gtk.Label(label="Load Preset", xalign=0.0)
-        bind_label_to_control(preset_label, self.preset_load_button)
+        bind_label_to_control(preset_label, self.preset_combo)
         preset_row.append(preset_label)
-        preset_row.append(self.preset_load_button)
+        preset_row.append(self.preset_combo)
         preset_section.append(preset_row)
 
         self.output_scope_state_label.set_hexpand(True)

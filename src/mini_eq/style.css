@@ -167,19 +167,6 @@ overlay-split-view.mini-eq-workspace > widget.sidebar-pane {
     min-width: 190px;
 }
 
-.preset-library-popover {
-    min-width: 260px;
-}
-
-.preset-library-list {
-    min-width: 248px;
-}
-
-.preset-library-action {
-    padding-top: 5px;
-    padding-bottom: 5px;
-}
-
 .preset-menu-separator {
     margin-top: 4px;
     margin-bottom: 4px;
