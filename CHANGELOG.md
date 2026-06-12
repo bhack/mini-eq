@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.7 - 2026-06-12
+
+- Fix saved preset loading when many presets are stored.
+- Use a searchable preset picker for larger preset libraries.
+- Avoid a GTK accessibility warning from band fader range values.
+
 ## 0.8.6 - 2026-06-04
 
 - Fix auto presets at login for outputs where PipeWire restores the selected

@@ -33,11 +33,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.6/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.7/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.6/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.7/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -45,6 +45,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.8.7" date="2026-06-12">
+      <description>
+        <ul>
+          <li>Fix saved preset loading when many presets are stored.</li>
+          <li>Use a searchable preset picker for larger preset libraries.</li>
+          <li>Avoid a GTK accessibility warning from band fader range values.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.6" date="2026-06-04">
       <description>
         <p>Fix auto presets at login for outputs where PipeWire restores the selected speaker sink before reporting the active port route.</p>
