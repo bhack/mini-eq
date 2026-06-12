@@ -83,6 +83,9 @@ mini_eq = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+filterwarnings = [
+    "ignore:GLib\\.unix_signal_add_full is deprecated; use GLibUnix\\.signal_add_full instead:gi.PyGIDeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 120

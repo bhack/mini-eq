@@ -75,18 +75,22 @@ class FakeLabel:
 class FakeModel:
     def __init__(self) -> None:
         self.items: list[str] = []
+        self.on_splice = None
 
     def get_n_items(self) -> int:
         return len(self.items)
 
     def splice(self, position: int, removed: int, added: list[str]) -> None:
         self.items[position : position + removed] = added
+        if self.on_splice is not None:
+            self.on_splice()
 
 
 class FakeCombo:
     def __init__(self, selected: int = 0) -> None:
         self.selected = selected
         self.sensitive = True
+        self.tooltip = ""
 
     def get_selected(self) -> int:
         return self.selected
@@ -96,6 +100,9 @@ class FakeCombo:
 
     def set_sensitive(self, sensitive: bool) -> None:
         self.sensitive = sensitive
+
+    def set_tooltip_text(self, text: str) -> None:
+        self.tooltip = text
 
 
 class FakeOutputTransitionController(SimpleNamespace):
@@ -442,7 +449,7 @@ def test_reset_to_neutral_clears_loaded_preset_selection(monkeypatch, tmp_path) 
     test_window.on_preset_reset_to_neutral_clicked(FakeButton())
 
     assert test_window.current_preset_name is None
-    assert test_window.preset_combo.selected == window_presets.Gtk.INVALID_LIST_POSITION
+    assert test_window.preset_combo.selected == 0
     assert controller.state_signature() == controller.default_state_signature()
     assert test_window.current_curve_state_label.text == "Neutral"
     assert test_window.current_curve_state_label.tooltip == "Neutral. Load Headphones to restore."
@@ -453,7 +460,7 @@ def test_reset_to_neutral_clears_loaded_preset_selection(monkeypatch, tmp_path) 
     test_window.load_library_preset("Headphones")
 
     assert test_window.current_preset_name == "Headphones"
-    assert test_window.preset_combo.selected == 0
+    assert test_window.preset_combo.selected == 1
     assert controller.bands[0].gain_db == 2.5
     assert test_window.statuses[-1] == "Preset loaded"
 
@@ -514,8 +521,10 @@ def test_unsaved_apo_import_is_shown_as_current_curve(monkeypatch, tmp_path) -> 
 
     test_window.refresh_preset_list()
 
-    assert test_window.preset_model.items == []
-    assert test_window.preset_combo.selected == window_presets.Gtk.INVALID_LIST_POSITION
+    assert test_window.preset_model.items == [window_presets.PRESET_PICKER_EMPTY]
+    assert test_window.preset_combo.selected == 0
+    assert test_window.preset_combo.sensitive is False
+    assert test_window.preset_combo.tooltip == "No saved presets"
     assert test_window.current_curve_row.visible is True
     assert test_window.current_curve_state_label.text == "Imported curve"
     assert test_window.current_curve_state_label.tooltip == "Imported from HD 650."
@@ -536,10 +545,10 @@ def test_saved_preset_selection_ignores_current_curve_label(monkeypatch, tmp_pat
 
     test_window.refresh_preset_list()
 
-    assert test_window.preset_model.items == ["Headphones"]
+    assert test_window.preset_model.items == [window_presets.PRESET_PICKER_PLACEHOLDER, "Headphones"]
     assert test_window.current_curve_state_label.text == "Imported curve"
 
-    test_window.preset_combo.selected = 0
+    test_window.preset_combo.selected = 1
     test_window.on_preset_selected(test_window.preset_combo, None)
 
     assert test_window.current_preset_name == "Headphones"
@@ -548,10 +557,72 @@ def test_saved_preset_selection_ignores_current_curve_label(monkeypatch, tmp_pat
     controller.bands[0].gain_db = 5.0
     test_window.update_preset_state()
 
-    assert test_window.preset_combo.selected == window_presets.Gtk.INVALID_LIST_POSITION
+    assert test_window.preset_combo.selected == 0
     assert test_window.preset_state_label.text == "Modified"
     assert test_window.current_curve_state_label.text == "Headphones"
     assert test_window.current_curve_state_label.tooltip == "Unsaved edits from Headphones."
+
+
+def test_preset_dropdown_model_handles_large_saved_library(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    for index in range(35):
+        write_test_preset(f"Preset {index + 1:02d}", float(index % 11) - 5.0)
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    test_window.refresh_preset_list()
+
+    assert len(test_window.preset_model.items) == 36
+    assert test_window.preset_model.items[0] == window_presets.PRESET_PICKER_PLACEHOLDER
+    assert test_window.preset_model.items[1] == "Preset 01"
+    assert test_window.preset_model.items[-1] == "Preset 35"
+    assert test_window.preset_combo.sensitive is True
+    assert test_window.preset_combo.tooltip == "Load a saved preset"
+    assert test_window.preset_combo.selected == 0
+
+    test_window.preset_combo.selected = 30
+    test_window.on_preset_selected(test_window.preset_combo, None)
+
+    assert test_window.current_preset_name == "Preset 30"
+    assert controller.bands[0].gain_db == 2.0
+    assert test_window.statuses[-1] == "Preset loaded"
+
+
+def test_preset_dropdown_refresh_ignores_transient_model_selection(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    write_test_preset("Preset 01", -4.0)
+    write_test_preset("Preset 02", 3.0)
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+
+    def select_first_during_model_splice() -> None:
+        test_window.preset_combo.selected = 1
+        test_window.on_preset_selected(test_window.preset_combo, None)
+
+    test_window.preset_model.on_splice = select_first_during_model_splice
+
+    test_window.refresh_preset_list()
+
+    assert test_window.current_preset_name is None
+    assert test_window.preset_combo.selected == 0
+    assert controller.bands[0].gain_db == 0.0
+    assert "Preset loaded" not in test_window.statuses
+
+
+def test_preset_dropdown_placeholder_selection_keeps_loaded_preset(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(core, "PRESET_STORAGE_DIR", tmp_path / "presets")
+    write_test_preset("Headphones", 4.0)
+    controller = make_controller()
+    test_window = OutputPresetWindow(controller)
+    test_window.refresh_preset_list()
+    test_window.load_library_preset("Headphones")
+
+    test_window.preset_combo.selected = 0
+    test_window.on_preset_selected(test_window.preset_combo, None)
+
+    assert test_window.current_preset_name == "Headphones"
+    assert test_window.preset_combo.selected == 1
+    assert controller.bands[0].gain_db == 4.0
 
 
 def test_save_as_existing_preset_requires_replace_confirmation(monkeypatch, tmp_path) -> None:
@@ -1089,7 +1160,7 @@ def test_external_loaded_preset_delete_keeps_reselectable_unsaved_copy(monkeypat
     test_window.refresh_preset_list()
 
     assert test_window.preset_names == []
-    assert test_window.preset_combo.selected == window_presets.Gtk.INVALID_LIST_POSITION
+    assert test_window.preset_combo.selected == 0
     assert test_window.current_preset_name is None
     assert test_window.preset_state_label.text == "Unsaved"
     assert test_window.current_curve_state_label.text == "Deleted preset copy"
@@ -1137,7 +1208,7 @@ def test_external_current_preset_overwrite_marks_curve_modified(monkeypatch, tmp
     assert controller.bands[0].gain_db == 2.5
     assert test_window.preset_state_label.text == "Modified"
     assert test_window.preset_revert_button.visible is False
-    assert test_window.preset_combo.selected == window_presets.Gtk.INVALID_LIST_POSITION
+    assert test_window.preset_combo.selected == 0
 
     test_window.load_library_preset("Headphones")
 
@@ -1158,7 +1229,7 @@ def test_external_current_preset_corruption_keeps_curve_as_unsaved_copy(monkeypa
     test_window.refresh_preset_list()
 
     assert test_window.current_preset_name is None
-    assert test_window.preset_combo.selected == window_presets.Gtk.INVALID_LIST_POSITION
+    assert test_window.preset_combo.selected == 0
     assert controller.bands[0].gain_db == 2.5
     assert test_window.current_curve_state_label.text == "Deleted preset copy"
     assert test_window.statuses[-1] == "Preset unavailable"

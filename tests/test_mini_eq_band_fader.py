@@ -61,6 +61,34 @@ def test_band_fader_compact_labels_fit_small_tiles() -> None:
     assert fader.show_q_in_tile(170.0) is True
 
 
+def test_band_fader_accessible_range_values_are_doubles() -> None:
+    fader, _selected, _gains, _activated = make_fader(gain_db=-4)
+    fader.frequency_label = "32 Hz"
+    fader.filter_type_label = "Bell"
+    fader.q_label = "0.80"
+    fader.selected = False
+    fader.active = True
+    fader.muted = False
+    fader.soloed = False
+    fader.solo_active = False
+    captured = {}
+
+    def update_property(properties, values) -> None:
+        captured["properties"] = properties
+        captured["values"] = values
+
+    fader.update_property = update_property
+    fader.update_state = lambda _states, _values: None
+
+    fader.update_accessible_state()
+
+    values = captured["values"]
+    assert isinstance(values[2], float)
+    assert isinstance(values[3], float)
+    assert isinstance(values[4], float)
+    assert values[4] == -4.0
+
+
 def test_band_fader_keyboard_steps_select_and_clamp_gain() -> None:
     fader, selected, gains, activated = make_fader(gain_db=19.8)
 

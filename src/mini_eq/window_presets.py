@@ -9,7 +9,7 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gio, GLib, Gtk, Pango
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from .core import (
     DEFAULT_ACTIVE_BANDS,
@@ -37,6 +37,8 @@ from .window_utils import requested_switch_state, set_accessible_label, set_swit
 
 APO_IMPORT_LABEL_PREFIX = "Imported APO: "
 DELETED_PRESET_LABEL_PREFIX = "Unsaved copy: "
+PRESET_PICKER_PLACEHOLDER = "Choose…"
+PRESET_PICKER_EMPTY = "No saved presets"
 
 
 def imported_apo_curve_label_for_name(name: str) -> str:
@@ -664,57 +666,14 @@ class MiniEqWindowPresetMixin:
         self.update_output_preset_state()
         self.update_fallback_preset_state()
 
-    def refresh_preset_library_popover(self) -> None:
-        load_button = getattr(self, "preset_load_button", None)
-        if load_button is not None:
-            load_button.set_label("Choose…")
-            load_button.set_sensitive(bool(self.preset_names))
-            load_button.set_tooltip_text("Load a saved preset" if self.preset_names else "No saved presets")
-
-        box = getattr(self, "preset_library_box", None)
-        if box is None:
+    def refresh_preset_picker(self) -> None:
+        combo = getattr(self, "preset_combo", None)
+        if combo is None:
             return
 
-        while child := box.get_first_child():
-            box.remove(child)
-
-        if not self.preset_names:
-            empty_label = Gtk.Label(label="No saved presets", xalign=0.0)
-            empty_label.add_css_class("dim-label")
-            empty_label.set_margin_top(8)
-            empty_label.set_margin_bottom(8)
-            empty_label.set_margin_start(10)
-            empty_label.set_margin_end(10)
-            box.append(empty_label)
-            return
-
-        for preset_name in self.preset_names:
-            button = Gtk.Button()
-            button.set_can_shrink(True)
-            button.set_hexpand(True)
-            button.add_css_class("popover-action")
-            button.add_css_class("preset-library-action")
-            button.add_css_class("flat")
-            button.set_tooltip_text(preset_name)
-
-            label = Gtk.Label(label=preset_name, xalign=0.0)
-            label.set_hexpand(True)
-            label.set_wrap(True)
-            label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            label.set_max_width_chars(42)
-            button.set_child(label)
-            button.connect("clicked", self.on_preset_library_button_clicked, preset_name)
-            box.append(button)
-
-    def on_preset_library_button_clicked(self, _button: Gtk.Button, preset_name: str) -> None:
-        popover = getattr(self, "preset_library_popover", None)
-        if popover is not None:
-            popover.popdown()
-
-        try:
-            self.load_library_preset(preset_name)
-        except Exception as exc:
-            self.set_status(str(exc))
+        has_presets = bool(self.preset_names)
+        combo.set_sensitive(has_presets)
+        combo.set_tooltip_text("Load a saved preset" if has_presets else "No saved presets")
 
     def selected_preset_combo_index(self) -> int:
         if (
@@ -722,8 +681,13 @@ class MiniEqWindowPresetMixin:
             and self.current_preset_name in self.preset_names
             and self.controller.state_signature() == self.saved_preset_signature
         ):
-            return self.preset_names.index(self.current_preset_name)
-        return Gtk.INVALID_LIST_POSITION
+            return self.preset_names.index(self.current_preset_name) + 1
+        return 0
+
+    def preset_picker_labels(self) -> list[str]:
+        if not self.preset_names:
+            return [PRESET_PICKER_EMPTY]
+        return [PRESET_PICKER_PLACEHOLDER, *self.preset_names]
 
     def sync_preset_combo_selection(self) -> None:
         combo = getattr(self, "preset_combo", None)
@@ -818,9 +782,13 @@ class MiniEqWindowPresetMixin:
         else:
             self.sync_current_preset_signature_from_library()
 
-        self.preset_model.splice(0, self.preset_model.get_n_items(), self.preset_names)
-        self.sync_preset_combo_selection()
-        self.refresh_preset_library_popover()
+        self.updating_preset_combo = True
+        try:
+            self.preset_model.splice(0, self.preset_model.get_n_items(), self.preset_picker_labels())
+            self.preset_combo.set_selected(self.selected_preset_combo_index())
+        finally:
+            self.updating_preset_combo = False
+        self.refresh_preset_picker()
 
         self.update_preset_state()
 
@@ -1192,11 +1160,16 @@ class MiniEqWindowPresetMixin:
             return
 
         selected = combo.get_selected()
-        if selected == Gtk.INVALID_LIST_POSITION or selected >= len(self.preset_names):
+        if selected == Gtk.INVALID_LIST_POSITION or selected == 0:
+            self.sync_preset_combo_selection()
+            return
+
+        preset_index = selected - 1
+        if preset_index >= len(self.preset_names):
             return
 
         try:
-            self.load_library_preset(self.preset_names[selected])
+            self.load_library_preset(self.preset_names[preset_index])
         except Exception as exc:
             self.set_status(str(exc))
 
