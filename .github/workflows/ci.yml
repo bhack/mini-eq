@@ -69,7 +69,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref }}
 
@@ -166,7 +166,7 @@ jobs:
 
       - name: Check out repository
         if: ${{ needs.changes.outputs.release_metadata == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Check local release metadata status
         if: ${{ needs.changes.outputs.release_metadata == 'true' }}
@@ -188,7 +188,7 @@ jobs:
 
       - name: Check out repository
         if: ${{ needs.changes.outputs.tooling == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Cache pip downloads
         if: ${{ needs.changes.outputs.tooling == 'true' }}
@@ -229,7 +229,7 @@ jobs:
 
       - name: Check out repository
         if: ${{ needs.changes.outputs.test == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Cache pip downloads and wheels
         if: ${{ needs.changes.outputs.test == 'true' }}
@@ -321,7 +321,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Configure Flathub remote
         run: |
@@ -429,7 +429,7 @@ jobs:
         run: exit 1
 
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Flatpak and PipeWire test dependencies
         run: |
@@ -463,7 +463,7 @@ jobs:
         run: exit 1
 
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install headless PipeWire runtime dependencies
         run: |
@@ -506,7 +506,7 @@ jobs:
         run: exit 1
 
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install live UI runtime dependencies
         run: |
