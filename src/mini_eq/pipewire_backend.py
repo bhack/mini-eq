@@ -188,6 +188,31 @@ class PipeWireBackend(PipeWireRouteMixin):
     def __exit__(self, _exc_type, _exc, _tb) -> None:
         self.close()
 
+    def create_graph_rate_monitor(self, sink_name: str, callback):
+        """Observe a sink's driving clock without keeping its graph active."""
+        self._ensure_connected()
+        if not hasattr(self._Pwg.Stream, "get_graph_rate"):
+            return None
+        stream = self._Pwg.Stream.new_audio_capture(sink_name, True)
+        for key, value in (
+            ("node.name", "mini-eq-clock-monitor"),
+            ("application.name", "Mini EQ"),
+            ("node.passive", "true"),
+            ("node.dont-move", "true"),
+            ("node.dont-reconnect", "true"),
+            ("state.restore-target", "false"),
+        ):
+            stream.set_pipewire_property(key, value)
+        stream.set_deliver_audio_blocks(False)
+        stream.connect("notify::graph-rate", lambda current, _spec: callback(current.get_graph_rate()))
+        try:
+            if not stream.start():
+                raise PipeWireBackendError("failed to start graph clock monitor")
+        except Exception:
+            stream.stop()
+            raise
+        return stream
+
     def connect(self) -> None:
         if self._connected:
             return

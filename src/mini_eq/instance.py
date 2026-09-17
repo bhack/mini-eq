@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import os
 import signal
+import stat
 import tempfile
 import time
 from collections.abc import Iterable
@@ -40,17 +41,47 @@ class InstanceLock:
         self.handle = None
 
     def acquire(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self.path.open("w", encoding="utf-8")
-
+        if not self.path.is_absolute():
+            raise ValueError("Instance lock path must be absolute")
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
         try:
+            info = os.fstat(directory)
+            if info.st_uid != os.getuid() or info.st_mode & 0o022:
+                raise PermissionError("Instance lock directory must be owned by the user and not writable by others")
+            descriptor = os.open(
+                self.path.name,
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                0o600,
+                dir_fd=directory,
+            )
+        finally:
+            os.close(directory)
+        handle = os.fdopen(descriptor, "r+", encoding="utf-8")
+        try:
+            info = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+                or info.st_mode & 0o022
+            ):
+                raise PermissionError("Instance lock must be a regular file owned exclusively by the user")
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             handle.close()
             raise MiniEqAlreadyRunningError("Mini EQ is already running") from exc
+        except Exception:
+            handle.close()
+            raise
 
-        handle.write(f"{os.getpid()}\n")
-        handle.flush()
+        try:
+            handle.truncate(0)
+            handle.write(f"{os.getpid()}\n")
+            handle.flush()
+        except Exception:
+            handle.close()
+            raise
         self.handle = handle
 
     def release(self) -> None:
@@ -63,10 +94,8 @@ class InstanceLock:
             self.handle.close()
             self.handle = None
 
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
+        # Keep a stable inode: unlinking lets a concurrent opener lock an old
+        # inode while a third process creates and locks a different one.
 
 
 class MiniEqInstanceGuard:

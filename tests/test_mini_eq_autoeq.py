@@ -26,6 +26,29 @@ def use_autoeq_cache(monkeypatch, tmp_path):
     return cache_dir
 
 
+@pytest.mark.parametrize("rate", [44100, 48000, 96000, 192000])
+def test_autoeq_request_uses_processing_rate(rate) -> None:
+    assert autoeq.autoeq_equalize_body(make_entry(), [], sample_rate=rate)["fs"] == rate
+
+
+@pytest.mark.parametrize("rate", [0, -1, True, 48000.5, float("nan"), float("inf")])
+def test_autoeq_rejects_invalid_sample_rate(rate) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        autoeq.autoeq_equalize_body(make_entry(), [], sample_rate=rate)
+
+
+def test_autoeq_cache_separates_rates_and_preserves_legacy(monkeypatch, tmp_path) -> None:
+    use_autoeq_cache(monkeypatch, tmp_path)
+    entry = make_entry()
+    legacy = autoeq.autoeq_download_path(entry)
+    legacy.write_text("# AutoEq target: Legacy target\nPreamp: -1 dB\n", encoding="utf-8")
+    assert autoeq.autoeq_download_path(entry, sample_rate=48000) == legacy
+    assert autoeq.download_autoeq_preset_info(entry, sample_rate=48000).target_label == "Legacy target"
+    paths = {autoeq.autoeq_download_path(entry, sample_rate=rate) for rate in (44100, 48000, 96000, 192000)}
+    assert len(paths) == 4
+    assert autoeq.read_cached_autoeq_target_label(entry, sample_rate=192000) is None
+
+
 def test_parse_autoeq_app_entries_deduplicates_profiles() -> None:
     text = json.dumps(
         {
@@ -144,7 +167,8 @@ def test_download_autoeq_preset_writes_equalizer_apo_text(monkeypatch, tmp_path)
     assert path.is_file()
     assert path.name.startswith("AutoEq-")
     assert path.read_text(encoding="utf-8") == (
-        "# AutoEq target: Target\nPreamp: -4.62 dB\nFilter 1: ON LSC Fc 105.0 Hz Gain 3.8 dB Q 0.70\n"
+        "# AutoEq target: Target\n# AutoEq sample rate: 48000\n"
+        "Preamp: -4.62 dB\nFilter 1: ON LSC Fc 105.0 Hz Gain 3.8 dB Q 0.70\n"
     )
     assert bodies[0]["target"] == "Target"
 
@@ -690,6 +714,7 @@ def test_preview_accessible_description_tracks_selection_and_result(monkeypatch)
         "AutoEq curve preview for Example: 0 filters, preamp -1.5 dB, target AutoEq in-ear",
     ]
     assert preview_window.autoeq_preview_detail.text == "Target: AutoEq in-ear - Preamp -1.5 dB - Source - Rig"
+    assert preview_window.autoeq_preview_count_label.text == "0 filters · 48 kHz"
 
 
 def test_preview_success_enables_import_after_target_is_visible(tmp_path) -> None:
@@ -766,7 +791,7 @@ def test_preview_generation_failure_stays_inside_dialog(monkeypatch) -> None:
         idle_calls.append((callback, args))
         return len(idle_calls)
 
-    def download_autoeq_preset_info(_entry):
+    def download_autoeq_preset_info(_entry, *, sample_rate):
         raise RuntimeError("AutoEq response format changed")
 
     monkeypatch.setattr(window_autoeq.threading, "Thread", FakeThread)

@@ -4,6 +4,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
+import Pango from 'gi://Pango';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -27,6 +28,10 @@ const PANEL_ANALYZER_MIN_ACTIVE_HEIGHT = 3;
 const PANEL_ANALYZER_ACTIVE_COLOR = 'rgba(127, 213, 232, 0.96)';
 const PANEL_ANALYZER_DIM_COLOR = 'rgba(255, 255, 255, 0.24)';
 const PANEL_ANALYZER_STANDBY_COLOR = 'rgba(255, 255, 255, 0.16)';
+const PRESET_SEARCH_THRESHOLD = 12;
+const PRESET_PICKER_WIDTH = 280;
+const PRESET_PICKER_MAX_HEIGHT = 296;
+const PRESET_SEARCH_ENTRY_WIDTH = 232;
 const SHELL_ICON_FILE = 'mini-eq-symbolic.svg';
 
 function unpackValue(value) {
@@ -62,6 +67,12 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._presetsSignalId = 0;
         this.connect('destroy', () => this._beginDispose());
         this._presetItems = [];
+        this._allPresets = [];
+        this._currentPresetName = '';
+        this._presetSearchEntry = null;
+        this._presetResultsBox = null;
+        this._presetFilterText = '';
+        this._presetFocusSourceId = 0;
         this._analyzerBars = [];
         this._analyzerBarHeights = [];
         this._analyzerBarStyles = [];
@@ -111,6 +122,25 @@ class MiniEqIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._eqItem);
 
         this._presetsItem = new PopupMenu.PopupSubMenuMenuItem(_('Presets'));
+        this._presetsItem.menu.connect('open-state-changed', () => {
+            if (this._presetFocusSourceId) {
+                GLib.source_remove(this._presetFocusSourceId);
+                this._presetFocusSourceId = 0;
+            }
+            if (!this._presetsItem.menu.isOpen) {
+                this._resetPresetSearch();
+                return;
+            }
+
+            if (this._presetSearchEntry !== null) {
+                this._presetFocusSourceId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                    this._presetFocusSourceId = 0;
+                    if (!this._disposed && this._presetsItem.menu.isOpen)
+                        this._presetSearchEntry?.grab_key_focus();
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
+        });
         this.menu.addMenuItem(this._presetsItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -184,6 +214,10 @@ class MiniEqIndicator extends PanelMenu.Button {
             return;
 
         this._disposed = true;
+        if (this._presetFocusSourceId) {
+            GLib.source_remove(this._presetFocusSourceId);
+            this._presetFocusSourceId = 0;
+        }
 
         if (this._refreshSourceId) {
             GLib.source_remove(this._refreshSourceId);
@@ -341,8 +375,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         const analyzerEnabled = 'analyzer_enabled' in state
             ? Boolean(unpackValue(state.analyzer_enabled))
             : true;
-        const presetName = unpackValue(state.preset_name) || _('Current State');
-        const curveLabel = unpackValue(state.curve_label) || presetName;
+        const rawPresetName = unpackValue(state.preset_name) || '';
         const outputPresetName = unpackValue(state.output_preset_name) || '';
         const outputPresetLabel = unpackValue(state.output_preset_label) || outputPresetName;
         const capabilities = unpackValue(state.capabilities) || [];
@@ -353,6 +386,8 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._routed = routed;
         this._eqEnabled = eqEnabled;
         this._analyzerEnabled = analyzerEnabled;
+        this._currentPresetName = rawPresetName;
+        this._syncPresetOrnaments();
         this.visible = running;
         this._syncPanelStateStyle(running, routed, eqEnabled, analyzerEnabled);
         this._updating = true;
@@ -369,7 +404,7 @@ class MiniEqIndicator extends PanelMenu.Button {
         this._routingItem.setSensitive(running);
         this._eqItem.setSensitive(running && routed);
         this._presetsItem.setSensitive(running);
-        this._presetsItem.label.text = running ? _('Curve: %s').format(curveLabel) : _('Presets');
+        this._presetsItem.label.text = running ? _('Load Preset') : _('Presets');
         this._statusItem.label.text = this._statusText(running, routed, eqEnabled);
         this._outputPresetItem.label.text = this._outputPresetText(running, outputPresetLabel);
         this._quitItem.visible = running && canQuit;
@@ -500,22 +535,143 @@ class MiniEqIndicator extends PanelMenu.Button {
     }
 
     _setPresets(presets) {
+        this._allPresets = Array.isArray(presets) ? presets : [];
+        this._presetFilterText = '';
+        this._rebuildPresetsMenu();
+    }
+
+    _resetPresetSearch() {
+        if (this._presetFilterText === '')
+            return;
+
+        this._presetFilterText = '';
+        if (this._presetSearchEntry !== null)
+            this._presetSearchEntry.text = '';
+        this._refreshFilteredPresetRows();
+    }
+
+    _rebuildPresetsMenu() {
         this._presetsItem.menu.removeAll();
         this._presetItems = [];
+        this._presetSearchEntry = null;
+        this._presetResultsBox = null;
 
-        if (!presets.length) {
+        if (!this._allPresets.length) {
             const item = new PopupMenu.PopupMenuItem(_('No saved presets'));
             item.setSensitive(false);
             this._presetsItem.menu.addMenuItem(item);
             return;
         }
 
-        for (const preset of presets) {
-            const item = new PopupMenu.PopupMenuItem(preset);
-            item.connect('activate', () => this._setPreset(preset));
-            this._presetsItem.menu.addMenuItem(item);
-            this._presetItems.push(item);
+        if (this._allPresets.length <= PRESET_SEARCH_THRESHOLD) {
+            for (const preset of this._allPresets)
+                this._presetsItem.menu.addMenuItem(this._makePresetItem(preset));
+            return;
         }
+
+        this._buildPresetSearch();
+        this._buildPresetResults();
+    }
+
+    _buildPresetSearch() {
+        const searchItem = new PopupMenu.PopupMenuSection();
+        const searchBox = new St.BoxLayout({
+            x_align: Clutter.ActorAlign.START,
+            x_expand: false,
+        });
+        this._presetSearchEntry = new St.Entry({
+            can_focus: true,
+            hint_text: _('Search presets'),
+            style_class: 'search-entry',
+            style: `width: ${PRESET_SEARCH_ENTRY_WIDTH}px;`,
+            x_expand: false,
+            track_hover: true,
+        });
+        this._presetSearchEntry.clutter_text.connect('text-changed', () => {
+            this._presetFilterText = this._presetSearchEntry?.text ?? '';
+            this._refreshFilteredPresetRows();
+        });
+        searchBox.add_child(this._presetSearchEntry);
+        searchItem.actor.add_child(searchBox);
+        this._presetsItem.menu.addMenuItem(searchItem);
+    }
+
+    _buildPresetResults() {
+        const resultsItem = new PopupMenu.PopupMenuSection();
+        const scrollView = new St.ScrollView({
+            hscrollbar_policy: St.PolicyType.NEVER,
+            style: `width: ${PRESET_PICKER_WIDTH}px; max-height: ${PRESET_PICKER_MAX_HEIGHT}px; padding-bottom: 6px;`,
+            x_expand: true,
+        });
+        this._presetResultsBox = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            style: 'padding-top: 4px; padding-bottom: 4px;',
+            x_expand: true,
+        });
+        scrollView.set_child(this._presetResultsBox);
+        resultsItem.actor.add_child(scrollView);
+        this._presetsItem.menu.addMenuItem(resultsItem);
+        this._refreshFilteredPresetRows();
+    }
+
+    _refreshFilteredPresetRows() {
+        if (this._presetResultsBox === null)
+            return;
+
+        this._presetResultsBox.destroy_all_children();
+        this._presetItems = [];
+
+        const filteredPresets = this._filteredPresets();
+        if (!filteredPresets.length) {
+            const item = new PopupMenu.PopupMenuItem(_('No matching presets'));
+            item.setSensitive(false);
+            this._presetResultsBox.add_child(item);
+            return;
+        }
+
+        for (const preset of filteredPresets)
+            this._presetResultsBox.add_child(this._makePresetItem(preset));
+    }
+
+    _filteredPresets() {
+        const query = this._presetFilterText.trim().toLocaleLowerCase();
+        if (!query)
+            return this._allPresets;
+
+        const tokens = query.split(/\s+/).filter(Boolean);
+        return this._allPresets.filter(preset => {
+            const normalizedPreset = preset.toLocaleLowerCase();
+            return tokens.every(term => normalizedPreset.includes(term));
+        });
+    }
+
+    _makePresetItem(preset) {
+        const item = new PopupMenu.PopupMenuItem(preset);
+        item._miniEqPresetName = preset;
+        item.label.clutter_text.set({
+            ellipsize: Pango.EllipsizeMode.END,
+            line_wrap: false,
+        });
+        item.connect('activate', () => this._activatePreset(preset));
+        this._presetItems.push(item);
+        this._syncPresetItemOrnament(item);
+        return item;
+    }
+
+    _activatePreset(preset) {
+        this.menu.close();
+        this._setPreset(preset);
+    }
+
+    _syncPresetItemOrnament(item) {
+        item.setOrnament(item._miniEqPresetName === this._currentPresetName
+            ? PopupMenu.Ornament.CHECK
+            : PopupMenu.Ornament.NONE);
+    }
+
+    _syncPresetOrnaments() {
+        for (const item of this._presetItems)
+            this._syncPresetItemOrnament(item);
     }
 });
 

@@ -12,13 +12,15 @@ dev_config_home="$dev_home/config"
 dev_cache_home="$dev_home/cache"
 bundle="$dev_home/$uuid.shell-extension.zip"
 mode="fake"
+fake_preset_count=""
 
 usage() {
     cat >&2 <<EOF
-Usage: $0 [--fake-control|--fake-control-monitor-off|--no-fake-control|--real-session-install]
+Usage: $0 [--fake-control|--fake-control-monitor-off|--fake-preset-count COUNT|--no-fake-control|--real-session-install]
 
   --fake-control              Start isolated devkit Shell with fake Mini EQ D-Bus control service. Default.
   --fake-control-monitor-off  Start fake control service with analyzer monitoring disabled.
+  --fake-preset-count COUNT   Number of fake saved presets exposed by the fake control service.
   --no-fake-control           Start isolated devkit Shell without a control service; tests disconnected UI.
   --real-session-install      Install/reload the extension in the real GNOME session for real app integration.
 EOF
@@ -31,6 +33,14 @@ while (($# > 0)); do
             ;;
         --fake-control-monitor-off)
             mode="fake-monitor-off"
+            ;;
+        --fake-preset-count)
+            if (($# < 2)); then
+                usage
+                exit 2
+            fi
+            fake_preset_count="$2"
+            shift
             ;;
         --no-fake-control)
             mode="no-fake"
@@ -157,18 +167,22 @@ run_in_dev_bus() {
 
         fake_control="$1"
         fake_mode="$2"
-        shift 2
+        fake_preset_count="$3"
+        shift 3
 
         fake_args=()
         if [[ "$fake_mode" == "fake-monitor-off" ]]; then
             fake_args+=(--monitor-off)
+        fi
+        if [[ -n "$fake_preset_count" ]]; then
+            fake_args+=(--preset-count "$fake_preset_count")
         fi
 
         "$fake_control" "${fake_args[@]}" &
         fake_pid=$!
         sleep 0.5
         "$@"
-    ' bash "$fake_control" "$mode" "${shell_command[@]}"
+    ' bash "$fake_control" "$mode" "$fake_preset_count" "${shell_command[@]}"
 }
 
 if gnome-shell --help 2>&1 | grep -q -- '--devkit'; then

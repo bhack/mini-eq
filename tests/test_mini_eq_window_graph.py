@@ -210,6 +210,25 @@ class GraphInteractionWindow(window_graph.MiniEqWindowGraphMixin):
         return x, y
 
 
+def test_response_caches_follow_processing_rate() -> None:
+    band = core.EqBand(core.FILTER_TYPES["Bell"], 16000.0, gain_db=6.0)
+    window = GraphInteractionWindow([band])
+    rate = 48000
+    window.controller.active_sample_rate = lambda: rate
+    bounds = (600.0, 300.0, 30.0, 15.0, 15.0, 30.0)
+    total48 = window.total_response_points(*bounds)
+    selected48 = window.selected_response_points(*bounds, band)
+    assert window.total_response_points(*bounds) is total48
+    assert window.selected_response_points(*bounds, band) is selected48
+    rate = 192000
+    total192 = window.total_response_points(*bounds)
+    selected192 = window.selected_response_points(*bounds, band)
+    assert total192 != total48
+    assert selected192 != selected48
+    assert window.total_response_points(*bounds) is total192
+    assert window.selected_response_points(*bounds, band) is selected192
+
+
 class FocusSummaryWindow(window_graph.MiniEqWindowGraphMixin):
     def __init__(
         self,

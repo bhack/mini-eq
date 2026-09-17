@@ -12,7 +12,7 @@ from typing import Literal
 
 Status = Literal["ok", "missing", "warning"]
 
-PWG_REQUIRED_VERSION = "0.3.9"
+PWG_REQUIRED_VERSION = "0.3.10"
 PWG_REQUIRED_VERSION_PARTS = (0, 3, 9)
 PWG_REQUIRED_SYMBOLS = (
     "Core.set_pipewire_property",
@@ -39,6 +39,7 @@ PWG_REQUIRED_SYMBOLS = (
     "Registry.sync",
     "RouteInfo.new_from_param",
     "Stream.set_pipewire_property",
+    "Stream.get_graph_rate",
 )
 PYGOBJECT_HINT = "Ubuntu/Debian: python3-gi; Fedora: python3-gobject; Arch: python-gobject"
 PYCAIRO_HINT = "Ubuntu/Debian: python3-cairo; Fedora: python3-cairo; Arch: python-cairo"

@@ -35,6 +35,18 @@ class BackgroundPortalError(RuntimeError):
     pass
 
 
+def user_facing_background_portal_error(error: GLib.Error) -> Exception:
+    unavailable_codes = (
+        Gio.DBusError.UNKNOWN_METHOD,
+        Gio.DBusError.UNKNOWN_INTERFACE,
+        Gio.DBusError.SERVICE_UNKNOWN,
+        Gio.DBusError.NAME_HAS_NO_OWNER,
+    )
+    if any(error.matches(Gio.dbus_error_quark(), code) for code in unavailable_codes):
+        return BackgroundPortalError("Background permissions are not available from this desktop portal")
+    return error
+
+
 def normalize_bool(value: object) -> bool:
     return value is True
 
@@ -225,7 +237,7 @@ class BackgroundPortalRequest:
             reply = connection.call_finish(result)
             (handle_path,) = reply.unpack()
         except GLib.Error as exc:
-            self.finish(False, False, exc)
+            self.finish(False, False, user_facing_background_portal_error(exc))
             return
 
         if handle_path != self.handle_path:

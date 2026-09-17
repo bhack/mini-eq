@@ -29,7 +29,7 @@ from mini_eq.core import (
     EQ_Q_MIN,
 )
 from mini_eq.desktop_integration import APP_ID
-from mini_eq.filter_chain import builtin_biquad_band_control_values
+from mini_eq.filter_chain import native_biquad_band_control_values as builtin_biquad_band_control_values
 from mini_eq.pipewire_backend import build_props_controls_param
 from mini_eq.window import MiniEqWindow
 

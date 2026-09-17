@@ -31,7 +31,7 @@ from .core import (
     total_response_db_at_frequencies,
 )
 from .glib_utils import destroy_glib_source
-from .window_utils import set_accessible_description, set_accessible_label
+from .window_utils import controller_sample_rate, set_accessible_description, set_accessible_label
 
 AUTOEQ_PREVIEW_STEPS = 192
 AUTOEQ_PREVIEW_DEBOUNCE_MS = 240
@@ -507,6 +507,7 @@ class MiniEqWindowAutoEqMixin:
         self.autoeq_preview_request_id += 1
         request_id = self.autoeq_preview_request_id
 
+        self.update_autoeq_import_button_sensitivity()
         self.autoeq_preview_title.set_text("Curve Preview")
         self.autoeq_preview_count_label.set_text("Preview")
         self.autoeq_preview_detail.set_text(entry.detail or "AutoEq")
@@ -540,7 +541,7 @@ class MiniEqWindowAutoEqMixin:
 
         def load_preview() -> None:
             try:
-                preset = download_autoeq_preset_info(entry)
+                preset = download_autoeq_preset_info(entry, sample_rate=sample_rate)
                 preamp, bands = parse_apo_file(str(preset.path))
                 GLib.idle_add(
                     self.finish_autoeq_preview_load,
@@ -555,6 +556,10 @@ class MiniEqWindowAutoEqMixin:
             except Exception as exc:
                 GLib.idle_add(self.finish_autoeq_preview_load, request_id, entry, "", 0.0, [], None, str(exc))
 
+        # Capture on the UI thread. A rate change invalidates the request id
+        # and starts a new preview, never relabels an in-flight result.
+        sample_rate = controller_sample_rate(getattr(self, "controller", None))
+        self.autoeq_preview_sample_rate = sample_rate
         threading.Thread(target=load_preview, daemon=True).start()
 
     def finish_autoeq_preview_load(
@@ -588,7 +593,8 @@ class MiniEqWindowAutoEqMixin:
                 f"AutoEq curve preview unavailable for {entry.name}: {error}"
             )
         else:
-            self.autoeq_preview_count_label.set_text(f"{len(bands)} filters")
+            rate = getattr(self, "autoeq_preview_sample_rate", SAMPLE_RATE)
+            self.autoeq_preview_count_label.set_text(f"{len(bands)} filters · {rate / 1000:g} kHz")
             detail = entry.detail or "AutoEq"
             self.autoeq_preview_detail.set_text(self.autoeq_preview_detail_text(preamp_db, detail, target_label))
             description_parts = [f"{len(bands)} filters", f"preamp {preamp_db:+.1f} dB"]
@@ -675,8 +681,9 @@ class MiniEqWindowAutoEqMixin:
         frequencies: list[float] = []
         response: list[float] = []
         if bands and preamp_db is not None:
-            frequencies = stepped_response_frequencies(SAMPLE_RATE, AUTOEQ_PREVIEW_STEPS)
-            response = total_response_db_at_frequencies(bands, preamp_db, SAMPLE_RATE, frequencies)
+            rate = getattr(self, "autoeq_preview_sample_rate", SAMPLE_RATE)
+            frequencies = stepped_response_frequencies(rate, AUTOEQ_PREVIEW_STEPS)
+            response = total_response_db_at_frequencies(bands, preamp_db, rate, frequencies)
 
         db_limit = self.autoeq_preview_db_limit(response)
         left, right, top, bottom = self.draw_autoeq_preview_grid(cr, width_f, height_f, palette, db_limit)

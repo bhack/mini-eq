@@ -115,8 +115,8 @@ modules:
     sources:
       - type: git
         url: https://gitlab.freedesktop.org/pipewire/pipewire.git
-        tag: 1.6.1
-        commit: b7341d068947225fcdf62d39277606e8516d7f52
+        tag: 1.6.9
+        commit: 8fa27cabdc6c0c1350c69c026af5850ef0af1e26
 
   - name: pipewire-gobject
     buildsystem: meson
@@ -126,8 +126,8 @@ modules:
     sources:
       - type: git
         url: https://github.com/bhack/pipewire-gobject.git
-        tag: 0.3.9
-        commit: d132598a7e03800fb169fd39d2c71afacdb47195
+        tag: 0.3.10
+        commit: a9d652f0f2abdba0ab7dcba12e52835f679d24a4
 
   - python3-dependencies.yaml
 

@@ -7,6 +7,7 @@ from mini_eq import core
 from mini_eq.analyzer import ANALYZER_BIN_COUNT, AnalyzerLoudnessSnapshot
 from mini_eq.core import EQ_MODES, FILTER_TYPES, PRESET_VERSION, EqBand, eq_band_to_dict
 from mini_eq.pipewire_backend import PipeWireNode
+from mini_eq.routing import OutputPresetTargetSnapshot, OutputPresetTargetTransition
 
 DEMO_PRESET_NAME = "Studio Reference"
 DEMO_OUTPUT_NAME = "studio-monitor"
@@ -33,6 +34,14 @@ def demo_analyzer_loudness() -> AnalyzerLoudnessSnapshot:
 
 
 class DemoController:
+    def output_preset_target_transition(self, *, consume: bool = True) -> OutputPresetTargetTransition:
+        previous = getattr(self, "_observed_output_preset_target_snapshot", None)
+        current = OutputPresetTargetSnapshot(self.output_sink, self.output_sink, None)
+        changed = previous is not None and previous.identity != current.identity
+        if consume or previous is None:
+            self._observed_output_preset_target_snapshot = current
+        return OutputPresetTargetTransition(previous, current, changed)
+
     def __init__(self) -> None:
         self.output_sink = DEMO_OUTPUT_NAME
         self.virtual_sink_name = DEMO_VIRTUAL_SINK_LABEL

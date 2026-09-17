@@ -27,6 +27,46 @@ def make_node(
     )
 
 
+def test_processing_rate_notifications_and_monitor_cleanup() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    rates = []
+    controller.set_sample_rate_changed_callback(lambda: rates.append(controller.active_sample_rate()))
+    assert controller.active_sample_rate() == 48000
+    controller.update_processing_sample_rate(192000)
+    controller.update_processing_sample_rate(192000)
+    controller.update_processing_sample_rate(96000)
+    controller.stop_graph_rate_monitor()
+    assert rates == [192000, 96000, 48000]
+    controller.set_sample_rate_changed_callback(None)
+    controller.update_processing_sample_rate(44100)
+    assert rates == [192000, 96000, 48000]
+
+
+def test_graph_rate_monitor_is_singleton_and_stopped() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls = []
+
+    class Monitor:
+        def stop(self):
+            calls.append("stop")
+
+    class Backend:
+        def create_graph_rate_monitor(self, sink_name, callback):
+            calls.append(sink_name)
+            callback(192000)
+            return Monitor()
+
+    controller.output_backend = Backend()
+    controller.virtual_sink_name = "test_eq_sink"
+    controller.start_graph_rate_monitor()
+    controller.start_graph_rate_monitor()
+    assert controller.active_sample_rate() == 192000
+    controller.stop_graph_rate_monitor()
+    controller.stop_graph_rate_monitor()
+    assert calls == ["test_eq_sink", "stop"]
+    assert controller.active_sample_rate() == 48000
+
+
 class FakeOutputBackend:
     def __init__(self, sinks: list[pw_backend.PipeWireNode]) -> None:
         self.sinks = sinks
@@ -1138,7 +1178,7 @@ def test_enabling_unprepared_analyzer_restores_engine_when_analyzer_is_unavailab
     assert controller.running is True
 
 
-def test_active_sample_rate_prefers_virtual_sink_then_output_sink() -> None:
+def test_active_sample_rate_uses_fixed_dsp_clock_despite_node_properties() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.virtual_sink_name = "mini_eq_sink"
     controller.output_sink = "speakers"
@@ -1149,10 +1189,10 @@ def test_active_sample_rate_prefers_virtual_sink_then_output_sink() -> None:
         ]
     )
 
-    assert routing.SystemWideEqController.active_sample_rate(controller) == pytest.approx(96000.0)
+    assert routing.SystemWideEqController.active_sample_rate(controller) == pytest.approx(48000.0)
 
 
-def test_active_sample_rate_uses_output_sink_when_virtual_sink_is_not_ready() -> None:
+def test_active_sample_rate_uses_fixed_dsp_clock_before_sink_is_ready() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.virtual_sink_name = "mini_eq_sink"
     controller.output_sink = "speakers"
@@ -1162,7 +1202,7 @@ def test_active_sample_rate_uses_output_sink_when_virtual_sink_is_not_ready() ->
         ]
     )
 
-    assert routing.SystemWideEqController.active_sample_rate(controller) == pytest.approx(44100.0)
+    assert routing.SystemWideEqController.active_sample_rate(controller) == pytest.approx(48000.0)
 
 
 def test_live_biquad_updates_use_active_sample_rate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1562,6 +1602,77 @@ def test_start_engine_waits_for_filter_chain_node_from_registry() -> None:
     assert controller.running is True
 
 
+@pytest.mark.parametrize("replacement_fails", [False, True])
+def test_start_engine_preserves_completion_across_pending_type_changes(replacement_fails: bool) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    callbacks = []
+    unloaded = []
+    ready = []
+    errors = []
+    monitored = []
+
+    class FakeWatch:
+        def cancel(self):
+            pass
+
+    class FakeBackend:
+        def load_filter_chain_module(self, arguments):
+            return object()
+
+        def unload_filter_chain_module(self, module):
+            unloaded.append(module)
+
+        def sync(self):
+            pass
+
+        def watch_for_audio_sink(self, name, callback, **kwargs):
+            callbacks.append(callback)
+            return FakeWatch()
+
+        def set_node_params(self, node_id, controls):
+            pass
+
+    controller.output_backend = FakeBackend()
+    controller.running = False
+    controller.routed = False
+    controller.stream_router = None
+    controller.filter_node_id = None
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.filter_output_name = "mini_eq_output"
+    controller.output_sink = "speakers"
+    controller.bands = [core.EqBand(core.FILTER_TYPES["Bell"], 1000)]
+    controller.preamp_db = 0.0
+    controller.eq_enabled = True
+    controller.emit_status = lambda message: None
+    controller.start_filter_node_state_monitor = lambda: monitored.append(controller.filter_node_id)
+    controller.start_filter_control_param_monitor = lambda: None
+    controller.start_engine(
+        on_ready=lambda: ready.append(controller.filter_node_id),
+        on_error=lambda error: errors.append(str(error)),
+    )
+    for index, name in enumerate(("Lo-pass", "Hi-pass")):
+        controller.bands[0].filter_type = core.FILTER_TYPES[name]
+        callbacks[index](make_node(42 + index, "mini_eq_sink"))
+        assert ready == []
+        assert monitored == []
+        assert controller.running is False
+        assert controller.filter_node_id is None
+        assert controller.engine_start_pending is True
+
+    assert len(unloaded) == 2
+    replacement = controller.engine_module
+    # Even a late timeout from an obsolete watch must not clear the new start.
+    callbacks[0](None)
+    assert controller.engine_module is replacement
+    assert controller.engine_start_pending is True
+    assert errors == []
+    callbacks[2](None if replacement_fails else make_node(44, "mini_eq_sink"))
+    assert ready == ([] if replacement_fails else [44])
+    assert monitored == ([] if replacement_fails else [44])
+    assert errors == (["filter-chain did not create mini_eq_sink"] if replacement_fails else [])
+    assert controller.running is not replacement_fails
+
+
 def test_start_filter_control_param_monitor_subscribes_to_filter_props() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     calls: list[tuple[int, str]] = []
@@ -1733,6 +1844,7 @@ def test_filter_control_verification_echo_does_not_schedule_another_verification
     controller.running = True
     controller.filter_node_id = 42
     controller.applying_filter_control_verification = True
+    controller.bands = []
 
     routing.SystemWideEqController.set_filter_controls(controller, {"preamp_l:b0": 1.0})
     routing.SystemWideEqController.handle_filter_control_param_changed(controller)
