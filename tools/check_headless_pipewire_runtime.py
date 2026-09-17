@@ -861,11 +861,59 @@ def run_controller_flow(
                     raise RuntimeError(f"Mini EQ filter node entered PipeWire error state{detail}")
 
         controller.set_analyzer_enabled(False)
+        if getattr(controller, "_graph_rate_monitor", None) is not None:
+            expected_rate = int(os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_GRAPH_RATE", "48000"))
+            live.wait_for(
+                "controller processing clock with analyzer disabled",
+                lambda: controller.active_sample_rate() == expected_rate,
+                timeout_seconds,
+            )
+            print(f"Controller processing clock: {controller.active_sample_rate():g} Hz", flush=True)
         print("## headless signal processing check with monitor off", flush=True)
         baseline_rms = capture_sink_monitor_rms(
             controller.output_sink,
             tmp_dir / "mini-eq-headless-baseline.raw",
             timeout_seconds,
+        )
+        # Exercise a frequency-selective live update, not only preamp gain:
+        # coefficients computed at the wrong rate still pass a preamp test.
+        controller.set_band_frequency(0, 440.0)
+        controller.set_band_q(0, 4.0)
+        controller.set_band_gain(0, -12.0)
+        bell_rms = capture_sink_monitor_rms(
+            controller.output_sink,
+            tmp_dir / "mini-eq-headless-bell.raw",
+            timeout_seconds,
+        )
+        bell_db = 20.0 * math.log10(max(bell_rms, 1e-12) / max(baseline_rms, 1e-12))
+        if not -13.0 <= bell_db <= -11.0:
+            raise RuntimeError(f"440 Hz bell response was {bell_db:.2f} dB; expected -12 dB")
+        print(f"Live 440 Hz bell response: {bell_db:.2f} dB", flush=True)
+        from mini_eq.core import FILTER_TYPES
+
+        controller.set_band_type(0, FILTER_TYPES["Lo-pass"])
+        controller.set_band_frequency(0, 100.0)
+        controller.set_band_q(0, 0.707)
+        dispatch_until("native low-pass topology ready", lambda: controller.running, timeout_seconds)
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id, virtual_sink_name, filter_output_name, timeout_seconds, "after filter type change"
+        )
+        lowpass_rms = capture_sink_monitor_rms(controller.output_sink, tmp_dir / "lowpass.raw", timeout_seconds)
+        lowpass_db = 20.0 * math.log10(max(lowpass_rms, 1e-12) / max(baseline_rms, 1e-12))
+        if not -28.0 < lowpass_db < -24.0:
+            raise RuntimeError(f"Low-pass type change response incorrect: {lowpass_db:.2f} dB")
+        controller.set_band_mute(0, True)
+        bypass_rms = capture_sink_monitor_rms(controller.output_sink, tmp_dir / "lowpass-bypass.raw", timeout_seconds)
+        bypass_db = 20.0 * math.log10(max(bypass_rms, 1e-12) / max(baseline_rms, 1e-12))
+        if abs(bypass_db) > 0.5:
+            raise RuntimeError(f"Low-pass bypass is not flat: {bypass_db:.2f} dB")
+        print(f"Native low-pass/type change: {lowpass_db:.2f} dB; bypass: {bypass_db:.2f} dB", flush=True)
+        controller.set_band_mute(0, False)
+        controller.set_band_gain(0, 0.0)
+        controller.set_band_type(0, FILTER_TYPES["Bell"])
+        dispatch_until("native bell topology restored", lambda: controller.running, timeout_seconds)
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id, virtual_sink_name, filter_output_name, timeout_seconds, "after restoring bell"
         )
         controller.preamp_db = SIGNAL_CHECK_PREAMP_DB
         controller.apply_state_to_engine()
@@ -1140,6 +1188,18 @@ def run_controller_flow(
             )
             wait_for_processing_path_active(virtual_sink_name, filter_output_name, timeout_seconds)
 
+            monitor = controller.output_analyzer.stream
+            if hasattr(monitor, "get_graph_rate"):
+                expected_rate = int(os.environ.get("MINI_EQ_HEADLESS_PIPEWIRE_GRAPH_RATE", "48000"))
+                dispatch_until(
+                    f"Mini EQ monitor graph clock {expected_rate} Hz",
+                    lambda monitor=monitor, expected_rate=expected_rate: monitor.get_graph_rate() == expected_rate,
+                    timeout_seconds,
+                )
+                if monitor.get_rate() != 48000:
+                    raise RuntimeError("Monitor negotiated format unexpectedly changed from 48000 Hz")
+                print(f"Mini EQ monitor: graph={monitor.get_graph_rate()} Hz, capture={monitor.get_rate()} Hz")
+
             controller.set_analyzer_enabled(False)
             virtual_serial = dispatch_until(
                 "synthetic stream stayed routed while monitor was disabled",
@@ -1212,6 +1272,13 @@ def run_helper(_args: argparse.Namespace) -> int:
         runtime_dir.chmod(0o700)
         live.write_settings(config_dir)
         live.write_pipewire_config(config_dir)
+        graph_rate = int(os.environ["MINI_EQ_HEADLESS_PIPEWIRE_GRAPH_RATE"])
+        rate_config = config_dir / "pipewire" / "pipewire.conf.d" / "20-mini-eq-test-rate.conf"
+        rate_config.write_text(
+            f"context.properties = {{ default.clock.rate = {graph_rate} "
+            f"default.clock.allowed-rates = [ {graph_rate} ] }}\n",
+            encoding="utf-8",
+        )
 
         os.environ["XDG_RUNTIME_DIR"] = str(runtime_dir)
         os.environ["XDG_CONFIG_HOME"] = str(config_dir)
@@ -1247,6 +1314,7 @@ def run_parent(args: argparse.Namespace) -> int:
     env["MINI_EQ_HEADLESS_PIPEWIRE_CYCLES"] = str(args.cycles)
     env["MINI_EQ_HEADLESS_PIPEWIRE_AUDIO_DURATION"] = str(args.audio_duration)
     env["MINI_EQ_HEADLESS_PIPEWIRE_IDLE_GAP"] = str(args.idle_gap)
+    env["MINI_EQ_HEADLESS_PIPEWIRE_GRAPH_RATE"] = str(args.graph_rate)
     env["PYTHONUNBUFFERED"] = "1"
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
@@ -1273,6 +1341,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--helper", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--timeout", type=float, default=35.0, help="Timeout for each PipeWire transition.")
     parser.add_argument("--cycles", type=int, default=3, help="Route and monitor toggle cycles to drive.")
+    parser.add_argument(
+        "--graph-rate",
+        type=int,
+        choices=(44100, 48000, 96000, 192000),
+        default=48000,
+        help="Sample rate of the isolated PipeWire graph.",
+    )
     parser.add_argument(
         "--audio-duration",
         type=float,

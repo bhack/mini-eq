@@ -6,6 +6,13 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Gtk, Pango
 
+from .core import SAMPLE_RATE
+
+
+def controller_sample_rate(controller) -> float:
+    getter = getattr(controller, "active_sample_rate", None)
+    return float(getter()) if getter is not None else SAMPLE_RATE
+
 
 def set_accessible_label(widget: Gtk.Widget, label: str) -> None:
     widget.update_property([Gtk.AccessibleProperty.LABEL], [label])

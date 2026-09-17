@@ -35,11 +35,13 @@ from .core import (
     sanitize_preset_name,
 )
 from .filter_chain import (
-    build_builtin_biquad_filter_chain_module_args,
-    builtin_biquad_band_control_values,
-    builtin_biquad_control_values,
+    build_native_biquad_filter_chain_module_args as build_builtin_biquad_filter_chain_module_args,
+)
+from .filter_chain import (
     builtin_biquad_preamp_control_values,
 )
+from .filter_chain import native_biquad_band_control_values as builtin_biquad_band_control_values
+from .filter_chain import native_biquad_control_values as builtin_biquad_control_values
 from .glib_utils import destroy_glib_source
 from .pipewire_backend import (
     DEFAULT_AUDIO_SINK_KEY,
@@ -47,7 +49,6 @@ from .pipewire_backend import (
     NODE_PROPS_PARAM_NAME,
     PipeWireBackend,
     PipeWireNode,
-    node_sample_rate,
     parse_metadata_node_name,
 )
 from .pipewire_routes import PipeWireOutputPresetTarget
@@ -682,14 +683,39 @@ class SystemWideEqController:
         return default_eq_bands()
 
     def active_sample_rate(self) -> float:
-        for sink_name in (self.virtual_sink_name, self.output_sink):
-            rate = node_sample_rate(self.get_sink(sink_name))
-            if rate > 0:
-                return rate
+        # A stopped/idle graph has no observed clock yet. Use a reference rate
+        # only for display/import calculations; native DSP never uses it.
+        return float(getattr(self, "_processing_sample_rate", 0) or SAMPLE_RATE)
 
-        return SAMPLE_RATE
+    def set_sample_rate_changed_callback(self, callback: Callable[[], None] | None) -> None:
+        self.sample_rate_changed_callback = callback
+
+    def update_processing_sample_rate(self, rate: int) -> None:
+        if rate == getattr(self, "_processing_sample_rate", 0):
+            return
+        self._processing_sample_rate = rate
+        callback = getattr(self, "sample_rate_changed_callback", None)
+        if callback is not None:
+            callback()
+
+    def start_graph_rate_monitor(self) -> None:
+        factory = getattr(self.output_backend, "create_graph_rate_monitor", None)
+        if factory is None or getattr(self, "_graph_rate_monitor", None) is not None:
+            return
+        try:
+            self._graph_rate_monitor = factory(self.virtual_sink_name, self.update_processing_sample_rate)
+        except Exception as exc:
+            self.emit_status(f"PipeWire graph clock monitor warning: {exc}")
+
+    def stop_graph_rate_monitor(self) -> None:
+        monitor = getattr(self, "_graph_rate_monitor", None)
+        self._graph_rate_monitor = None
+        if monitor is not None:
+            monitor.stop()
+        self.update_processing_sample_rate(0)
 
     def build_filter_chain_module_args(self) -> str:
+        self._engine_band_types = tuple(band.filter_type for band in self.bands)
         return build_builtin_biquad_filter_chain_module_args(
             bands=self.bands,
             preamp_db=self.preamp_db,
@@ -700,6 +726,7 @@ class SystemWideEqController:
         )
 
     def cancel_pending_engine_start(self) -> None:
+        self._engine_start_token = None
         watch = getattr(self, "engine_start_watch", None)
         self.engine_start_watch = None
         self.engine_start_pending = False
@@ -722,8 +749,13 @@ class SystemWideEqController:
 
         self.engine_module = self.output_backend.load_filter_chain_module(self.build_filter_chain_module_args())
         self.engine_start_pending = True
+        start_token = object()
+        self._engine_start_token = start_token
 
         def fail(exc: Exception) -> None:
+            if self._engine_start_token is not start_token:
+                return
+            self._engine_start_token = None
             self.engine_start_watch = None
             self.engine_start_pending = False
             self.engine_module = None
@@ -738,6 +770,8 @@ class SystemWideEqController:
                 self.emit_status(str(exc))
 
         def on_sink_ready(sink: PipeWireNode | None) -> None:
+            if self._engine_start_token is not start_token:
+                return
             self.engine_start_watch = None
             self.engine_start_pending = False
 
@@ -748,12 +782,33 @@ class SystemWideEqController:
                 fail(RuntimeError(f"filter-chain did not create {self.virtual_sink_name}"))
                 return
 
+            # A preset/type edit during creation makes this topology obsolete.
+            # Replace it before announcing readiness, preserving the caller's
+            # completion callbacks (including restart routing restoration).
+            built_types = getattr(self, "_engine_band_types", None)
+            if built_types is not None and built_types != tuple(band.filter_type for band in self.bands):
+                self.stop_engine(announce=False)
+                try:
+                    self.start_engine(on_ready=on_ready, on_error=on_error)
+                except Exception as exc:
+                    if on_error is not None:
+                        on_error(exc)
+                    else:
+                        self.emit_status(str(exc))
+                return
+
             self.filter_node_id = sink.bound_id
             self.running = True
             self.emit_status(f"filter-chain PipeWire EQ ready: {self.virtual_sink_name} -> {self.output_sink}")
             self.apply_state_to_engine()
+            if self._engine_start_token is not start_token or not self.running:
+                return
             self.start_filter_node_state_monitor()
             self.start_filter_control_param_monitor()
+            self.start_graph_rate_monitor()
+            if self._engine_start_token is not start_token or not self.running:
+                return
+            self._engine_start_token = None
             if on_ready is not None:
                 on_ready()
 
@@ -791,6 +846,7 @@ class SystemWideEqController:
 
     def stop_engine(self, announce: bool = True) -> None:
         self.cancel_pending_engine_start()
+        self.stop_graph_rate_monitor()
         module = getattr(self, "engine_module", None)
         if module is None:
             self.stop_filter_node_state_monitor()
@@ -847,6 +903,13 @@ class SystemWideEqController:
 
     def set_filter_controls(self, controls: dict[str, float]) -> None:
         if self.filter_node_id is None or not self.running:
+            return
+
+        # Native biquad labels are graph topology, not mutable controls. Rebuild
+        # once for a type/preset change; ordinary frequency/Q/gain edits stay live.
+        types = tuple(band.filter_type for band in self.bands)
+        if getattr(self, "_engine_band_types", types) != types:
+            self.restart_engine()
             return
 
         try:
@@ -1069,6 +1132,7 @@ class SystemWideEqController:
         self.outputs_changed_callback = None
         self.analyzer_levels_callback = None
         self.analyzer_loudness_callback = None
+        self.sample_rate_changed_callback = None
 
         try:
             try:

@@ -56,6 +56,7 @@ class AutoEqGeneratedPreset:
 class AutoEqDownloadedPreset:
     path: Path
     target_label: str | None = None
+    sample_rate: int = int(SAMPLE_RATE)
 
 
 def user_cache_dir() -> Path:
@@ -236,9 +237,23 @@ def search_autoeq_entries(entries: list[AutoEqEntry], query: str, *, limit: int 
     return matched[:limit]
 
 
-def autoeq_download_path(entry: AutoEqEntry) -> Path:
+def autoeq_sample_rate(sample_rate: float) -> int:
+    try:
+        rate = int(sample_rate)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError("AutoEq sample rate must be a positive integer") from exc
+    if isinstance(sample_rate, bool) or rate <= 0 or rate != sample_rate:
+        raise ValueError("AutoEq sample rate must be a positive integer")
+    return rate
+
+
+def autoeq_download_path(entry: AutoEqEntry, *, sample_rate: float = SAMPLE_RATE) -> Path:
+    rate = autoeq_sample_rate(sample_rate)
     directory = autoeq_cache_dir() / AUTOEQ_PRESET_DIR
-    digest = f"{int.from_bytes(hashlib.sha256(entry.cache_key.encode('utf-8')).digest()[:6], 'big'):012x}"
+    # Existing caches were generated at 48 kHz. Preserve that legacy key only
+    # for 48 kHz; other rates must never reuse those filter parameters.
+    key = entry.cache_key if rate == SAMPLE_RATE else f"{entry.cache_key}/fs/{rate}"
+    digest = f"{int.from_bytes(hashlib.sha256(key.encode('utf-8')).digest()[:6], 'big'):012x}"
     return directory / f"AutoEq-{digest}.txt"
 
 
@@ -247,8 +262,8 @@ def autoeq_metadata_line(label: str, value: str) -> str:
     return f"# AutoEq {label}: {normalized}\n" if normalized else ""
 
 
-def read_cached_autoeq_target_label(entry: AutoEqEntry) -> str | None:
-    path = autoeq_download_path(entry)
+def read_cached_autoeq_target_label(entry: AutoEqEntry, *, sample_rate: float = SAMPLE_RATE) -> str | None:
+    path = autoeq_download_path(entry, sample_rate=sample_rate)
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -261,8 +276,8 @@ def read_cached_autoeq_target_label(entry: AutoEqEntry) -> str | None:
     return None
 
 
-def cached_autoeq_target_label(entry: AutoEqEntry) -> str:
-    target_label = read_cached_autoeq_target_label(entry)
+def cached_autoeq_target_label(entry: AutoEqEntry, *, sample_rate: float = SAMPLE_RATE) -> str:
+    target_label = read_cached_autoeq_target_label(entry, sample_rate=sample_rate)
     if target_label is not None:
         return target_label
 
@@ -332,7 +347,9 @@ def autoeq_target_and_bass_boost(
     return target_label, bass_boost
 
 
-def autoeq_equalize_body(entry: AutoEqEntry, targets: list[object]) -> dict[str, object]:
+def autoeq_equalize_body(
+    entry: AutoEqEntry, targets: list[object], *, sample_rate: float = SAMPLE_RATE
+) -> dict[str, object]:
     target_label, bass_boost = autoeq_target_and_bass_boost(entry, targets)
     return {
         "target": target_label,
@@ -345,7 +362,7 @@ def autoeq_equalize_body(entry: AutoEqEntry, targets: list[object]) -> dict[str,
         "treble_boost_fc": 10000.0,
         "treble_boost_q": 0.7,
         "tilt": 0.0,
-        "fs": int(SAMPLE_RATE),
+        "fs": autoeq_sample_rate(sample_rate),
         "bit_depth": 16,
         "phase": "minimum",
         "f_res": 16.0,
@@ -409,9 +426,11 @@ def format_autoeq_parametric_eq(parametric_eq: object) -> str:
     return "\n".join(lines) + "\n"
 
 
-def download_autoeq_app_preset_info(entry: AutoEqEntry, *, refresh: bool = False) -> AutoEqGeneratedPreset:
+def download_autoeq_app_preset_info(
+    entry: AutoEqEntry, *, refresh: bool = False, sample_rate: float = SAMPLE_RATE
+) -> AutoEqGeneratedPreset:
     targets = load_autoeq_targets_data(refresh=refresh)
-    body = autoeq_equalize_body(entry, targets)
+    body = autoeq_equalize_body(entry, targets, sample_rate=sample_rate)
     target_label = str(body.get("target") or "Flat")
     data = post_json(AUTOEQ_APP_EQUALIZE_URL, body)
     return AutoEqGeneratedPreset(
@@ -420,28 +439,35 @@ def download_autoeq_app_preset_info(entry: AutoEqEntry, *, refresh: bool = False
     )
 
 
-def download_autoeq_app_preset(entry: AutoEqEntry, *, refresh: bool = False) -> str:
-    return download_autoeq_app_preset_info(entry, refresh=refresh).text
+def download_autoeq_app_preset(entry: AutoEqEntry, *, refresh: bool = False, sample_rate: float = SAMPLE_RATE) -> str:
+    return download_autoeq_app_preset_info(entry, refresh=refresh, sample_rate=sample_rate).text
 
 
-def download_autoeq_preset(entry: AutoEqEntry, *, refresh: bool = False) -> Path:
-    return download_autoeq_preset_info(entry, refresh=refresh).path
+def download_autoeq_preset(entry: AutoEqEntry, *, refresh: bool = False, sample_rate: float = SAMPLE_RATE) -> Path:
+    return download_autoeq_preset_info(entry, refresh=refresh, sample_rate=sample_rate).path
 
 
 def download_autoeq_preset_info(
     entry: AutoEqEntry,
     *,
     refresh: bool = False,
+    sample_rate: float = SAMPLE_RATE,
 ) -> AutoEqDownloadedPreset:
-    path = autoeq_download_path(entry)
+    rate = autoeq_sample_rate(sample_rate)
+    path = autoeq_download_path(entry, sample_rate=rate)
     if not refresh and path.is_file():
-        return AutoEqDownloadedPreset(path=path, target_label=cached_autoeq_target_label(entry))
+        return AutoEqDownloadedPreset(
+            path=path, target_label=cached_autoeq_target_label(entry, sample_rate=rate), sample_rate=rate
+        )
 
-    generated = download_autoeq_app_preset_info(entry, refresh=refresh)
+    generated = download_autoeq_app_preset_info(entry, refresh=refresh, sample_rate=rate)
     text = generated.text
     if "Filter " not in text and "Preamp:" not in text:
         raise RuntimeError("downloaded AutoEq preset does not look like an Equalizer APO preset")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(autoeq_metadata_line("target", generated.target_label) + text, encoding="utf-8")
-    return AutoEqDownloadedPreset(path=path, target_label=generated.target_label)
+    path.write_text(
+        autoeq_metadata_line("target", generated.target_label) + autoeq_metadata_line("sample rate", str(rate)) + text,
+        encoding="utf-8",
+    )
+    return AutoEqDownloadedPreset(path=path, target_label=generated.target_label, sample_rate=rate)

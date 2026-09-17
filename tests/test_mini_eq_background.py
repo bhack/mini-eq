@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from gi.repository import Gio, GLib
+
 from tests._mini_eq_imports import core, import_mini_eq_module
 
 background = import_mini_eq_module("background")
@@ -76,6 +78,25 @@ def test_background_command_can_start_active() -> None:
         "--background",
         "--auto-route",
     ]
+
+
+def test_unknown_method_background_portal_error_is_user_facing() -> None:
+    error = GLib.Error.new_literal(
+        Gio.dbus_error_quark(),
+        "No such interface org.freedesktop.portal.Background",
+        Gio.DBusError.UNKNOWN_METHOD,
+    )
+
+    user_error = background.user_facing_background_portal_error(error)
+
+    assert isinstance(user_error, background.BackgroundPortalError)
+    assert str(user_error) == "Background permissions are not available from this desktop portal"
+
+
+def test_other_background_portal_error_is_preserved() -> None:
+    error = GLib.Error.new_literal(Gio.io_error_quark(), "Connection closed", Gio.IOErrorEnum.CLOSED)
+
+    assert background.user_facing_background_portal_error(error) is error
 
 
 def test_resolve_mini_eq_executable_prefers_path_lookup(monkeypatch) -> None:

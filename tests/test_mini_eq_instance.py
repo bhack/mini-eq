@@ -53,4 +53,61 @@ def test_instance_lock_is_exclusive(tmp_path: Path) -> None:
     finally:
         first.release()
 
-    assert not lock_path.exists()
+    assert lock_path.exists()
+    second.acquire()
+    second.release()
+
+
+def test_instance_lock_does_not_follow_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "valuable.txt"
+    target.write_text("keep me")
+    lock_path = tmp_path / "mini-eq.lock"
+    lock_path.symlink_to(target)
+    with pytest.raises(OSError):
+        instance.InstanceLock(lock_path).acquire()
+    assert target.read_text() == "keep me"
+
+
+def test_failed_lock_does_not_truncate_owner_pid(tmp_path: Path) -> None:
+    lock_path = tmp_path / "mini-eq.lock"
+    first = instance.InstanceLock(lock_path)
+    first.acquire()
+    try:
+        contents = lock_path.read_text()
+        with pytest.raises(instance.MiniEqAlreadyRunningError):
+            instance.InstanceLock(lock_path).acquire()
+        assert lock_path.read_text() == contents
+    finally:
+        first.release()
+
+
+def test_instance_lock_rejects_shared_directory(tmp_path: Path) -> None:
+    directory = tmp_path / "shared"
+    directory.mkdir(mode=0o777)
+    directory.chmod(0o777)
+    with pytest.raises(PermissionError):
+        instance.InstanceLock(directory / "mini-eq.lock").acquire()
+
+
+def test_instance_lock_rejects_hardlink_without_truncating(tmp_path: Path) -> None:
+    target = tmp_path / "valuable.txt"
+    target.write_text("keep me")
+    lock_path = tmp_path / "mini-eq.lock"
+    lock_path.hardlink_to(target)
+    with pytest.raises(PermissionError):
+        instance.InstanceLock(lock_path).acquire()
+    assert target.read_text() == "keep me"
+
+
+def test_instance_lock_rejects_writable_file(tmp_path: Path) -> None:
+    lock_path = tmp_path / "mini-eq.lock"
+    lock_path.write_text("keep me")
+    lock_path.chmod(0o666)
+    with pytest.raises(PermissionError):
+        instance.InstanceLock(lock_path).acquire()
+    assert lock_path.read_text() == "keep me"
+
+
+def test_instance_lock_rejects_relative_path() -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        instance.InstanceLock(Path("mini-eq.lock")).acquire()

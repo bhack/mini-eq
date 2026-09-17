@@ -304,7 +304,9 @@ def start_smoke_stream(target: str | None, audio_file: Path) -> subprocess.Popen
         ),
     ]
     if target is not None:
-        command.extend(["--target", target])
+        # Validate here as well as in argparse for programmatic callers. Keep
+        # the value attached to its option, even if validation changes later.
+        command.append(f"--target={pipewire_node_target(target)}")
     command.append(audio_file)
     print(f"$ {format_command(command)}", flush=True)
     return subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

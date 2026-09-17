@@ -31,7 +31,6 @@ from .core import (
     EQ_GAIN_MIN_DB,
     EQ_MODES,
     MODE_ORDER,
-    SAMPLE_RATE,
     AudioBackendError,
     ensure_preset_storage_dir,
     estimate_response_peak_db,
@@ -51,7 +50,7 @@ from .window_preferences import MiniEqWindowPreferencesMixin
 from .window_presets import MiniEqWindowPresetMixin, imported_apo_curve_label, imported_apo_curve_label_for_name
 from .window_state import bind_window_state
 from .window_utility import MiniEqWindowUtilityPaneMixin
-from .window_utils import requested_switch_state, set_switch_confirmed_state
+from .window_utils import controller_sample_rate, requested_switch_state, set_switch_confirmed_state
 
 TOAST_TIMEOUT_SECONDS = 2
 MIN_WINDOW_WIDTH = 980
@@ -269,6 +268,18 @@ class MiniEqWindow(
             "notify::dark", self.on_style_manager_dark_changed
         )
         self.controller.set_outputs_changed_callback(self.refresh_output_sinks)
+        if hasattr(self.controller, "set_sample_rate_changed_callback"):
+            self.controller.set_sample_rate_changed_callback(self.on_processing_sample_rate_changed)
+
+    def on_processing_sample_rate_changed(self) -> None:
+        if self.ui_shutting_down:
+            return
+        self.invalidate_graph_response_cache()
+        self.queue_graph_draw()
+        self.update_status_summary()
+        entry = getattr(self, "autoeq_selected_entry", None)
+        if entry is not None and self.autoeq_dialog_is_active():
+            self.schedule_autoeq_preview_load(entry)
 
     def do_size_allocate(self, width: int, height: int, baseline: int) -> None:
         Adw.ApplicationWindow.do_size_allocate(self, width, height, baseline)
@@ -489,6 +500,8 @@ class MiniEqWindow(
         self.controller.set_outputs_changed_callback(None)
         self.controller.set_analyzer_levels_callback(None)
         self.controller.set_analyzer_loudness_callback(None)
+        if hasattr(self.controller, "set_sample_rate_changed_callback"):
+            self.controller.set_sample_rate_changed_callback(None)
         self.stop_preset_monitoring()
         self.stop_analyzer_preview(stop_backend=False)
 
@@ -856,7 +869,9 @@ class MiniEqWindow(
         return f"{self.transport_label_for_sink(sink)} output", sample_text, False, warnings
 
     def estimate_curve_peak_db(self) -> float:
-        return estimate_response_peak_db(self.controller.bands, self.controller.preamp_db, SAMPLE_RATE)
+        return estimate_response_peak_db(
+            self.controller.bands, self.controller.preamp_db, controller_sample_rate(self.controller)
+        )
 
     def update_status_summary(self) -> None:
         sink = self.output_sink_info()

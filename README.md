@@ -13,6 +13,9 @@ routing, metadata, and monitor streams, and PipeWire filter-chain with builtin
 biquad filters for the equalizer. When libebur128 is available, the monitor can
 also show live LUFS loudness.
 
+The native PipeWire biquad filters calculate coefficients at their processing
+sample rate; EQ processing is not pinned to 48 kHz.
+
 ![Mini EQ screenshot](https://raw.githubusercontent.com/bhack/mini-eq/main/docs/screenshots/mini-eq.png)
 
 ## Features

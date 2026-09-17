@@ -21,6 +21,17 @@ INTERFACE_NAME = "io.github.bhack.MiniEq.Control"
 ANALYZER_DB_FLOOR = -100.0
 API_VERSION = 1
 APP_VERSION = "dev"
+DEFAULT_PRESETS = ("Studio Reference", "Flat", "Voice Focus")
+DEMO_PRESET_SUFFIXES = (
+    "Studio Reference",
+    "Bright Headphones",
+    "Late Night Speakers",
+    "Voice Focus",
+    "Bass Trim",
+    "Travel Earbuds",
+    "Living Room",
+    "Desk Monitors",
+)
 CAPABILITIES = (
     "present-window",
     "quit",
@@ -93,13 +104,26 @@ def display_level(level: float) -> float:
     return max(0.0, min(1.0, deflection / 115.0))
 
 
+def demo_presets(count: int) -> list[str]:
+    if count <= 0:
+        return []
+    if count <= len(DEFAULT_PRESETS):
+        return list(DEFAULT_PRESETS[:count])
+
+    presets = list(DEFAULT_PRESETS)
+    for index in range(len(DEFAULT_PRESETS) + 1, count + 1):
+        suffix = DEMO_PRESET_SUFFIXES[(index - 1) % len(DEMO_PRESET_SUFFIXES)]
+        presets.append(f"Preset {index:02d} - {suffix}")
+    return presets
+
+
 class FakeMiniEqControl:
-    def __init__(self, *, analyzer_enabled: bool = True) -> None:
+    def __init__(self, *, analyzer_enabled: bool = True, preset_count: int = len(DEFAULT_PRESETS)) -> None:
         self.eq_enabled = True
         self.routed = True
-        self.preset_name = "Studio Reference"
         self.output_preset_name = "Demo Output Link"
-        self.presets = ["Studio Reference", "Flat", "Voice Focus"]
+        self.presets = demo_presets(preset_count)
+        self.preset_name = self.presets[0] if self.presets else ""
         self.analyzer_enabled = analyzer_enabled
         self.analyzer_levels = [0.0] * 10
         self.animation_step = 0
@@ -264,9 +288,17 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="report analyzer monitoring as disabled",
     )
+    parser.add_argument(
+        "--preset-count",
+        type=int,
+        default=len(DEFAULT_PRESETS),
+        help="number of demo presets exposed by ListPresets",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    FakeMiniEqControl(analyzer_enabled=args.analyzer_enabled).run()
+    if args.preset_count < 0:
+        raise SystemExit("--preset-count must be greater than or equal to 0")
+    FakeMiniEqControl(analyzer_enabled=args.analyzer_enabled, preset_count=args.preset_count).run()

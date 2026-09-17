@@ -25,7 +25,6 @@ from .core import (
     GRAPH_FREQ_MIN,
     MAX_BANDS,
     MODE_INDEX_BY_VALUE,
-    SAMPLE_RATE,
     EqBand,
     band_is_effective,
     bands_have_solo,
@@ -34,7 +33,7 @@ from .core import (
     total_response_db,
     total_response_db_at_frequencies,
 )
-from .window_utils import set_switch_confirmed_state
+from .window_utils import controller_sample_rate, set_switch_confirmed_state
 
 ENGINE_CONTROL_REFRESH_INTERVAL_MS = 16
 FOCUS_BLUE = (0.47, 0.72, 1.0)
@@ -376,7 +375,12 @@ class MiniEqWindowGraphMixin:
             band = self.controller.bands[index]
             bx = self.frequency_to_x(band.frequency, width_f, left, right)
             by = self.db_to_y(
-                total_response_db(self.controller.bands, self.controller.preamp_db, SAMPLE_RATE, band.frequency),
+                total_response_db(
+                    self.controller.bands,
+                    self.controller.preamp_db,
+                    controller_sample_rate(self.controller),
+                    band.frequency,
+                ),
                 height_f,
                 top,
                 bottom,
@@ -473,7 +477,9 @@ class MiniEqWindowGraphMixin:
                     )
                     for i, b in enumerate(bands)
                 ]
-                db_others = total_response_db(temp_bands, self.controller.preamp_db, SAMPLE_RATE, freq)
+                db_others = total_response_db(
+                    temp_bands, self.controller.preamp_db, controller_sample_rate(self.controller), freq
+                )
 
                 # Required gain for this band at the current mouse frequency
                 new_gain = target_db - db_others
@@ -764,6 +770,7 @@ class MiniEqWindowGraphMixin:
     ) -> list[tuple[float, float]]:
         cache_key = (
             self.graph_layout_key(width, height),
+            controller_sample_rate(self.controller),
             round(float(self.controller.preamp_db), 4),
             tuple(self.response_band_key(band) for band in self.controller.bands),
         )
@@ -776,7 +783,7 @@ class MiniEqWindowGraphMixin:
         db_values = total_response_db_at_frequencies(
             self.controller.bands,
             self.controller.preamp_db,
-            SAMPLE_RATE,
+            controller_sample_rate(self.controller),
             frequencies,
             clamp_output=True,
         )
@@ -805,6 +812,7 @@ class MiniEqWindowGraphMixin:
 
         cache_key = (
             self.graph_layout_key(width, height),
+            controller_sample_rate(self.controller),
             self.selected_band_index,
             self.response_band_key(selected_band),
         )
@@ -814,7 +822,9 @@ class MiniEqWindowGraphMixin:
 
         pixels = list(range(int(left), int(width - right)))
         frequencies = [self.x_to_frequency(float(pixel), width, left, right) for pixel in pixels]
-        db_values = total_response_db_at_frequencies([selected_band], 0.0, SAMPLE_RATE, frequencies, clamp_output=True)
+        db_values = total_response_db_at_frequencies(
+            [selected_band], 0.0, controller_sample_rate(self.controller), frequencies, clamp_output=True
+        )
         points = [
             (float(pixel), self.db_to_y(float(db_value), height, top, bottom))
             for pixel, db_value in zip(pixels, db_values, strict=True)
@@ -1070,7 +1080,12 @@ class MiniEqWindowGraphMixin:
             band = self.controller.bands[index]
             x = self.frequency_to_x(band.frequency, width_f, left, right)
             y = self.db_to_y(
-                total_response_db(self.controller.bands, self.controller.preamp_db, SAMPLE_RATE, band.frequency),
+                total_response_db(
+                    self.controller.bands,
+                    self.controller.preamp_db,
+                    controller_sample_rate(self.controller),
+                    band.frequency,
+                ),
                 height_f,
                 top,
                 bottom,

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.8 - 2026-09-17
+
+- Harden single-instance lock handling against unsafe files and concurrent
+  startup races.
+- Keep EQ frequency controls consistent across processing sample rates using
+  native rate-aware PipeWire biquads.
+- Follow the processing clock for response curves and AutoEq requests, keeping
+  downloaded AutoEq profiles cached separately for each sample rate.
+- Make large preset libraries searchable and scrollable in the GNOME Shell
+  extension.
+- Improve background permission error messages.
+- Update bundled PipeWire filter modules to 1.6.9 and NumPy to 2.4.6.
+- Require pipewire-gobject 0.3.10 for runtime graph-clock observation.
+
 ## 0.8.7 - 2026-06-12
 
 - Fix saved preset loading when many presets are stored.

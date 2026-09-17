@@ -23,3 +23,12 @@ def test_gnome_shell_extension_dbus_contract_matches_app() -> None:
 
 def test_gnome_shell_extension_fake_control_matches_shell_usage() -> None:
     assert check_gnome_shell_extension.check_fake_control_contract() is None
+
+
+def test_gnome_shell_extension_fake_control_can_expose_large_preset_library() -> None:
+    fake_control = check_gnome_shell_extension.fake_control_module()
+    presets = fake_control.demo_presets(35)
+
+    assert len(presets) == 35
+    assert presets[:3] == ["Studio Reference", "Flat", "Voice Focus"]
+    assert presets[-1].startswith("Preset 35 - ")

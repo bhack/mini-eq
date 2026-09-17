@@ -9,6 +9,42 @@ def test_pipewire_quote_escapes_module_argument_strings() -> None:
     assert filter_chain.pipewire_quote('a"b\\c') == '"a\\"b\\\\c"'
 
 
+def test_native_biquads_follow_graph_rate_and_have_true_bypass() -> None:
+    bands = [core.EqBand(core.FILTER_TYPES["Lo-pass"], 1000.0, 0.0, 1.4)]
+    args = filter_chain.build_native_biquad_filter_chain_module_args(
+        bands=bands,
+        preamp_db=0.0,
+        eq_enabled=True,
+        virtual_sink_name="mini_eq_sink",
+        filter_output_name="mini_eq_sink_output",
+        output_sink="test",
+    )
+    assert "audio.rate" not in args
+    assert "label = bq_lowpass" in args
+    assert 'input = "band_l_0:In 2"' in args
+    assert 'output = "band_l_0_filter:Out" input = "band_l_0:In 1"' in args
+    enabled = filter_chain.native_biquad_band_control_values(0, bands[0], True, 192000)
+    bypass = filter_chain.native_biquad_band_control_values(0, bands[0], False, 192000)
+    assert enabled["band_l_0:Gain 1"] == 1
+    assert enabled["band_l_0:Gain 2"] == 0
+    assert bypass["band_l_0:Gain 1"] == 0
+    assert bypass["band_l_0:Gain 2"] == 1
+    assert enabled["band_l_0_filter:Freq"] == 1000
+    assert enabled == filter_chain.native_biquad_band_control_values(0, bands[0], True, 48000)
+
+
+def test_native_biquad_solo_and_mute_use_dry_path() -> None:
+    bands = [
+        core.EqBand(core.FILTER_TYPES["Bell"], 1000, 6, 1),
+        core.EqBand(core.FILTER_TYPES["Bell"], 2000, 3, 1, solo=True),
+    ]
+    controls = filter_chain.native_biquad_control_values(bands, 0, True)
+    assert controls["band_l_0:Gain 1"] == 0
+    assert controls["band_l_1:Gain 1"] == 1
+    bands[1].mute = True
+    assert filter_chain.native_biquad_control_values(bands, 0, True)["band_r_1:Gain 1"] == 0
+
+
 def test_builtin_biquad_filter_chain_uses_pipewire_raw_biquads() -> None:
     bands = [
         core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, 6.0, 1.4),
@@ -29,6 +65,7 @@ def test_builtin_biquad_filter_chain_uses_pipewire_raw_biquads() -> None:
     assert "type = lv2" not in args
     assert "plugin =" not in args
     assert "label = bq_raw" in args
+    assert "audio.rate = 48000" in args
     assert "name = preamp_l" in args
     assert "name = band_l_0" in args
     assert "name = band_r_1" in args
