@@ -485,6 +485,75 @@ class PipeWireBackend(PipeWireRouteMixin):
             timeout_ms=timeout_ms,
         )
 
+    def wait_for_input_unlinked(self, node_id: int, stream_ids: set[int], timeout_ms: int = 1500) -> bool:
+        """Drain device links on shutdown, not just the metadata write.
+
+        The session manager moves streams asynchronously. Dispatch its graph
+        events before destroying an app-owned device that can trigger MPRIS
+        pause policy. This bounded nested loop is for shutdown only.
+        """
+        self._ensure_connected()
+        loop = self._GLib.MainLoop()
+        pending_id = 0
+        timeout_id = 0
+        done = False
+        detached = False
+        link_handlers: dict[int, int] = {}
+
+        def check() -> bool:
+            nonlocal pending_id, done, detached
+            pending_id = 0
+            if done:
+                return False
+            links = self.list_links()
+            detached = not any(link.input_node_id == node_id for link in links)
+            existing = {node.bound_id for node in self.list_output_streams()}
+            for stream_id in stream_ids & existing:
+                restored = [
+                    link for link in links if link.output_node_id == stream_id and link.input_node_id != node_id
+                ]
+                if not restored:
+                    detached = False
+                for link in restored:
+                    if link.bound_id not in link_handlers:
+                        link_handlers[link.bound_id] = self.connect_link_state_changed(link.bound_id, changed)
+                    proxy = self._link_proxy_by_bound_id(link.bound_id)
+                    if proxy is None or proxy.get_state() not in ("active", "paused"):
+                        detached = False
+            if detached:
+                done = True
+                loop.quit()
+            return False
+
+        def changed(*_args) -> None:
+            nonlocal pending_id
+            if not done and pending_id == 0:
+                pending_id = self._GLib.idle_add(check)
+
+        def timeout() -> bool:
+            nonlocal timeout_id, done
+            timeout_id = 0
+            done = True
+            loop.quit()
+            return False
+
+        added = self.connect_object_added(changed)
+        removed = self.connect_object_removed(changed)
+        try:
+            timeout_id = self._GLib.timeout_add(max(1, timeout_ms), timeout)
+            changed()
+            loop.run()
+        finally:
+            done = True
+            self.disconnect_node_manager_handler(added)
+            self.disconnect_node_manager_handler(removed)
+            for handler_id in link_handlers.values():
+                self.disconnect_link_handler(handler_id)
+            for source_id in (pending_id, timeout_id):
+                if source_id:
+                    self._GLib.source_remove(source_id)
+        return detached
+
     def connect_object_added(self, callback) -> int:
         self._ensure_connected()
         handler_id = self._GObject.Object.connect(self._registry, "global-added", callback)
@@ -986,11 +1055,14 @@ class PipeWireBackend(PipeWireRouteMixin):
         return None
 
     def load_filter_chain_module(self, arguments: str):
+        return self.load_module(FILTER_CHAIN_MODULE_NAME, arguments)
+
+    def load_module(self, name: str, arguments: str):
         self._ensure_connected()
 
-        module = self._core.load_module(FILTER_CHAIN_MODULE_NAME, arguments)
+        module = self._core.load_module(name, arguments)
         if module is None:
-            raise PipeWireBackendError(f"failed to load PipeWire module: {FILTER_CHAIN_MODULE_NAME}")
+            raise PipeWireBackendError(f"failed to load PipeWire module: {name}")
 
         self._loaded_modules.append(module)
         return module

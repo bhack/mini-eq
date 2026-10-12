@@ -222,6 +222,19 @@ a focused local loop:
 python3 tools/check_headless_pipewire_runtime.py --timeout 35 --cycles 2
 ```
 
+For preset topology or virtual-device lifecycle changes, also run the isolated
+PulseAudio/MPRIS smoke on a recent WirePlumber with `linking.pause-playback`
+support. It checks stable device identity, no player pause on preset/type edits
+or normal shutdown, and a positive device-removal control:
+
+```bash
+python3 tools/check_mpris_preset_runtime.py
+```
+
+This requires `pipewire-pulse` and `paplay` in addition to the native headless
+smoke dependencies. It uses a private session bus and audio graph and does not
+change the host's playback or WirePlumber settings.
+
 For background portal changes, run one clean-permission Flatpak smoke in a real
 GNOME session. Enable **Keep Running in Background**, approve the portal
 prompt, enable **Start at Login**, close the window, and confirm the app stays

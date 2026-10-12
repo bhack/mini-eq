@@ -2,6 +2,8 @@
 
 ## 0.8.9 - 2026-10-13
 
+- Keep the audio device stable when changing presets or filter types, avoiding
+  media-player pauses caused by device removal.
 - Avoid processing unused Off bands while keeping all 32 band slots available.
 - Stop analyzer animation and spectrum calculations while frozen, and stop
   animation while the window is hidden.

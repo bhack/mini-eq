@@ -8,6 +8,60 @@ from tests._mini_eq_imports import pipewire_backend as pw_backend
 from tests._mini_eq_imports import pipewire_routes as pw_routes
 
 
+@pytest.mark.parametrize("initial", ["old-link", "gap"])
+@pytest.mark.parametrize("restored_state", ["active", "paused", "error"])
+def test_shutdown_wait_requires_a_restored_link_and_cleans_up(initial, restored_state) -> None:
+    backend = pw_backend.PipeWireBackend.__new__(pw_backend.PipeWireBackend)
+    links = [pw_backend.PipeWireLink(1, 7, 42, False, False)] if initial == "old-link" else []
+    events = {}
+    disconnected = []
+
+    class Loop:
+        stopped = False
+
+        def quit(self):
+            self.stopped = True
+
+        def run(self):
+            glib.idle()
+            # An unlinked gap is not a completed restore.
+            assert not self.stopped
+            links[:] = [pw_backend.PipeWireLink(2, 7, 43, False, False)]
+            events[10]()
+            glib.idle()
+            if not self.stopped:
+                glib.timeout()
+
+    class GLib:
+        MainLoop = Loop
+
+        def idle_add(self, callback):
+            self.idle = callback
+            return 88
+
+        def timeout_add(self, milliseconds, callback):
+            assert milliseconds == 1500
+            self.timeout = callback
+            return 77
+
+        def source_remove(self, source_id):
+            pass
+
+    glib = GLib()
+    backend._GLib = glib
+    backend._ensure_connected = lambda: None
+    backend.list_links = lambda: list(links)
+    backend.list_output_streams = lambda: [SimpleNamespace(bound_id=7)]
+    backend.connect_object_added = lambda callback: events.setdefault(10, callback) and 10
+    backend.connect_object_removed = lambda callback: events.setdefault(11, callback) and 11
+    backend.disconnect_node_manager_handler = disconnected.append
+    backend.connect_link_state_changed = lambda _link_id, _callback: 12
+    backend.disconnect_link_handler = disconnected.append
+    backend._link_proxy_by_bound_id = lambda _link_id: SimpleNamespace(get_state=lambda: restored_state)
+    assert backend.wait_for_input_unlinked(42, {7}) is (restored_state != "error")
+    assert set(disconnected) == {10, 11, 12}
+
+
 class FakeCore:
     calls: int = 0
 

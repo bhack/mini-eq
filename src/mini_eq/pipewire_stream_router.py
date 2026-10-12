@@ -47,6 +47,7 @@ class PipeWireStreamRouter:
         self.accept_stream_events = False
         self.event_source_id = 0
         self.pending_route_applied_callback = False
+        self.pending_processing_links: dict[int, PipeWireLink] = {}
         self.object_added_handler_id = 0
         self.object_removed_handler_id = 0
         self.link_state_handler_ids: dict[int, int] = {}
@@ -294,6 +295,12 @@ class PipeWireStreamRouter:
 
         route_applied = self.pending_route_applied_callback
         self.pending_route_applied_callback = False
+        # Registry signals can arrive on the PipeWire loop thread. Binding and
+        # synchronizing link proxies must happen on the GLib thread.
+        pending_links = list(self.pending_processing_links.values())
+        self.pending_processing_links.clear()
+        for link in pending_links:
+            self.track_processing_link_state(link)
         self.refresh()
         if route_applied and self.route_applied_callback is not None:
             self.route_applied_callback()
@@ -319,7 +326,7 @@ class PipeWireStreamRouter:
             return
 
         if self._link_touches_processing_path(link):
-            self.track_processing_link_state(link)
+            self.pending_processing_links[link.bound_id] = link
             self.schedule_refresh(route_applied=True)
         elif self._link_touches_routed_stream(link):
             self.schedule_refresh()
@@ -331,6 +338,7 @@ class PipeWireStreamRouter:
             return
 
         should_refresh = self._link_touches_processing_path(link) or self._link_touches_routed_stream(link)
+        self.pending_processing_links.pop(link.bound_id, None)
         self.untrack_processing_link_state(link)
         if should_refresh:
             self.schedule_refresh()
@@ -355,6 +363,7 @@ class PipeWireStreamRouter:
 
     def stop_monitoring(self) -> None:
         self.accept_stream_events = False
+        self.pending_processing_links.clear()
 
         if self.event_source_id > 0:
             destroy_glib_source(self.event_source_id)

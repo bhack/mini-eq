@@ -172,7 +172,7 @@ runtime.
 ## Local Flatpak Build
 
 The Flatpak manifest uses the GNOME runtime. It does not ship a full PipeWire
-daemon or session manager; it builds only the local PipeWire filter-chain module
+daemon or session manager; it builds the local PipeWire filter-chain and loopback modules
 and SPA builtin filter-graph support that Mini EQ loads inside the app process.
 It also builds pipewire-gobject for Mini EQ's app-facing PipeWire access and
 bundles NumPy and libebur128 for analyzer and live LUFS support.

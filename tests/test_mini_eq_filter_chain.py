@@ -9,6 +9,34 @@ def test_pipewire_quote_escapes_module_argument_strings() -> None:
     assert filter_chain.pipewire_quote('a"b\\c') == '"a\\"b\\\\c"'
 
 
+def test_stable_input_has_no_hardware_fallback_or_fixed_sample_rate() -> None:
+    args = filter_chain.build_eq_input_module_args("mini_eq_sink", "mini_eq_sink.dsp")
+    assert 'node.name = "mini_eq_sink"' in args
+    assert 'target.object = "mini_eq_sink.dsp"' in args
+    assert "media.class = Audio/Sink" in args
+    assert "node.dont-fallback = true" in args
+    assert "node.linger = true" in args
+    assert "node.passive = true" in args
+    assert "audio.rate" not in args
+
+
+def test_dsp_input_is_a_stream_not_a_removable_device() -> None:
+    args = filter_chain.build_native_biquad_filter_chain_module_args(
+        bands=core.default_eq_bands(),
+        preamp_db=0,
+        eq_enabled=True,
+        virtual_sink_name="mini_eq_sink.dsp",
+        filter_output_name="mini_eq_sink_output",
+        output_sink="speakers",
+        capture_as_stream=True,
+    )
+    assert "media.class = Stream/Input/Audio" in args
+    assert "media.class = Audio/Sink" not in args
+    assert "node.autoconnect = false" in args
+    assert 'target.object = "speakers"' in args
+    assert "audio.rate" not in args
+
+
 def test_native_biquads_follow_graph_rate_and_have_true_bypass() -> None:
     bands = [core.EqBand(core.FILTER_TYPES["Lo-pass"], 1000.0, 0.0, 1.4)]
     args = filter_chain.build_native_biquad_filter_chain_module_args(

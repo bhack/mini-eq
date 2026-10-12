@@ -488,11 +488,12 @@ def test_pipewire_router_reapplies_controls_when_virtual_sink_link_appears(monke
 
     assert router.event_source_id == 321
     assert len(scheduled_callbacks) == 1
-    assert 5092 in backend.link_state_handlers
+    assert backend.link_state_handlers == {}
 
     keep_source = scheduled_callbacks[0]()
 
     assert keep_source is False
+    assert 5092 in backend.link_state_handlers
     assert backend.moves == [(1, "mini_eq_sink")]
     assert applied == ["apply"]
 
@@ -608,6 +609,8 @@ def test_pipewire_router_tracks_internal_output_links(monkeypatch: pytest.Monkey
     router.handle_object_added(None, make_link(93, output_node_id=internal_output.bound_id, input_node_id=22))
 
     assert router.event_source_id == 321
+    assert backend.link_state_handlers == {}
+    scheduled_callbacks[0]()
     assert 5093 in backend.link_state_handlers
 
 

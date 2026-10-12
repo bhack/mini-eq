@@ -120,6 +120,30 @@ def pipewire_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def build_eq_input_module_args(virtual_sink_name: str, dsp_input_name: str) -> str:
+    """Keep the player-facing device alive independently of DSP topology."""
+    return f"""{{
+  audio.channels = 2
+  audio.position = [ FL FR ]
+  capture.props = {{
+    node.name = {pipewire_quote(virtual_sink_name)}
+    node.description = {pipewire_quote(VIRTUAL_SINK_DESCRIPTION)}
+    media.class = Audio/Sink
+    state.restore-props = false
+    state.restore-target = false
+  }}
+  playback.props = {{
+    node.name = {pipewire_quote(virtual_sink_name + ".input")}
+    target.object = {pipewire_quote(dsp_input_name)}
+    node.passive = true
+    node.dont-fallback = true
+    node.linger = true
+    state.restore-props = false
+    state.restore-target = false
+  }}
+}}"""
+
+
 def spa_float(value: float) -> str:
     return f"{float(value):.8g}"
 
@@ -294,6 +318,7 @@ def build_builtin_biquad_filter_chain_module_args(
     filter_output_name: str,
     output_sink: str,
     native_biquads: bool = False,
+    capture_as_stream: bool = False,
 ) -> str:
     graph_bands = bands[:MAX_BANDS]
     band_count = len(graph_bands)
@@ -334,7 +359,8 @@ def build_builtin_biquad_filter_chain_module_args(
   capture.props = {{
     node.name = {pipewire_quote(virtual_sink_name)}
     node.description = {pipewire_quote(VIRTUAL_SINK_DESCRIPTION)}
-    media.class = Audio/Sink
+    media.class = {"Stream/Input/Audio" if capture_as_stream else "Audio/Sink"}
+    {"node.autoconnect = false" if capture_as_stream else ""}
     state.restore-props = false
     state.restore-target = false
     audio.channels = 2

@@ -48,6 +48,7 @@
     <release version="0.8.9" date="2026-10-13">
       <description>
         <ul>
+          <li>Keep the audio device stable when changing presets or filter types, avoiding media-player pauses caused by device removal.</li>
           <li>Avoid processing unused Off bands while keeping all 32 band slots available.</li>
           <li>Stop analyzer animation and spectrum calculations while frozen, and stop animation while the window is hidden.</li>
           <li>Use audio-driven analyzer wakeups and coalesced display updates while preserving loudness measurement and background Shell meters.</li>
