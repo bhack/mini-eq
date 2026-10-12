@@ -147,6 +147,7 @@ class SystemWideEqController:
             self.stream_router: PipeWireStreamRouter | None = None
             self.output_analyzer: OutputSpectrumAnalyzer | None = None
             self.analyzer_response_speed = ANALYZER_RESPONSE_DEFAULT
+            self.analyzer_spectrum_enabled = True
 
             if not self.is_valid_output_sink(self.output_sink):
                 raise AudioBackendError("output sink cannot be a Mini EQ virtual sink")
@@ -187,6 +188,11 @@ class SystemWideEqController:
 
         if self.output_analyzer is not None:
             self.output_analyzer.set_loudness_callback(callback)
+
+    def set_analyzer_spectrum_enabled(self, enabled: bool) -> None:
+        self.analyzer_spectrum_enabled = bool(enabled)
+        if self.output_analyzer is not None:
+            self.output_analyzer.set_spectrum_enabled(enabled)
 
     def list_sinks(self) -> list[PipeWireNode]:
         return self.output_backend.list_audio_sinks()
@@ -328,6 +334,7 @@ class SystemWideEqController:
         self.output_analyzer.set_levels_callback(self.analyzer_levels_callback)
         self.output_analyzer.set_loudness_callback(self.analyzer_loudness_callback)
         self.output_analyzer.set_response_speed(self.analyzer_response_speed)
+        self.output_analyzer.set_spectrum_enabled(getattr(self, "analyzer_spectrum_enabled", True))
         return self.output_analyzer
 
     def prepare_output_analyzer(self) -> bool:
@@ -910,6 +917,9 @@ class SystemWideEqController:
         types = tuple(band.filter_type for band in self.bands)
         if getattr(self, "_engine_band_types", types) != types:
             self.restart_engine()
+            return
+
+        if not controls:
             return
 
         try:

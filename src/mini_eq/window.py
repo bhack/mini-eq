@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import gi
@@ -180,9 +181,13 @@ class MiniEqWindow(
         self.analyzer_frozen = False
         self.analyzer_smoothing = 0.40
         self.analyzer_preview_source_id = 0
+        self.analyzer_background_decay_source_id = 0
         self.analyzer_preview_uses_tick_callback = False
         self.analyzer_preview_last_tick_time = 0.0
         self.analyzer_levels = [0.0] * ANALYZER_BIN_COUNT
+        self.analyzer_levels_lock = threading.Lock()
+        self.analyzer_pending_levels: tuple[float, ...] | None = None
+        self.analyzer_levels_idle_pending = False
         self.analyzer_db_floor = ANALYZER_DB_FLOOR
         self.analyzer_display_gain_db = ANALYZER_DISPLAY_GAIN_DEFAULT
         self.analyzer_loudness_snapshot = None
@@ -264,6 +269,8 @@ class MiniEqWindow(
         self.install_css()
         self.sync_appearance_css_class()
         self.build_window_content(auto_route)
+        self.connect("map", self.on_analyzer_visibility_changed)
+        self.connect("unmap", self.on_analyzer_visibility_changed)
         self.style_dark_notify_handler_id = self.style_manager.connect(
             "notify::dark", self.on_style_manager_dark_changed
         )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from array import array
 
 import pytest
@@ -583,3 +584,74 @@ def test_analyzer_starts_loudness_meter_when_callback_is_added_late(monkeypatch:
     assert snapshots == [analyzer.AnalyzerLoudnessSnapshot(-20.0, -18.0, -17.0)]
     assert len(created_meters) == 1
     assert created_meters[0].closed is True
+
+
+def test_analyzer_empty_reader_waits_for_data_and_stop_wakes_it(monkeypatch) -> None:
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+    entered = threading.Event()
+    original_wait = spectrum.audio_blocks_ready.wait
+
+    def wait_for_audio():
+        entered.set()
+        return original_wait()
+
+    monkeypatch.setattr(spectrum.audio_blocks_ready, "wait", wait_for_audio)
+    spectrum.stop_event.clear()
+    reader = threading.Thread(target=spectrum.read_audio_levels, daemon=True)
+    spectrum.reader_thread = reader
+    reader.start()
+    try:
+        assert entered.wait(1)
+    finally:
+        spectrum.stop()
+    assert not reader.is_alive()
+
+
+def test_frozen_analyzer_preserves_loudness_without_fft(monkeypatch) -> None:
+    snapshots = []
+    fft_calls = []
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+    spectrum.stop_event.clear()
+    spectrum.set_spectrum_enabled(False)
+    spectrum.audio_blocks.append((array("f", [0.2] * 2048).tobytes(), array("f", [0.1] * 2048).tobytes()))
+
+    class Meter:
+        def close(self):
+            pass
+
+    snapshot = analyzer.AnalyzerLoudnessSnapshot(-20, -18, -17)
+
+    def on_loudness(value):
+        snapshots.append(value)
+        spectrum.stop_event.set()
+
+    spectrum.set_loudness_callback(on_loudness)
+    monkeypatch.setattr(spectrum, "create_loudness_meter", Meter)
+    monkeypatch.setattr(spectrum, "feed_loudness_meter", lambda *_args: True)
+    monkeypatch.setattr(spectrum, "read_loudness_snapshot", lambda _meter: snapshot)
+    monkeypatch.setattr(analyzer, "samples_to_log_band_powers", lambda *_args, **_kwargs: fft_calls.append(True))
+    spectrum.read_audio_levels()
+    assert snapshots == [snapshot]
+    assert fft_calls == []
+
+
+def test_analyzer_rechecks_queue_when_data_arrives_during_empty_clear(monkeypatch) -> None:
+    spectrum = analyzer.OutputSpectrumAnalyzer("test_sink", None, lambda _message: None)
+    spectrum.stop_event.clear()
+    original_clear = spectrum.audio_blocks_ready.clear
+    frames = []
+
+    def enqueue_during_clear():
+        original_clear()
+        payload = array("f", [0.1] * 2048).tobytes()
+        spectrum.audio_blocks.append((payload, payload))
+        spectrum.audio_blocks_ready.set()
+
+    def on_levels(levels):
+        frames.append(levels)
+        spectrum.stop_event.set()
+
+    monkeypatch.setattr(spectrum.audio_blocks_ready, "clear", enqueue_during_clear)
+    spectrum.set_levels_callback(on_levels)
+    spectrum.read_audio_levels()
+    assert frames

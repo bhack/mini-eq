@@ -875,6 +875,48 @@ def run_controller_flow(
             tmp_dir / "mini-eq-headless-baseline.raw",
             timeout_seconds,
         )
+        from mini_eq.core import FILTER_TYPES
+
+        print("## sparse native graph: enable and remove slot 31", flush=True)
+        controller.set_band_type(31, FILTER_TYPES["Bell"])
+        controller.set_band_frequency(31, 440.0)
+        controller.set_band_q(31, 4.0)
+        controller.set_band_gain(31, -6.0)
+        dispatch_until("sparse high-index topology ready", lambda: controller.running, timeout_seconds)
+        wait_for_stream_routed_and_processing(
+            smoke_id, virtual_sink_name, filter_output_name, timeout_seconds, "after adding slot 31"
+        )
+        sparse_rms = capture_sink_monitor_rms(controller.output_sink, tmp_dir / "sparse-slot.raw", timeout_seconds)
+        sparse_db = 20.0 * math.log10(max(sparse_rms, 1e-12) / max(baseline_rms, 1e-12))
+        if not -7.0 <= sparse_db <= -5.0:
+            raise RuntimeError(f"Sparse slot 31 response was {sparse_db:.2f} dB; expected -6 dB")
+        controller.set_band_type(31, FILTER_TYPES["Off"])
+        dispatch_until("sparse high-index topology removed", lambda: controller.running, timeout_seconds)
+        wait_for_stream_routed_and_processing(
+            smoke_id, virtual_sink_name, filter_output_name, timeout_seconds, "after removing slot 31"
+        )
+
+        print("## all-Off native graph retains preamp", flush=True)
+        payload = controller.build_preset_payload()
+        payload["preamp_db"] = -6.0
+        for band in payload["bands"]:
+            band["filter_type"] = FILTER_TYPES["Off"]
+        controller.apply_preset_payload(payload)
+        dispatch_until("all-Off topology ready", lambda: controller.running, timeout_seconds)
+        wait_for_stream_routed_and_processing(
+            smoke_id, virtual_sink_name, filter_output_name, timeout_seconds, "with all bands Off"
+        )
+        all_off_rms = capture_sink_monitor_rms(controller.output_sink, tmp_dir / "all-off.raw", timeout_seconds)
+        all_off_db = 20.0 * math.log10(max(all_off_rms, 1e-12) / max(baseline_rms, 1e-12))
+        if not -7.0 <= all_off_db <= -5.0:
+            raise RuntimeError(f"All-Off preamp response was {all_off_db:.2f} dB; expected -6 dB")
+        controller.reset_state()
+        dispatch_until("default topology restored", lambda: controller.running, timeout_seconds)
+        virtual_serial = wait_for_stream_routed_and_processing(
+            smoke_id, virtual_sink_name, filter_output_name, timeout_seconds, "after restoring default bands"
+        )
+        print(f"Sparse slot 31: {sparse_db:.2f} dB; all-Off preamp: {all_off_db:.2f} dB", flush=True)
+
         # Exercise a frequency-selective live update, not only preamp gain:
         # coefficients computed at the wrong rate still pass a preamp test.
         controller.set_band_frequency(0, 440.0)
@@ -889,8 +931,6 @@ def run_controller_flow(
         if not -13.0 <= bell_db <= -11.0:
             raise RuntimeError(f"440 Hz bell response was {bell_db:.2f} dB; expected -12 dB")
         print(f"Live 440 Hz bell response: {bell_db:.2f} dB", flush=True)
-        from mini_eq.core import FILTER_TYPES
-
         controller.set_band_type(0, FILTER_TYPES["Lo-pass"])
         controller.set_band_frequency(0, 100.0)
         controller.set_band_q(0, 0.707)

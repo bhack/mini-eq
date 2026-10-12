@@ -1055,8 +1055,12 @@ def test_ensure_output_analyzer_passes_loudness_callback(monkeypatch: pytest.Mon
         def set_response_speed(self, speed: float) -> None:
             self.response_speed = speed
 
+        def set_spectrum_enabled(self, enabled: bool) -> None:
+            self.spectrum_enabled = enabled
+
     monkeypatch.setattr(routing, "OutputSpectrumAnalyzer", FakeAnalyzer)
     controller.emit_status = lambda _message: None
+    controller.analyzer_spectrum_enabled = False
 
     analyzer_instance = routing.SystemWideEqController.ensure_output_analyzer(controller)
 
@@ -1064,6 +1068,7 @@ def test_ensure_output_analyzer_passes_loudness_callback(monkeypatch: pytest.Mon
     assert analyzer_instance.output_sink_name == "speakers"
     assert analyzer_instance.levels_callback is controller.analyzer_levels_callback
     assert analyzer_instance.loudness_callback is controller.analyzer_loudness_callback
+    assert analyzer_instance.spectrum_enabled is False
 
 
 def test_enabling_prepared_analyzer_does_not_restart_running_engine() -> None:
@@ -1816,6 +1821,24 @@ def test_filter_control_param_change_ignores_recent_local_control_update(
     assert controller.filter_control_reapply_source_id == 0
     assert controller.filter_control_reapply_source_is_verification is False
     assert controller.applying_filter_control_verification is False
+
+
+@pytest.mark.parametrize("type_changed", [False, True])
+def test_empty_off_band_controls_only_rebuild_when_topology_changed(type_changed: bool) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.bands = core.inactive_eq_bands()
+    built_types = [band.filter_type for band in controller.bands]
+    if type_changed:
+        built_types[31] = core.FILTER_TYPES["Bell"]
+    controller._engine_band_types = tuple(built_types)
+    calls = []
+    controller.restart_engine = lambda: calls.append("restart")
+    # An empty control set must not reach the backend, including on a rebuild.
+    controller.output_backend = object()
+    controller.set_filter_controls({})
+    assert calls == (["restart"] if type_changed else [])
 
 
 def test_filter_control_verification_echo_does_not_schedule_another_verification(

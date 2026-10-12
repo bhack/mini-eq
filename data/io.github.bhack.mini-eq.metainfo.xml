@@ -33,11 +33,11 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.8/docs/screenshots/mini-eq.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.9/docs/screenshots/mini-eq.png</image>
       <caption>Adjust sound output with equalizer controls</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.8/docs/screenshots/mini-eq-dark.png</image>
+      <image>https://raw.githubusercontent.com/bhack/mini-eq/v0.8.9/docs/screenshots/mini-eq-dark.png</image>
       <caption>Use the equalizer with dark style</caption>
     </screenshot>
   </screenshots>
@@ -45,6 +45,15 @@
   <url type="bugtracker">https://github.com/bhack/mini-eq/issues</url>
   <url type="vcs-browser">https://github.com/bhack/mini-eq</url>
   <releases>
+    <release version="0.8.9" date="2026-10-13">
+      <description>
+        <ul>
+          <li>Avoid processing unused Off bands while keeping all 32 band slots available.</li>
+          <li>Stop analyzer animation and spectrum calculations while frozen, and stop animation while the window is hidden.</li>
+          <li>Use audio-driven analyzer wakeups and coalesced display updates while preserving loudness measurement and background Shell meters.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.8" date="2026-09-17">
       <description>
         <ul>

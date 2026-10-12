@@ -51,7 +51,6 @@ ANALYZER_FFT_WINDOW_SECONDS = 0.085
 ANALYZER_FFT_MIN_SIZE = 8192
 ANALYZER_FFT_MAX_SIZE = 32768
 ANALYZER_SAMPLE_WIDTH_BYTES = 4
-ANALYZER_QUEUE_WAIT_SECONDS = 0.005
 ANALYZER_READER_JOIN_TIMEOUT_SECONDS = 0.2
 ANALYZER_DISPLAY_GAIN_MIN = -12.0
 ANALYZER_DISPLAY_GAIN_MAX = 32.0
@@ -432,6 +431,8 @@ class OutputSpectrumAnalyzer:
         self.stop_event = threading.Event()
         self.stop_event.set()
         self.audio_blocks = deque(maxlen=ANALYZER_CAPTURE_QUEUE_BLOCKS)
+        self.audio_blocks_ready = threading.Event()
+        self.spectrum_enabled = True
         self.sample_rate = SAMPLE_RATE
         self.response_speed = ANALYZER_RESPONSE_DEFAULT
 
@@ -441,6 +442,10 @@ class OutputSpectrumAnalyzer:
 
     def set_levels_callback(self, callback: Callable[[list[float]], None] | None) -> None:
         self.levels_callback = callback
+
+    def set_spectrum_enabled(self, enabled: bool) -> None:
+        # Display freeze does not interrupt integrated loudness measurement.
+        self.spectrum_enabled = bool(enabled)
 
     def set_loudness_callback(self, callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None) -> None:
         self.loudness_callback = callback
@@ -476,6 +481,7 @@ class OutputSpectrumAnalyzer:
             return True
 
         self.audio_blocks.clear()
+        self.audio_blocks_ready.clear()
         self.stop_event.clear()
 
         try:
@@ -511,6 +517,7 @@ class OutputSpectrumAnalyzer:
 
         self.reader_thread = None
         self.stop_event.set()
+        self.audio_blocks_ready.set()
         self.audio_blocks.clear()
         self.emit_loudness_snapshot(None)
 
@@ -640,6 +647,7 @@ class OutputSpectrumAnalyzer:
         self.sample_rate = float(audio_format.get_rate() or self.sample_rate or SAMPLE_RATE)
         data = block.get_data().get_data()
         self.audio_blocks.append(interleaved_f32le_bytes_to_channel_payloads(data, audio_format.get_channels()))
+        self.audio_blocks_ready.set()
 
     def read_audio_levels(self) -> None:
         pending_samples = array("f")
@@ -655,7 +663,12 @@ class OutputSpectrumAnalyzer:
                 try:
                     left_payload, right_payload = self.audio_blocks.popleft()
                 except IndexError:
-                    self.stop_event.wait(ANALYZER_QUEUE_WAIT_SECONDS)
+                    # Clear before rechecking the queue so a producer cannot
+                    # enqueue between the empty check and wait unnoticed.
+                    self.audio_blocks_ready.clear()
+                    if self.audio_blocks or self.stop_event.is_set():
+                        continue
+                    self.audio_blocks_ready.wait()
                     continue
 
                 if self.loudness_callback is None:
@@ -682,6 +695,12 @@ class OutputSpectrumAnalyzer:
                         self.close_loudness_meter(loudness_meter)
                         loudness_meter = None
                         loudness_stopped = True
+
+                if not self.spectrum_enabled:
+                    pending_samples = array("f")
+                    fft_samples = array("f")
+                    smoothed_powers = ()
+                    continue
 
                 pending_samples.extend(stereo_f32le_bytes_to_mono_samples(left_payload, right_payload))
                 frame_count = analyzer_frame_count(self.sample_rate)

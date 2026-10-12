@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.9 - 2026-10-13
+
+- Avoid processing unused Off bands while keeping all 32 band slots available.
+- Stop analyzer animation and spectrum calculations while frozen, and stop
+  animation while the window is hidden.
+- Use audio-driven analyzer wakeups and coalesced display updates while
+  preserving loudness measurement and background Shell meters.
+
 ## 0.8.8 - 2026-09-17
 
 - Harden single-instance lock handling against unsafe files and concurrent
