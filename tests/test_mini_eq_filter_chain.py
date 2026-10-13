@@ -9,6 +9,34 @@ def test_pipewire_quote_escapes_module_argument_strings() -> None:
     assert filter_chain.pipewire_quote('a"b\\c') == '"a\\"b\\\\c"'
 
 
+def test_stable_input_has_no_hardware_fallback_or_fixed_sample_rate() -> None:
+    args = filter_chain.build_eq_input_module_args("mini_eq_sink", "mini_eq_sink.dsp")
+    assert 'node.name = "mini_eq_sink"' in args
+    assert 'target.object = "mini_eq_sink.dsp"' in args
+    assert "media.class = Audio/Sink" in args
+    assert "node.dont-fallback = true" in args
+    assert "node.linger = true" in args
+    assert "node.passive = true" in args
+    assert "audio.rate" not in args
+
+
+def test_dsp_input_is_a_stream_not_a_removable_device() -> None:
+    args = filter_chain.build_native_biquad_filter_chain_module_args(
+        bands=core.default_eq_bands(),
+        preamp_db=0,
+        eq_enabled=True,
+        virtual_sink_name="mini_eq_sink.dsp",
+        filter_output_name="mini_eq_sink_output",
+        output_sink="speakers",
+        capture_as_stream=True,
+    )
+    assert "media.class = Stream/Input/Audio" in args
+    assert "media.class = Audio/Sink" not in args
+    assert "node.autoconnect = false" in args
+    assert 'target.object = "speakers"' in args
+    assert "audio.rate" not in args
+
+
 def test_native_biquads_follow_graph_rate_and_have_true_bypass() -> None:
     bands = [core.EqBand(core.FILTER_TYPES["Lo-pass"], 1000.0, 0.0, 1.4)]
     args = filter_chain.build_native_biquad_filter_chain_module_args(
@@ -43,6 +71,46 @@ def test_native_biquad_solo_and_mute_use_dry_path() -> None:
     assert controls["band_l_1:Gain 1"] == 1
     bands[1].mute = True
     assert filter_chain.native_biquad_control_values(bands, 0, True)["band_r_1:Gain 1"] == 0
+
+
+def test_native_graph_skips_off_slots_without_renumbering() -> None:
+    bands = core.inactive_eq_bands()
+    bands[2] = core.EqBand(core.FILTER_TYPES["Lo-pass"], 1000, 0, 1)
+    bands[7] = core.EqBand(core.FILTER_TYPES["Bell"], 2000, 3, 1, mute=True)
+    args = filter_chain.build_native_biquad_filter_chain_module_args(
+        bands=bands,
+        preamp_db=-3,
+        eq_enabled=True,
+        virtual_sink_name="mini_eq_sink",
+        filter_output_name="mini_eq_sink_output",
+        output_sink="test",
+    )
+    for side in ("l", "r"):
+        assert f'output = "preamp_{side}:Out" input = "band_{side}_2_filter:In"' in args
+        assert f'output = "band_{side}_2:Out" input = "band_{side}_7_filter:In"' in args
+        assert f'"band_{side}_7:Out"' in args
+        assert f"name = band_{side}_7_filter" in args
+    assert "band_l_0" not in args
+    assert "band_l_31" not in args
+    controls = filter_chain.native_biquad_control_values(bands, -3, True)
+    assert controls["band_l_2:Gain 1"] == 1
+    assert controls["band_l_7:Gain 1"] == 0
+    assert not any("band_l_0" in key or "band_l_31" in key for key in controls)
+    assert filter_chain.native_biquad_band_control_values(31, bands[31], True) == {}
+    assert len(bands) == core.MAX_BANDS
+
+
+def test_native_all_off_graph_connects_preamp_to_outputs() -> None:
+    args = filter_chain.build_native_biquad_filter_chain_module_args(
+        bands=core.inactive_eq_bands(),
+        preamp_db=-6,
+        eq_enabled=True,
+        virtual_sink_name="mini_eq_sink",
+        filter_output_name="mini_eq_sink_output",
+        output_sink="test",
+    )
+    assert "band_l_" not in args
+    assert 'outputs = [ "preamp_l:Out" "preamp_r:Out" ]' in args
 
 
 def test_builtin_biquad_filter_chain_uses_pipewire_raw_biquads() -> None:

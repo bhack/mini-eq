@@ -35,10 +35,11 @@ from .core import (
     sanitize_preset_name,
 )
 from .filter_chain import (
-    build_native_biquad_filter_chain_module_args as build_builtin_biquad_filter_chain_module_args,
+    build_eq_input_module_args,
+    builtin_biquad_preamp_control_values,
 )
 from .filter_chain import (
-    builtin_biquad_preamp_control_values,
+    build_native_biquad_filter_chain_module_args as build_builtin_biquad_filter_chain_module_args,
 )
 from .filter_chain import native_biquad_band_control_values as builtin_biquad_band_control_values
 from .filter_chain import native_biquad_control_values as builtin_biquad_control_values
@@ -112,6 +113,7 @@ class SystemWideEqController:
             self._observed_output_preset_target_snapshot: OutputPresetTargetSnapshot | None = None
             self.filter_output_name = f"{self.virtual_sink_name}{FILTER_OUTPUT_SUFFIX}"
             self.engine_module = None
+            self.input_module = None
             self.engine_start_watch = None
             self.engine_start_pending = False
             self.filter_node_id: int | None = None
@@ -147,6 +149,7 @@ class SystemWideEqController:
             self.stream_router: PipeWireStreamRouter | None = None
             self.output_analyzer: OutputSpectrumAnalyzer | None = None
             self.analyzer_response_speed = ANALYZER_RESPONSE_DEFAULT
+            self.analyzer_spectrum_enabled = True
 
             if not self.is_valid_output_sink(self.output_sink):
                 raise AudioBackendError("output sink cannot be a Mini EQ virtual sink")
@@ -187,6 +190,11 @@ class SystemWideEqController:
 
         if self.output_analyzer is not None:
             self.output_analyzer.set_loudness_callback(callback)
+
+    def set_analyzer_spectrum_enabled(self, enabled: bool) -> None:
+        self.analyzer_spectrum_enabled = bool(enabled)
+        if self.output_analyzer is not None:
+            self.output_analyzer.set_spectrum_enabled(enabled)
 
     def list_sinks(self) -> list[PipeWireNode]:
         return self.output_backend.list_audio_sinks()
@@ -328,6 +336,7 @@ class SystemWideEqController:
         self.output_analyzer.set_levels_callback(self.analyzer_levels_callback)
         self.output_analyzer.set_loudness_callback(self.analyzer_loudness_callback)
         self.output_analyzer.set_response_speed(self.analyzer_response_speed)
+        self.output_analyzer.set_spectrum_enabled(getattr(self, "analyzer_spectrum_enabled", True))
         return self.output_analyzer
 
     def prepare_output_analyzer(self) -> bool:
@@ -720,10 +729,22 @@ class SystemWideEqController:
             bands=self.bands,
             preamp_db=self.preamp_db,
             eq_enabled=self.eq_enabled,
-            virtual_sink_name=self.virtual_sink_name,
+            virtual_sink_name=self.dsp_input_name,
             filter_output_name=self.filter_output_name,
             output_sink=self.output_sink,
+            capture_as_stream=True,
         )
+
+    @property
+    def dsp_input_name(self) -> str:
+        return f"{self.virtual_sink_name}.dsp"
+
+    def ensure_input_module(self) -> None:
+        if getattr(self, "input_module", None) is None:
+            self.input_module = self.output_backend.load_module(
+                "libpipewire-module-loopback",
+                build_eq_input_module_args(self.virtual_sink_name, self.dsp_input_name),
+            )
 
     def cancel_pending_engine_start(self) -> None:
         self._engine_start_token = None
@@ -747,6 +768,7 @@ class SystemWideEqController:
         if getattr(self, "engine_start_pending", False):
             return
 
+        self.ensure_input_module()
         self.engine_module = self.output_backend.load_filter_chain_module(self.build_filter_chain_module_args())
         self.engine_start_pending = True
         start_token = object()
@@ -758,8 +780,14 @@ class SystemWideEqController:
             self._engine_start_token = None
             self.engine_start_watch = None
             self.engine_start_pending = False
+            module = self.engine_module
             self.engine_module = None
             self.filter_node_id = None
+            if module is not None:
+                try:
+                    self.output_backend.unload_filter_chain_module(module)
+                except Exception:
+                    pass
             try:
                 self.output_backend.sync()
             except Exception:
@@ -779,7 +807,7 @@ class SystemWideEqController:
                 return
 
             if sink is None:
-                fail(RuntimeError(f"filter-chain did not create {self.virtual_sink_name}"))
+                fail(RuntimeError(f"filter-chain did not create {self.dsp_input_name}"))
                 return
 
             # A preset/type edit during creation makes this topology obsolete.
@@ -813,9 +841,32 @@ class SystemWideEqController:
                 on_ready()
 
         try:
-            self.engine_start_watch = self.output_backend.watch_for_audio_sink(
-                self.virtual_sink_name,
-                on_sink_ready,
+
+            def on_dsp_ready(node: PipeWireNode | None) -> None:
+                if self._engine_start_token is not start_token:
+                    return
+                if node is None:
+                    on_sink_ready(None)
+                    return
+
+                def on_input_ready(sink: PipeWireNode | None) -> None:
+                    if self._engine_start_token is not start_token:
+                        return
+                    if sink is None:
+                        fail(RuntimeError(f"loopback did not create {self.virtual_sink_name}"))
+                    else:
+                        on_sink_ready(node)
+
+                try:
+                    self.engine_start_watch = self.output_backend.watch_for_audio_sink(
+                        self.virtual_sink_name, on_input_ready, timeout_ms=3000
+                    )
+                except Exception as exc:
+                    fail(exc)
+
+            self.engine_start_watch = self.output_backend.watch_for_node(
+                lambda node: node.node_name == self.dsp_input_name,
+                on_dsp_ready,
                 timeout_ms=3000,
             )
         except Exception as exc:
@@ -879,27 +930,23 @@ class SystemWideEqController:
         if not was_running:
             return
 
-        stream_router = self.stream_router if self.routed else None
-        if stream_router is not None:
-            stream_router.stop_monitoring()
-            try:
-                stream_router.restore_output_streams()
-            except Exception as exc:
-                stream_router.emit_warning(exc)
-
+        # Only stream nodes disappear here. The player-facing Audio/Sink stays
+        # alive, so WirePlumber's device-removal MPRIS policy cannot pause players.
         self.stop_engine(announce=False)
 
-        def on_ready() -> None:
-            if stream_router is not None:
-                stream_router.start_monitoring(require_initial_route=True)
-
         def on_error(exc: Exception) -> None:
-            if stream_router is not None:
-                stream_router.emit_warning(exc)
-            else:
-                self.emit_status(str(exc))
+            # Keep the stable sink alive, but don't strand music in a broken DSP.
+            if self.routed:
+                try:
+                    self.route_system_audio(False, refresh_output=False)
+                except Exception as restore_exc:
+                    self.emit_status(f"filter-chain routing restore failed: {restore_exc}")
+            self.emit_status(str(exc))
 
-        self.start_engine(on_ready=on_ready, on_error=on_error)
+        try:
+            self.start_engine(on_error=on_error)
+        except Exception as exc:
+            on_error(exc)
 
     def set_filter_controls(self, controls: dict[str, float]) -> None:
         if self.filter_node_id is None or not self.running:
@@ -910,6 +957,9 @@ class SystemWideEqController:
         types = tuple(band.filter_type for band in self.bands)
         if getattr(self, "_engine_band_types", types) != types:
             self.restart_engine()
+            return
+
+        if not controls:
             return
 
         try:
@@ -1127,6 +1177,7 @@ class SystemWideEqController:
                 raise
 
     def shutdown(self) -> None:
+        routed_stream_ids = set(getattr(self.stream_router, "routed_stream_ids", ()))
         self.shutting_down = True
         self.status_callback = None
         self.outputs_changed_callback = None
@@ -1146,6 +1197,13 @@ class SystemWideEqController:
                     pass
         finally:
             try:
+                # Remove internal streams first. Keep the device until the
+                # session manager has linked restored playback to its output.
+                self.stop_engine(announce=False)
+                if getattr(self, "input_module", None) is not None:
+                    sink = self.output_backend.audio_sink_by_name(self.virtual_sink_name)
+                    if sink is not None:
+                        self.output_backend.wait_for_input_unlinked(sink.bound_id, routed_stream_ids)
                 if self.stream_router is not None:
                     self.stream_router.close()
                 if self.output_analyzer is not None:
@@ -1155,6 +1213,13 @@ class SystemWideEqController:
                     self.stop_engine(announce=False)
                 except Exception:
                     pass
+                input_module = getattr(self, "input_module", None)
+                self.input_module = None
+                if input_module is not None:
+                    try:
+                        self.output_backend.unload_filter_chain_module(input_module)
+                    except Exception:
+                        pass
                 try:
                     self.output_backend.close()
                 except Exception:

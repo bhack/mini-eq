@@ -54,7 +54,7 @@ PIPEWIRE_HINT = (
 )
 PIPEWIRE_FILTER_CHAIN_HINT = (
     "Ubuntu/Debian: pipewire; Fedora: pipewire; Arch: pipewire. "
-    "Flatpak builds bundle only the filter-chain module and SPA builtin filter support."
+    "Flatpak builds bundle the filter-chain and loopback modules and SPA builtin filter support."
 )
 NUMPY_HINT = (
     "Install the package with Python dependencies: python -m pip install mini-eq, or python -m pip install numpy."
@@ -396,6 +396,12 @@ def collect_dependency_checks() -> list[DependencyCheck]:
         check_pipewire_module(
             "libpipewire-module-filter-chain.so",
             "PipeWire filter-chain module",
+            True,
+            PIPEWIRE_FILTER_CHAIN_HINT,
+        ),
+        check_pipewire_module(
+            "libpipewire-module-loopback.so",
+            "PipeWire loopback module",
             True,
             PIPEWIRE_FILTER_CHAIN_HINT,
         ),

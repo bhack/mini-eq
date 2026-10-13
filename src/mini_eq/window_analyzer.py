@@ -26,6 +26,7 @@ ANALYZER_PREVIEW_INTERVAL_MS = 33
 ANALYZER_ATTACK_SMOOTHING_MAX = 0.25
 ANALYZER_PIXEL_REDRAW_THRESHOLD = 1.0
 CONTROL_ANALYZER_EMIT_INTERVAL_SECONDS = 0.10
+ANALYZER_BACKGROUND_DECAY_INTERVAL_MS = 100
 LOUDNESS_METER_MIN_LUFS = -60.0
 LOUDNESS_METER_MAX_LUFS = 0.0
 
@@ -188,7 +189,8 @@ class MiniEqWindowAnalyzerMixin:
             self.refresh_after_monitor_state_changed(monitor_visibility_changed=True)
             return
 
-        self.start_analyzer_preview_clock()
+        self.sync_analyzer_spectrum_enabled()
+        self.sync_analyzer_preview_clock()
 
     def stop_analyzer_preview(self, *, stop_backend: bool = True) -> None:
         if stop_backend:
@@ -203,8 +205,14 @@ class MiniEqWindowAnalyzerMixin:
                 destroy_glib_source(self.analyzer_preview_source_id)
             self.analyzer_preview_source_id = 0
             self.analyzer_preview_uses_tick_callback = False
+        decay_source_id = getattr(self, "analyzer_background_decay_source_id", 0)
+        if decay_source_id > 0:
+            destroy_glib_source(decay_source_id)
+            self.analyzer_background_decay_source_id = 0
 
     def start_analyzer_preview_clock(self) -> None:
+        if self.analyzer_preview_source_id > 0:
+            return
         add_tick_callback = getattr(self.analyzer_area, "add_tick_callback", None)
         if callable(add_tick_callback):
             self.analyzer_preview_source_id = add_tick_callback(self.on_analyzer_preview_frame)
@@ -213,6 +221,67 @@ class MiniEqWindowAnalyzerMixin:
 
         self.analyzer_preview_source_id = GLib.timeout_add(ANALYZER_PREVIEW_INTERVAL_MS, self.on_analyzer_preview_tick)
         self.analyzer_preview_uses_tick_callback = False
+
+    def sync_analyzer_spectrum_enabled(self) -> None:
+        callback = getattr(self.controller, "set_analyzer_spectrum_enabled", None)
+        if callable(callback):
+            callback(not self.analyzer_frozen)
+
+    def sync_analyzer_preview_clock(self) -> None:
+        if (
+            not getattr(self, "ui_shutting_down", False)
+            and self.analyzer_enabled
+            and not self.analyzer_frozen
+            and self.analyzer_area_is_drawable()
+        ):
+            decay_source_id = getattr(self, "analyzer_background_decay_source_id", 0)
+            if decay_source_id > 0:
+                destroy_glib_source(decay_source_id)
+                self.analyzer_background_decay_source_id = 0
+            self.start_analyzer_preview_clock()
+        else:
+            self.stop_analyzer_preview(stop_backend=False)
+
+    def on_analyzer_visibility_changed(self, *_args: object) -> None:
+        self.sync_analyzer_preview_clock()
+        self.schedule_background_analyzer_decay()
+        self.queue_analyzer_draw(force=True)
+
+    def schedule_background_analyzer_decay(self) -> None:
+        if (
+            getattr(self, "ui_shutting_down", False)
+            or not self.analyzer_enabled
+            or self.analyzer_frozen
+            or not hasattr(self, "analyzer_area")
+            or self.analyzer_area_is_drawable()
+            or not any(level > 0.01 for level in self.analyzer_levels)
+            or getattr(self, "analyzer_background_decay_source_id", 0) > 0
+        ):
+            return
+        # A hidden window has no animation clock. Keep the Shell meter's
+        # stale-data decay at its 10 Hz publication cadence instead.
+        self.analyzer_background_decay_source_id = GLib.timeout_add(
+            ANALYZER_BACKGROUND_DECAY_INTERVAL_MS, self.on_background_analyzer_decay
+        )
+
+    def on_background_analyzer_decay(self) -> bool:
+        if (
+            self.ui_shutting_down
+            or not self.analyzer_enabled
+            or self.analyzer_frozen
+            or self.analyzer_area_is_drawable()
+        ):
+            self.analyzer_background_decay_source_id = 0
+            return False
+        now = GLib.get_monotonic_time() / 1_000_000.0
+        if now - self.analyzer_last_frame_time < 0.18:
+            return True
+        keep_running = self.decay_analyzer_levels(
+            now, interval_scale=ANALYZER_BACKGROUND_DECAY_INTERVAL_MS / 1000.0 / ANALYZER_PREVIEW_INTERVAL_S
+        )
+        if not keep_running:
+            self.analyzer_background_decay_source_id = 0
+        return keep_running
 
     def on_analyzer_preview_frame(self, _widget: Gtk.Widget, frame_clock: object) -> bool:
         get_frame_time = getattr(frame_clock, "get_frame_time", None)
@@ -312,10 +381,24 @@ class MiniEqWindowAnalyzerMixin:
         return False
 
     def on_analyzer_levels(self, levels: list[float]) -> None:
-        if self.ui_shutting_down:
+        if self.ui_shutting_down or self.analyzer_frozen:
             return
 
-        GLib.idle_add(self.on_analyzer_levels_idle, tuple(levels))
+        with self.analyzer_levels_lock:
+            self.analyzer_pending_levels = tuple(levels)
+            if self.analyzer_levels_idle_pending:
+                return
+            self.analyzer_levels_idle_pending = True
+        GLib.idle_add(self.dispatch_pending_analyzer_levels)
+
+    def dispatch_pending_analyzer_levels(self) -> bool:
+        with self.analyzer_levels_lock:
+            levels = self.analyzer_pending_levels
+            self.analyzer_pending_levels = None
+            self.analyzer_levels_idle_pending = False
+        if levels is not None:
+            self.on_analyzer_levels_idle(levels)
+        return False
 
     def on_analyzer_levels_idle(self, levels: tuple[float, ...]) -> bool:
         if self.ui_shutting_down:
@@ -340,6 +423,7 @@ class MiniEqWindowAnalyzerMixin:
 
         now = GLib.get_monotonic_time() / 1_000_000.0
         self.analyzer_last_frame_time = now
+        self.schedule_background_analyzer_decay()
         self.queue_analyzer_draw()
         self.maybe_emit_control_analyzer_levels_changed(now)
         return False
@@ -377,6 +461,11 @@ class MiniEqWindowAnalyzerMixin:
             self.analyzer_preview_uses_tick_callback = False
             return False
 
+        if self.analyzer_frozen or not self.analyzer_area_is_drawable():
+            self.analyzer_preview_source_id = 0
+            self.analyzer_preview_uses_tick_callback = False
+            return False
+
         if not self.analyzer_enabled and not any(level > 0.01 for level in self.analyzer_levels):
             self.analyzer_preview_source_id = 0
             self.analyzer_preview_uses_tick_callback = False
@@ -389,18 +478,21 @@ class MiniEqWindowAnalyzerMixin:
         if self.analyzer_enabled and not self.analyzer_frozen and age < 0.18:
             return True
 
+        self.decay_analyzer_levels(now)
+        return True
+
+    def decay_analyzer_levels(self, now: float, *, interval_scale: float = 1.0) -> bool:
         still_visible = False
         for index, current in enumerate(self.analyzer_levels):
-            decayed = current * (0.78 if self.analyzer_enabled else 0.68)
+            decayed = current * (0.78 if self.analyzer_enabled else 0.68) ** interval_scale
             if decayed > 0.01:
                 still_visible = True
-            self.analyzer_levels[index] = decayed
+            self.analyzer_levels[index] = decayed if decayed > 0.01 else 0.0
 
-        if still_visible:
-            self.queue_analyzer_draw()
-            self.maybe_emit_control_analyzer_levels_changed(now)
+        self.queue_analyzer_draw()
+        self.maybe_emit_control_analyzer_levels_changed(now)
 
-        return True
+        return still_visible
 
     def _sync_monitor_controls_unlocked(self) -> None:
         set_switch_confirmed_state(self.analyzer_switch, self.analyzer_enabled)
@@ -496,6 +588,8 @@ class MiniEqWindowAnalyzerMixin:
             return False
 
         self.analyzer_frozen = frozen
+        self.sync_analyzer_spectrum_enabled()
+        self.sync_analyzer_preview_clock()
         self.refresh_after_monitor_state_changed()
         return True
 

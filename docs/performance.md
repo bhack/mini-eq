@@ -83,3 +83,20 @@ https://docs.gtk.org/gtk4/running.html
 
 Those environment variables are debugging knobs, not stable application
 settings, so do not depend on them from Mini EQ code.
+
+Compare runtime CPU separately from profiler captures. Use a private
+PipeWire/WirePlumber graph, synthetic playback, and temporary application
+settings so the measurements do not change desktop audio or presets. Compare
+Monitor off, live, frozen, and hidden-window states at both 48 and 192 kHz.
+Warm up first, repeat the baseline after the changed build, and record the
+runtime versions and CPU frequency/power policy. Express process CPU as a
+percentage of one logical core; include native audio threads in that total.
+
+Use Sysprof's GTK trace to distinguish frame updates, layout, snapshots, and
+rendering, and its native samples to distinguish PipeWire DSP from Python
+callbacks. Profile startup separately from steady playback: shader compilation
+and font loading can dominate the first frame. `cProfile` is useful for Python
+call attribution, but its elapsed waiting time is not CPU consumption and its
+instrumentation overhead must not be used as a benchmark result. The official
+references are GTK's [drawing model](https://docs.gtk.org/gtk4/drawing-model.html)
+and Python's [profiler guidance](https://docs.python.org/3/library/profile.html).

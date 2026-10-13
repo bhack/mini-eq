@@ -43,6 +43,8 @@ def native_biquad_band_control_values(
     sample_rate: float = SAMPLE_RATE,
     solo_active: bool = False,
 ) -> dict[str, float]:
+    if band.filter_type == FILTER_TYPES["Off"] or band.filter_type not in NATIVE_BIQUAD_LABELS:
+        return {}
     # The native filter computes its coefficients at the DSP clock rate.
     wet = float(eq_enabled and band_is_effective(band, solo_active) and band.filter_type in NATIVE_BIQUAD_LABELS)
     controls: dict[str, float] = {}
@@ -67,8 +69,9 @@ def native_biquad_control_values(
     sample_rate: float = SAMPLE_RATE,
 ) -> dict[str, float]:
     controls = builtin_biquad_preamp_control_values(preamp_db, eq_enabled)
+    solo_active = bands_have_solo(bands)
     for index, band in enumerate(bands[:MAX_BANDS]):
-        controls.update(native_biquad_band_control_values(index, band, eq_enabled, sample_rate, bands_have_solo(bands)))
+        controls.update(native_biquad_band_control_values(index, band, eq_enabled, sample_rate, solo_active))
     return controls
 
 
@@ -77,6 +80,8 @@ def build_native_biquad_nodes(bands: list[EqBand], preamp_db: float, eq_enabled:
     for side in ("l", "r"):
         nodes.append(build_biquad_node(preamp_node_name(side), preamp_coefficients_by_rate(preamp_db, eq_enabled)))
         for index, band in enumerate(bands):
+            if band.filter_type == FILTER_TYPES["Off"] or band.filter_type not in NATIVE_BIQUAD_LABELS:
+                continue
             name = biquad_node_name(side, index)
             label = NATIVE_BIQUAD_LABELS.get(band.filter_type, "bq_peaking")
             controls = native_biquad_band_control_values(index, band, eq_enabled, solo_active=bands_have_solo(bands))
@@ -90,11 +95,11 @@ def build_native_biquad_nodes(bands: list[EqBand], preamp_db: float, eq_enabled:
     return "\n".join(nodes)
 
 
-def build_native_biquad_links(band_count: int) -> str:
+def build_native_biquad_links(band_indexes: list[int]) -> str:
     links: list[str] = []
     for side in ("l", "r"):
         previous = preamp_node_name(side)
-        for index in range(band_count):
+        for index in band_indexes:
             name = biquad_node_name(side, index)
             links.extend(
                 [
@@ -113,6 +118,30 @@ def build_native_biquad_filter_chain_module_args(**kwargs) -> str:
 
 def pipewire_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def build_eq_input_module_args(virtual_sink_name: str, dsp_input_name: str) -> str:
+    """Keep the player-facing device alive independently of DSP topology."""
+    return f"""{{
+  audio.channels = 2
+  audio.position = [ FL FR ]
+  capture.props = {{
+    node.name = {pipewire_quote(virtual_sink_name)}
+    node.description = {pipewire_quote(VIRTUAL_SINK_DESCRIPTION)}
+    media.class = Audio/Sink
+    state.restore-props = false
+    state.restore-target = false
+  }}
+  playback.props = {{
+    node.name = {pipewire_quote(virtual_sink_name + ".input")}
+    target.object = {pipewire_quote(dsp_input_name)}
+    node.passive = true
+    node.dont-fallback = true
+    node.linger = true
+    state.restore-props = false
+    state.restore-target = false
+  }}
+}}"""
 
 
 def spa_float(value: float) -> str:
@@ -289,16 +318,27 @@ def build_builtin_biquad_filter_chain_module_args(
     filter_output_name: str,
     output_sink: str,
     native_biquads: bool = False,
+    capture_as_stream: bool = False,
 ) -> str:
     graph_bands = bands[:MAX_BANDS]
     band_count = len(graph_bands)
     nodes = (build_native_biquad_nodes if native_biquads else build_builtin_biquad_nodes)(
         graph_bands, preamp_db, eq_enabled
     )
-    links = (build_native_biquad_links if native_biquads else build_builtin_biquad_links)(band_count)
+    if native_biquads:
+        band_indexes = [
+            index
+            for index, band in enumerate(graph_bands)
+            if band.filter_type != FILTER_TYPES["Off"] and band.filter_type in NATIVE_BIQUAD_LABELS
+        ]
+        links = build_native_biquad_links(band_indexes)
+        output_index = band_indexes[-1] if band_indexes else None
+    else:
+        links = build_builtin_biquad_links(band_count)
+        output_index = band_count - 1 if band_count else None
     rate_property = "" if native_biquads else f"  audio.rate = {int(SAMPLE_RATE)}\n"
-    output_l = biquad_node_name("l", band_count - 1) if band_count else preamp_node_name("l")
-    output_r = biquad_node_name("r", band_count - 1) if band_count else preamp_node_name("r")
+    output_l = biquad_node_name("l", output_index) if output_index is not None else preamp_node_name("l")
+    output_r = biquad_node_name("r", output_index) if output_index is not None else preamp_node_name("r")
 
     return f"""{{
   node.description = {pipewire_quote(VIRTUAL_SINK_DESCRIPTION)}
@@ -319,7 +359,8 @@ def build_builtin_biquad_filter_chain_module_args(
   capture.props = {{
     node.name = {pipewire_quote(virtual_sink_name)}
     node.description = {pipewire_quote(VIRTUAL_SINK_DESCRIPTION)}
-    media.class = Audio/Sink
+    media.class = {"Stream/Input/Audio" if capture_as_stream else "Audio/Sink"}
+    {"node.autoconnect = false" if capture_as_stream else ""}
     state.restore-props = false
     state.restore-target = false
     audio.channels = 2

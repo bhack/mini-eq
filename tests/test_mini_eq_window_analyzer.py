@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from tests._mini_eq_imports import import_mini_eq_module
@@ -29,6 +31,9 @@ class AnalyzerSignalWindow(window_analyzer.MiniEqWindowAnalyzerMixin):
         self.analyzer_enabled = True
         self.analyzer_frozen = False
         self.analyzer_levels = [0.0, 0.0]
+        self.analyzer_levels_lock = threading.Lock()
+        self.analyzer_pending_levels = None
+        self.analyzer_levels_idle_pending = False
         self.analyzer_smoothing = 0.5
         self.analyzer_last_frame_time = 0.0
         self.control_analyzer_last_emit_time = 0.0
@@ -76,16 +81,24 @@ class FakeAnalyzerController:
     def __init__(self, *, start_result: bool = True) -> None:
         self.enabled_values: list[bool] = []
         self.start_result = start_result
+        self.spectrum_enabled = True
 
     def set_analyzer_enabled(self, enabled: bool) -> bool:
         self.enabled_values.append(enabled)
         return self.start_result
+
+    def set_analyzer_spectrum_enabled(self, enabled: bool) -> None:
+        self.spectrum_enabled = enabled
 
 
 class TickAnalyzerArea:
     def __init__(self) -> None:
         self.callback = None
         self.removed_ids: list[int] = []
+        self.mapped = True
+
+    def get_mapped(self) -> bool:
+        return self.mapped
 
     def add_tick_callback(self, callback):
         self.callback = callback
@@ -381,6 +394,20 @@ def test_analyzer_level_frames_emit_compact_control_signal() -> None:
     assert window.application.state_count == 0
 
 
+def test_analyzer_dispatch_coalesces_frames_to_latest_levels(monkeypatch) -> None:
+    queued = []
+    monkeypatch.setattr(window_analyzer.GLib, "idle_add", lambda callback: queued.append(callback))
+    window = AnalyzerSignalWindow()
+    window.on_analyzer_levels([1.0, 0.2])
+    window.on_analyzer_levels([0.6, 0.8])
+    assert len(queued) == 1
+    assert queued.pop()() is False
+    assert window.analyzer_levels == pytest.approx([0.45, 0.6])
+    assert window.application.analyzer_count == 1
+    window.on_analyzer_levels([0.3, 0.4])
+    assert len(queued) == 1
+
+
 def test_analyzer_redraw_skips_unmapped_area() -> None:
     window = AnalyzerDrawWindow()
 
@@ -404,6 +431,58 @@ def test_analyzer_preview_uses_frame_clock_tick_callback() -> None:
     assert window.analyzer_area.removed_ids == [42]
     assert window.analyzer_preview_source_id == 0
     assert window.analyzer_preview_uses_tick_callback is False
+
+
+def test_analyzer_hidden_clock_stops_but_capture_continues() -> None:
+    window = AnalyzerPreviewWindow()
+    window.start_analyzer_preview()
+    window.analyzer_area.mapped = False
+    window.on_analyzer_visibility_changed()
+    assert window.analyzer_area.removed_ids == [42]
+    assert window.analyzer_preview_source_id == 0
+    assert window.controller.enabled_values == [True]
+    window.analyzer_area.mapped = True
+    window.on_analyzer_visibility_changed()
+    assert window.analyzer_preview_source_id == 42
+    assert window.controller.enabled_values == [True]
+
+
+def test_analyzer_freeze_stops_clock_and_fft_then_resumes() -> None:
+    window = AnalyzerPreviewWindow()
+    window.start_analyzer_preview()
+    window.on_analyzer_freeze_changed(FakeSwitch(True), None)
+    assert window.analyzer_preview_source_id == 0
+    assert window.controller.spectrum_enabled is False
+    assert window.controller.enabled_values == [True]
+    window.on_analyzer_freeze_changed(FakeSwitch(False), None)
+    assert window.analyzer_preview_source_id == 42
+    assert window.controller.spectrum_enabled is True
+    assert window.controller.enabled_values == [True]
+
+
+def test_hidden_analyzer_stale_levels_decay_to_zero_for_shell(monkeypatch) -> None:
+    window = AnalyzerPreviewWindow()
+    window.ui_shutting_down = False
+    window.analyzer_last_frame_time = 0.0
+    window.analyzer_area.mapped = False
+    window.analyzer_levels = [0.8, 0.4]
+    queued = []
+    monkeypatch.setattr(
+        window_analyzer.GLib, "timeout_add", lambda interval, callback: queued.append((interval, callback)) or 9
+    )
+    window.schedule_background_analyzer_decay()
+    assert queued == [(100, window.on_background_analyzer_decay)]
+    window.schedule_background_analyzer_decay()
+    assert len(queued) == 1
+    now = iter(range(1_000_000, 5_000_000, 100_000))
+    monkeypatch.setattr(window_analyzer.GLib, "get_monotonic_time", lambda: next(now))
+    for _ in range(40):
+        if not window.on_background_analyzer_decay():
+            break
+    assert window.analyzer_levels == [0.0, 0.0]
+    assert window.analyzer_background_decay_source_id == 0
+    assert window.application.analyzer_count > 0
+    assert window.analyzer_preview_source_id == 0
 
 
 def test_analyzer_preview_failure_refreshes_monitor_controls() -> None:

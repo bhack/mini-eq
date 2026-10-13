@@ -105,11 +105,13 @@ modules:
       - -Dflatpak=enabled
     make-args:
       - src/modules/libpipewire-module-filter-chain.so
+      - src/modules/libpipewire-module-loopback.so
       - spa/plugins/filter-graph/libspa-filter-graph.so
       - spa/plugins/filter-graph/libspa-filter-graph-plugin-builtin.so
     no-make-install: true
     build-commands:
       - install -Dm755 src/modules/libpipewire-module-filter-chain.so ${FLATPAK_DEST}/lib/pipewire-0.3/libpipewire-module-filter-chain.so
+      - install -Dm755 src/modules/libpipewire-module-loopback.so ${FLATPAK_DEST}/lib/pipewire-0.3/libpipewire-module-loopback.so
       - install -Dm755 spa/plugins/filter-graph/libspa-filter-graph.so ${FLATPAK_DEST}/lib/spa-0.2/filter-graph/libspa-filter-graph.so
       - install -Dm755 spa/plugins/filter-graph/libspa-filter-graph-plugin-builtin.so ${FLATPAK_DEST}/lib/spa-0.2/filter-graph/libspa-filter-graph-plugin-builtin.so
     sources:

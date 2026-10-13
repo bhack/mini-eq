@@ -1055,8 +1055,12 @@ def test_ensure_output_analyzer_passes_loudness_callback(monkeypatch: pytest.Mon
         def set_response_speed(self, speed: float) -> None:
             self.response_speed = speed
 
+        def set_spectrum_enabled(self, enabled: bool) -> None:
+            self.spectrum_enabled = enabled
+
     monkeypatch.setattr(routing, "OutputSpectrumAnalyzer", FakeAnalyzer)
     controller.emit_status = lambda _message: None
+    controller.analyzer_spectrum_enabled = False
 
     analyzer_instance = routing.SystemWideEqController.ensure_output_analyzer(controller)
 
@@ -1064,6 +1068,7 @@ def test_ensure_output_analyzer_passes_loudness_callback(monkeypatch: pytest.Mon
     assert analyzer_instance.output_sink_name == "speakers"
     assert analyzer_instance.levels_callback is controller.analyzer_levels_callback
     assert analyzer_instance.loudness_callback is controller.analyzer_loudness_callback
+    assert analyzer_instance.spectrum_enabled is False
 
 
 def test_enabling_prepared_analyzer_does_not_restart_running_engine() -> None:
@@ -1359,9 +1364,9 @@ def test_shutdown_restores_routed_streams_without_refreshing_followed_output() -
         "stop-monitor",
         ("target", "speakers"),
         ("disable", False),
-        "close-router",
         "unload-engine",
         "sync-engine",
+        "close-router",
         "close-backend",
     ]
     assert controller.routed is False
@@ -1565,13 +1570,23 @@ def test_start_engine_waits_for_filter_chain_node_from_registry() -> None:
         def __init__(self) -> None:
             self.callback = None
 
+        def load_module(self, name, arguments):
+            assert name == "libpipewire-module-loopback"
+            return object()
+
         def load_filter_chain_module(self, arguments: str):
             calls.append(f"load:{arguments}")
             return module
 
-        def watch_for_audio_sink(self, sink_name: str, callback, *, timeout_ms: int):
-            calls.append(f"wait:{sink_name}:{timeout_ms}")
+        def watch_for_node(self, predicate, callback, *, timeout_ms: int):
+            assert predicate(make_node(42, "mini_eq_sink.dsp"))
+            assert not predicate(make_node(43, "mini_eq_sink"))
+            calls.append(f"wait:mini_eq_sink.dsp:{timeout_ms}")
             self.callback = callback
+            return FakeWatch()
+
+        def watch_for_audio_sink(self, name, callback, **kwargs):
+            callback(make_node(43, name))
             return FakeWatch()
 
     backend = FakeBackend()
@@ -1593,13 +1608,56 @@ def test_start_engine_waits_for_filter_chain_node_from_registry() -> None:
 
     assert calls == [
         "load:module args",
-        "wait:mini_eq_sink:3000",
+        "wait:mini_eq_sink.dsp:3000",
         "status:filter-chain PipeWire EQ ready: mini_eq_sink -> speakers",
         "apply",
     ]
     assert controller.engine_module is module
     assert controller.filter_node_id == 42
     assert controller.running is True
+
+
+def test_input_module_is_loaded_once_across_dsp_replacements() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    calls = []
+    module = object()
+
+    class Backend:
+        def load_module(self, name, arguments):
+            calls.append((name, arguments))
+            return module
+
+    controller.virtual_sink_name = "mini_eq_sink"
+    controller.output_backend = Backend()
+    controller.ensure_input_module()
+    controller.ensure_input_module()
+    assert len(calls) == 1
+    assert calls[0][0] == "libpipewire-module-loopback"
+    assert 'target.object = "mini_eq_sink.dsp"' in calls[0][1]
+    assert controller.input_module is module
+
+
+def test_stop_engine_preserves_the_input_device() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    dsp = object()
+    device = object()
+    unloaded = []
+
+    class Backend:
+        def unload_filter_chain_module(self, module):
+            unloaded.append(module)
+
+        def sync(self):
+            pass
+
+    controller.engine_module = dsp
+    controller.input_module = device
+    controller.output_backend = Backend()
+    controller.running = True
+    controller.stop_engine(announce=False)
+    assert unloaded == [dsp]
+    assert controller.input_module is device
+    assert not controller.running
 
 
 @pytest.mark.parametrize("replacement_fails", [False, True])
@@ -1616,6 +1674,9 @@ def test_start_engine_preserves_completion_across_pending_type_changes(replaceme
             pass
 
     class FakeBackend:
+        def load_module(self, name, arguments):
+            return object()
+
         def load_filter_chain_module(self, arguments):
             return object()
 
@@ -1625,8 +1686,12 @@ def test_start_engine_preserves_completion_across_pending_type_changes(replaceme
         def sync(self):
             pass
 
-        def watch_for_audio_sink(self, name, callback, **kwargs):
+        def watch_for_node(self, predicate, callback, **kwargs):
             callbacks.append(callback)
+            return FakeWatch()
+
+        def watch_for_audio_sink(self, name, callback, **kwargs):
+            callback(make_node(41, name))
             return FakeWatch()
 
         def set_node_params(self, node_id, controls):
@@ -1669,7 +1734,7 @@ def test_start_engine_preserves_completion_across_pending_type_changes(replaceme
     callbacks[2](None if replacement_fails else make_node(44, "mini_eq_sink"))
     assert ready == ([] if replacement_fails else [44])
     assert monitored == ([] if replacement_fails else [44])
-    assert errors == (["filter-chain did not create mini_eq_sink"] if replacement_fails else [])
+    assert errors == (["filter-chain did not create mini_eq_sink.dsp"] if replacement_fails else [])
     assert controller.running is not replacement_fails
 
 
@@ -1818,6 +1883,24 @@ def test_filter_control_param_change_ignores_recent_local_control_update(
     assert controller.applying_filter_control_verification is False
 
 
+@pytest.mark.parametrize("type_changed", [False, True])
+def test_empty_off_band_controls_only_rebuild_when_topology_changed(type_changed: bool) -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.bands = core.inactive_eq_bands()
+    built_types = [band.filter_type for band in controller.bands]
+    if type_changed:
+        built_types[31] = core.FILTER_TYPES["Bell"]
+    controller._engine_band_types = tuple(built_types)
+    calls = []
+    controller.restart_engine = lambda: calls.append("restart")
+    # An empty control set must not reach the backend, including on a rebuild.
+    controller.output_backend = object()
+    controller.set_filter_controls({})
+    assert calls == (["restart"] if type_changed else [])
+
+
 def test_filter_control_verification_echo_does_not_schedule_another_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1867,12 +1950,15 @@ def test_start_engine_clears_module_when_filter_chain_node_times_out() -> None:
         def __init__(self) -> None:
             self.callback = None
 
+        def load_module(self, name, arguments):
+            return object()
+
         def load_filter_chain_module(self, arguments: str):
             calls.append(f"load:{arguments}")
             return module
 
-        def watch_for_audio_sink(self, sink_name: str, callback, *, timeout_ms: int):
-            calls.append(f"wait:{sink_name}:{timeout_ms}")
+        def watch_for_node(self, predicate, callback, *, timeout_ms: int):
+            calls.append(f"wait:mini_eq_sink.dsp:{timeout_ms}")
             self.callback = callback
             return FakeWatch()
 
@@ -1895,8 +1981,8 @@ def test_start_engine_clears_module_when_filter_chain_node_times_out() -> None:
     assert backend.callback is not None
     backend.callback(None)
 
-    assert calls == ["load:module args", "wait:mini_eq_sink:3000", "sync"]
-    assert errors == ["filter-chain did not create mini_eq_sink"]
+    assert calls == ["load:module args", "wait:mini_eq_sink.dsp:3000", "sync"]
+    assert errors == ["filter-chain did not create mini_eq_sink.dsp"]
     assert controller.engine_module is None
     assert controller.filter_node_id is None
     assert controller.running is False
@@ -1929,7 +2015,7 @@ def test_stop_engine_unloads_filter_chain_module_before_clearing_state() -> None
     assert controller.running is False
 
 
-def test_restart_engine_pauses_stream_router_monitoring_during_restart() -> None:
+def test_restart_engine_preserves_player_routing_during_restart() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.running = True
     controller.routed = True
@@ -1957,16 +2043,10 @@ def test_restart_engine_pauses_stream_router_monitoring_during_restart() -> None
 
     routing.SystemWideEqController.restart_engine(controller)
 
-    assert calls == [
-        "stop-monitoring",
-        "restore",
-        "stop-engine:False",
-        "start-engine",
-        "start-monitoring:True",
-    ]
+    assert calls == ["stop-engine:False", "start-engine"]
 
 
-def test_restart_engine_continues_when_routed_stream_restore_fails() -> None:
+def test_restart_engine_does_not_restore_routed_streams() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.running = True
     controller.routed = True
@@ -1995,14 +2075,7 @@ def test_restart_engine_continues_when_routed_stream_restore_fails() -> None:
 
     routing.SystemWideEqController.restart_engine(controller)
 
-    assert calls == [
-        "stop-monitoring",
-        "restore",
-        "warning:restore failed",
-        "stop-engine:False",
-        "start-engine",
-        "start-monitoring:True",
-    ]
+    assert calls == ["stop-engine:False", "start-engine"]
 
 
 def test_emit_status_is_silent_during_shutdown(capsys: pytest.CaptureFixture[str]) -> None:
