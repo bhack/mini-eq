@@ -612,6 +612,7 @@ def test_auto_route_import_error_does_not_retry(monkeypatch) -> None:
     class FakeController:
         def __init__(self, output_sink: str | None) -> None:
             calls.append(("controller", output_sink))
+            self.eq_enabled = True
 
         def import_apo_preset(self, path: str) -> int:
             calls.append(("import", path))

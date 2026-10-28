@@ -1318,6 +1318,21 @@ def run_ui_flow(
             timeout_seconds,
         )
 
+        compare_switch = driver.wait_for_accessible(
+            "A/B compare switch to turn off before restart",
+            lambda: driver.visible_switch_with_state(frame, name="A/B", expected_checked=True),
+            timeout_seconds,
+        )
+        driver.toggle_switch(compare_switch)
+        driver.wait_for_accessible(
+            "A/B compare switch off",
+            lambda: driver.visible_switch_with_state(frame, name="A/B", expected_checked=False),
+            timeout_seconds,
+        )
+        wait_for(
+            "D-Bus A/B state off", lambda: control_state(timeout_seconds).get("eq_enabled") is False, timeout_seconds
+        )
+
         try:
             driver.run_action(frame, ("close",))
         except AssertionError:
@@ -1337,10 +1352,25 @@ def run_ui_flow(
         if not no_traceback(app_log_path):
             raise AssertionError(f"Mini EQ logged a traceback on shutdown:\n{app_log_path.read_text(errors='replace')}")
 
+        # Simulate the hidden auto-route launch used at login with the same
+        # isolated settings directory, then inspect its actual control state.
+        app = start_app(repo_root, wayland_name, app_log_path, ["--background", "--auto-route"])
+        wait_for(
+            "hidden auto-route restart preserving A/B off",
+            lambda: (
+                (state := control_state(timeout_seconds)).get("routed") is True
+                and state.get("eq_enabled") is False
+                and state.get("window_visible") is False
+            ),
+            timeout_seconds,
+        )
+        if app.poll() is not None:
+            raise AssertionError(f"Mini EQ exited after restart:\n{app_log_path.read_text(errors='replace')}")
+
         print(
             "Live UI runtime smoke passed: AT-SPI UI flow, dropdown options, "
             "pipewire-gobject probe, output preset scope, preset menu reset, synthetic stream routing, "
-            "default-output follow, active processing links, monitor toggle cycles, and shutdown verified."
+            "default-output follow, active processing links, monitor toggle cycles, shutdown, and A/B restart verified."
         )
     finally:
         stop_accessible_event_loop(pyatspi, event_thread)

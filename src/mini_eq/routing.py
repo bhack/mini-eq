@@ -54,6 +54,7 @@ from .pipewire_backend import (
 )
 from .pipewire_routes import PipeWireOutputPresetTarget
 from .pipewire_stream_router import PipeWireStreamRouter
+from .settings import load_eq_enabled
 
 FILTER_CONTROL_PARAM_ECHO_GRACE_USEC = 500_000
 _OUTPUT_PRESET_TARGET_UNSET = object()
@@ -141,7 +142,7 @@ class SystemWideEqController:
             self.outputs_changed_callback: Callable[[], None] | None = None
             self.analyzer_levels_callback: Callable[[list[float]], None] | None = None
             self.analyzer_loudness_callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None = None
-            self.eq_enabled = True
+            self.eq_enabled = load_eq_enabled()
             self.eq_mode = next(iter(EQ_MODES.values()))
             self.preamp_db = 0.0
             self.default_bands: list[EqBand] = self.build_default_bands()
@@ -644,7 +645,9 @@ class SystemWideEqController:
 
         return f"{VIRTUAL_SINK_BASE}_{index}"
 
-    def route_system_audio(self, enabled: bool, announce: bool = True, *, refresh_output: bool = True) -> None:
+    def route_system_audio(
+        self, enabled: bool, announce: bool = True, *, refresh_output: bool = True, preserve_eq_state: bool = False
+    ) -> None:
         if enabled and getattr(self, "shutting_down", False):
             return
 
@@ -656,7 +659,7 @@ class SystemWideEqController:
             if enabled:
                 if not self.running or self.filter_node_id is None:
                     raise RuntimeError("filter-chain PipeWire EQ is not ready")
-                if not self.eq_enabled:
+                if not self.eq_enabled and not preserve_eq_state:
                     eq_enabled_for_route = True
                     self.set_eq_enabled(True)
 

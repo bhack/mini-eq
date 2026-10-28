@@ -7,6 +7,7 @@ from gi.repository import Gio, GLib
 from . import __version__
 from .analyzer import analyzer_level_to_display_norm
 from .core import list_preset_names, sanitize_preset_name
+from .settings import save_eq_enabled
 
 BUS_NAME = "io.github.bhack.mini-eq"
 OBJECT_PATH = "/io/github/bhack/mini_eq/Control"
@@ -366,10 +367,12 @@ class MiniEqDbusControl:
             raise ValueError("Mini EQ is not running")
 
         controller.set_eq_enabled(enabled)
-        if window is not None and not window.ui_shutting_down:
-            window.refresh_after_eq_state_changed(notify=False)
-
-        self.emit_state_changed()
+        try:
+            save_eq_enabled(enabled)
+        finally:
+            if window is not None and not window.ui_shutting_down:
+                window.refresh_after_eq_state_changed(notify=False)
+            self.emit_state_changed()
 
     def set_routing_enabled(self, enabled: bool) -> None:
         if self.app.controller is None:
@@ -388,10 +391,13 @@ class MiniEqDbusControl:
                 window.sync_control_switches_from_controller()
             raise
 
-        if window is not None and not window.ui_shutting_down:
-            window.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled, notify=False)
-
-        self.emit_state_changed()
+        try:
+            if enabled and controller.eq_enabled != eq_was_enabled:
+                save_eq_enabled(controller.eq_enabled)
+        finally:
+            if window is not None and not window.ui_shutting_down:
+                window.refresh_after_route_state_changed(eq_was_enabled=eq_was_enabled, notify=False)
+            self.emit_state_changed()
 
     def set_preset(self, name: str) -> None:
         preset_name = sanitize_preset_name(name)

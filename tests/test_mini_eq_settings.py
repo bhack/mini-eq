@@ -9,6 +9,28 @@ from tests._mini_eq_imports import core, import_mini_eq_module
 settings = import_mini_eq_module("settings")
 
 
+def test_eq_preference_defaults_on_and_remembers_changes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    assert settings.load_eq_enabled() is True
+    settings.save_eq_enabled(False)
+    assert settings.load_eq_enabled() is False
+    settings.save_eq_enabled(True)
+    assert settings.load_eq_enabled() is True
+
+
+def test_invalid_utf8_settings_use_defaults_without_rewriting(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    path = settings.settings_path()
+    path.parent.mkdir(parents=True)
+    invalid_data = b'{"eq_enabled": false, "name": "\xff"}\n'
+    path.write_bytes(invalid_data)
+
+    assert settings.load_settings() == {}
+    assert settings.load_eq_enabled() is True
+    assert settings.load_monitor_enabled() is True
+    assert path.read_bytes() == invalid_data
+
+
 def test_monitor_preference_defaults_to_on(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(core, "PRESET_STORAGE_DIR", None)
