@@ -158,7 +158,11 @@ class DemoController:
             self.analyzer_loudness_callback(demo_analyzer_loudness())
         return True
 
-    def route_system_audio(self, enabled: bool) -> None:
+    def route_system_audio(
+        self, enabled: bool, announce: bool = True, *, refresh_output: bool = True, preserve_eq_state: bool = False
+    ) -> None:
+        if enabled and not preserve_eq_state:
+            self.eq_enabled = True
         self.routed = enabled
 
     def follow_system_default_output(self) -> None:
