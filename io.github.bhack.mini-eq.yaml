@@ -1,6 +1,6 @@
 app-id: io.github.bhack.mini-eq
 runtime: org.gnome.Platform
-runtime-version: "50"
+runtime-version: "51"
 sdk: org.gnome.Sdk
 command: mini-eq
 finish-args:
@@ -117,8 +117,8 @@ modules:
     sources:
       - type: git
         url: https://gitlab.freedesktop.org/pipewire/pipewire.git
-        tag: 1.6.9
-        commit: 8fa27cabdc6c0c1350c69c026af5850ef0af1e26
+        tag: 1.6.10
+        commit: f9d6cbc99c354b9b0ad1d37245dc3ab0fb9f9171
 
   - name: pipewire-gobject
     buildsystem: meson
