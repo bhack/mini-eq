@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests._mini_eq_imports import core, routing
+from tests._mini_eq_imports import core, import_mini_eq_module, routing
 from tests._mini_eq_imports import pipewire_backend as pw_backend
 from tests._mini_eq_imports import pipewire_routes as pw_routes
 
@@ -127,6 +127,38 @@ def test_constructor_closes_backend_when_output_sink_validation_fails(monkeypatc
         routing.SystemWideEqController("missing")
 
     assert calls == ["connect", "close"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_enabled"),
+    [(b'{"version": 1, "eq_enabled": false}\n', False), (b"\xff", True)],
+)
+def test_constructor_loads_ab_state_without_rewriting_settings(
+    tmp_path, monkeypatch, payload, expected_enabled
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    settings = import_mini_eq_module("settings")
+    settings_file = settings.settings_path()
+    settings_file.parent.mkdir(parents=True)
+    settings_file.write_bytes(payload)
+    original = settings_file.read_bytes()
+
+    class FakeBackend(FakeDefaultOutputBackend):
+        def __init__(self) -> None:
+            super().__init__(
+                [make_node(1, "speakers")],
+                cached_defaults=pw_backend.PipeWireDefaults("speakers", None),
+                refreshed_defaults=pw_backend.PipeWireDefaults("speakers", None),
+            )
+
+        def connect(self) -> None:
+            pass
+
+    monkeypatch.setattr(routing, "PipeWireBackend", FakeBackend)
+    controller = routing.SystemWideEqController("speakers")
+
+    assert controller.eq_enabled is expected_enabled
+    assert settings_file.read_bytes() == original
 
 
 def test_list_output_sink_names_uses_wireplumber_sinks_and_filters_internal_nodes() -> None:
@@ -1445,6 +1477,32 @@ def test_route_system_audio_enables_eq_before_routing() -> None:
     ]
     assert controller.eq_enabled is True
     assert controller.routed is True
+
+
+def test_startup_route_preserves_bypassed_audio() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.shutting_down = False
+    controller.running = True
+    controller.filter_node_id = 42
+    controller.routed = False
+    controller.eq_enabled = False
+    controller.virtual_sink_name = "mini_eq_sink"
+    calls: list[str] = []
+
+    class FakeRouter:
+        def enable(self) -> None:
+            calls.append("enable")
+
+    controller.refresh_followed_output_sink = lambda **_kwargs: None
+    controller.ensure_stream_router = lambda: FakeRouter()
+    controller.apply_state_to_engine = lambda: calls.append("bypass" if not controller.eq_enabled else "eq")
+    controller.emit_status = lambda _message: None
+
+    routing.SystemWideEqController.route_system_audio(controller, True, preserve_eq_state=True)
+
+    assert controller.routed is True
+    assert controller.eq_enabled is False
+    assert calls == ["enable", "bypass"]
 
 
 def test_route_system_audio_reapplies_current_curve_after_routing() -> None:

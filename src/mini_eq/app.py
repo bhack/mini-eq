@@ -200,7 +200,9 @@ class MiniEqApplication(Adw.Application):
         try:
             controller = SystemWideEqController(self.args.output_sink)
             if self.args.import_apo:
+                startup_eq_enabled = controller.eq_enabled
                 controller.import_apo_preset(self.args.import_apo)
+                controller.eq_enabled = startup_eq_enabled
                 initial_curve_label = imported_apo_curve_label(self.args.import_apo)
         except Exception as exc:
             if controller is not None:
@@ -363,7 +365,9 @@ def run_headless(args: Namespace) -> int:
         controller = SystemWideEqController(args.output_sink)
 
         if args.import_apo:
+            startup_eq_enabled = controller.eq_enabled
             controller.import_apo_preset(args.import_apo)
+            controller.eq_enabled = startup_eq_enabled
 
         if duration_ms > 0:
             GLib.timeout_add(duration_ms, lambda: (loop.quit(), False)[1])
@@ -373,7 +377,7 @@ def run_headless(args: Namespace) -> int:
 
             try:
                 if args.auto_route:
-                    controller.route_system_audio(True)
+                    controller.route_system_audio(True, preserve_eq_state=True)
             except Exception as exc:
                 exit_code = 1
                 print(str(exc), file=sys.stderr)

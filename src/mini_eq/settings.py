@@ -10,6 +10,7 @@ SETTINGS_FILE_NAME: Final = "settings.json"
 SETTINGS_VERSION_KEY: Final = "version"
 SETTINGS_VERSION: Final = 1
 MONITOR_ENABLED_KEY: Final = "monitor_enabled"
+EQ_ENABLED_KEY: Final = "eq_enabled"
 APPEARANCE_KEY: Final = "appearance"
 BACKGROUND_MODE_KEY: Final = "background_mode"
 START_AT_LOGIN_KEY: Final = "start_at_login"
@@ -17,6 +18,7 @@ START_ACTIVE_AT_LOGIN_KEY: Final = "start_active_at_login"
 BOOL_SETTINGS_KEYS: Final = frozenset(
     (
         MONITOR_ENABLED_KEY,
+        EQ_ENABLED_KEY,
         BACKGROUND_MODE_KEY,
         START_AT_LOGIN_KEY,
         START_ACTIVE_AT_LOGIN_KEY,
@@ -72,7 +74,7 @@ def load_settings() -> dict[str, object]:
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
 
     if not isinstance(payload, dict):
@@ -113,3 +115,11 @@ def load_monitor_enabled() -> bool:
 
 def save_monitor_enabled(enabled: bool) -> None:
     save_bool_setting(MONITOR_ENABLED_KEY, enabled)
+
+
+def load_eq_enabled() -> bool:
+    return load_bool_setting(EQ_ENABLED_KEY, default=True)
+
+
+def save_eq_enabled(enabled: bool) -> None:
+    save_bool_setting(EQ_ENABLED_KEY, enabled)

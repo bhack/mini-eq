@@ -41,7 +41,7 @@ from .glib_utils import destroy_glib_source
 from .gtk_utils import create_dropdown_from_strings
 from .pipewire_backend import PipeWireBackendError, PipeWireNode, node_sample_rate, parse_positive_int
 from .routing import SystemWideEqController
-from .settings import load_monitor_enabled
+from .settings import load_monitor_enabled, save_eq_enabled
 from .window_analyzer import MiniEqWindowAnalyzerMixin
 from .window_autoeq import MiniEqWindowAutoEqMixin, initialize_autoeq_window_state
 from .window_graph import MiniEqWindowGraphMixin
@@ -420,7 +420,7 @@ class MiniEqWindow(
             output_sink=getattr(self.controller, "output_sink", None),
         )
         try:
-            self.controller.route_system_audio(True)
+            self.controller.route_system_audio(True, preserve_eq_state=True)
         except Exception as exc:
             retry_scheduled = self.schedule_startup_auto_route_retry_after_error(exc)
             trace_startup_event(
@@ -1043,6 +1043,7 @@ class MiniEqWindow(
             self.set_status(str(exc))
 
     def import_apo_preset_path(self, path: str, *, imported_name: str | None = None) -> int:
+        eq_was_enabled = self.controller.eq_enabled
         imported_count = self.controller.import_apo_preset(path)
         if imported_name is not None:
             curve_label = imported_apo_curve_label_for_name(imported_name)
@@ -1061,6 +1062,8 @@ class MiniEqWindow(
             utility_pane_button.set_active(True)
         self.sync_ui_from_state()
         self.notify_control_state_changed()
+        if self.controller.eq_enabled != eq_was_enabled:
+            save_eq_enabled(self.controller.eq_enabled)
         return imported_count
 
     def on_output_changed(self, combo: Gtk.DropDown, _param: object) -> None:
@@ -1108,7 +1111,10 @@ class MiniEqWindow(
         try:
             self.controller.route_system_audio(enabled)
             route_changed = True
+            if enabled and self.controller.eq_enabled != eq_was_enabled:
+                save_eq_enabled(self.controller.eq_enabled)
         except Exception as exc:
+            route_changed = False
             self.set_status(str(exc))
         finally:
             self.refresh_after_route_state_changed(
@@ -1126,7 +1132,10 @@ class MiniEqWindow(
 
         try:
             self.controller.set_eq_enabled(enabled)
-            self.refresh_after_eq_state_changed(announce_enabled=enabled)
+            try:
+                save_eq_enabled(enabled)
+            finally:
+                self.refresh_after_eq_state_changed(announce_enabled=enabled)
         except Exception as exc:
             self.sync_control_switches_from_controller(route=False)
             self.update_eq_power_indicator()

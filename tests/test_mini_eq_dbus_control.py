@@ -390,16 +390,59 @@ def test_dbus_control_ignores_closed_connection_error_during_signal_emit() -> No
     assert control.registration_id == 0
 
 
-def test_dbus_control_set_eq_enabled_updates_controller_and_window() -> None:
+def test_dbus_control_set_eq_enabled_updates_controller_and_window(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     control, controller, window = make_control()
 
     control.set_eq_enabled(False)
 
     assert controller.eq_enabled is False
     assert controller.enabled_values == [False]
+    assert import_mini_eq_module("settings").load_eq_enabled() is False
     assert window.bypass_switch.active is False
     assert window.bypass_switch.state is False
     assert window.update_count == 6
+
+
+def test_dbus_control_refreshes_eq_state_when_saving_fails(monkeypatch) -> None:
+    control, controller, window = make_control()
+    connection = FakeConnection()
+    control.connection = connection
+    control.registration_id = 1
+
+    def fail_save(_enabled: bool) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(dbus_control, "save_eq_enabled", fail_save)
+    with pytest.raises(OSError, match="disk full"):
+        control.set_eq_enabled(False)
+
+    assert controller.eq_enabled is False
+    assert window.bypass_switch.active is False
+    assert window.update_count == 6
+    assert [name for name, _params in connection.signals] == ["StateChanged"]
+
+
+def test_dbus_control_refreshes_routing_state_when_saving_fails(monkeypatch) -> None:
+    control, controller, window = make_control()
+    controller.eq_enabled = False
+    window.bypass_switch.active = False
+    connection = FakeConnection()
+    control.connection = connection
+    control.registration_id = 1
+
+    def fail_save(_enabled: bool) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(dbus_control, "save_eq_enabled", fail_save)
+    with pytest.raises(OSError, match="disk full"):
+        control.set_routing_enabled(True)
+
+    assert controller.routed is True
+    assert controller.eq_enabled is True
+    assert window.route_switch.active is True
+    assert window.bypass_switch.active is True
+    assert [name for name, _params in connection.signals] == ["StateChanged"]
 
 
 def test_dbus_control_set_routing_enabled_updates_controller_and_window() -> None:
@@ -414,7 +457,8 @@ def test_dbus_control_set_routing_enabled_updates_controller_and_window() -> Non
     assert window.update_count == 4
 
 
-def test_dbus_control_set_routing_enabled_restores_equalized_output() -> None:
+def test_dbus_control_set_routing_enabled_restores_equalized_output(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     control, controller, window = make_control()
     controller.eq_enabled = False
     window.bypass_switch.active = False

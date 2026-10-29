@@ -357,7 +357,8 @@ def test_startup_ready_applies_startup_state_before_presenting() -> None:
     controller = SimpleNamespace(eq_enabled=True, routed=False)
     application = SimpleNamespace(prepare_window_startup_notification=lambda _window: calls.append("startup-id"))
 
-    def route_system_audio(enabled: bool) -> None:
+    def route_system_audio(enabled: bool, *, preserve_eq_state: bool) -> None:
+        assert preserve_eq_state
         calls.append(("route", enabled))
         controller.routed = enabled
 
@@ -450,7 +451,8 @@ def test_startup_auto_route_idle_routes_after_startup_work() -> None:
     calls: list[object] = []
     controller = SimpleNamespace(eq_enabled=True, routed=False)
 
-    def route_system_audio(enabled: bool) -> None:
+    def route_system_audio(enabled: bool, *, preserve_eq_state: bool) -> None:
+        assert preserve_eq_state
         calls.append(("route", enabled))
         controller.routed = enabled
 
@@ -498,7 +500,8 @@ def test_startup_auto_route_reapplies_preset_when_followed_output_changes() -> N
         output_sink="alsa_output.headset",
     )
 
-    def route_system_audio(enabled: bool) -> None:
+    def route_system_audio(enabled: bool, *, preserve_eq_state: bool) -> None:
+        assert preserve_eq_state
         calls.append(("route", enabled))
         controller.routed = enabled
         controller.output_sink = "alsa_output.speakers"
@@ -549,7 +552,8 @@ def test_startup_auto_route_retries_until_filter_chain_is_ready(monkeypatch) -> 
     controller = SimpleNamespace(eq_enabled=True, routed=False)
     attempts = 0
 
-    def route_system_audio(enabled: bool) -> None:
+    def route_system_audio(enabled: bool, *, preserve_eq_state: bool) -> None:
+        assert preserve_eq_state
         nonlocal attempts
         attempts += 1
         calls.append(("route", attempts, enabled))
@@ -669,7 +673,8 @@ def test_on_route_changed_resets_switch_when_routing_fails() -> None:
     assert ("status", "metadata permission denied") in calls
 
 
-def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
+def test_on_route_changed_syncs_bypass_when_controller_enables_eq(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     calls: list[object] = []
     controller = SimpleNamespace(eq_enabled=False, routed=False)
     route_switch = FakeSwitch(True)
@@ -719,18 +724,29 @@ def test_on_route_changed_syncs_bypass_when_controller_enables_eq() -> None:
     ]
 
 
-def test_import_apo_updates_provisional_curve_status_and_control_state(tmp_path) -> None:
+def test_import_apo_updates_provisional_curve_status_and_control_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    settings = import_mini_eq_module("settings")
+    settings.save_eq_enabled(False)
     calls: list[object] = []
     statuses: list[str] = []
     apo_path = tmp_path / "HD 650.txt"
     apo_path.write_text("Preamp: 0 dB\n", encoding="utf-8")
 
+    controller = SimpleNamespace(
+        eq_enabled=False,
+        state_signature=lambda: "imported-signature",
+        build_preset_payload=lambda label: {"name": label},
+    )
+
+    def import_apo(path: str) -> int:
+        calls.append(("import", path))
+        controller.eq_enabled = True
+        return 7
+
+    controller.import_apo_preset = import_apo
     fake_window = SimpleNamespace(
-        controller=SimpleNamespace(
-            import_apo_preset=lambda path: calls.append(("import", path)) or 7,
-            state_signature=lambda: "imported-signature",
-            build_preset_payload=lambda label: {"name": label},
-        ),
+        controller=controller,
         selected_band_index=0,
         current_preset_name="Old",
         saved_preset_signature="old-signature",
@@ -751,6 +767,7 @@ def test_import_apo_updates_provisional_curve_status_and_control_state(tmp_path)
     assert fake_window.saved_preset_signature == "imported-signature"
     assert fake_window.output_preset_auto_applied is False
     assert fake_window.output_preset_curve_auto_loaded is False
+    assert settings.load_eq_enabled() is True
     assert statuses == ["Imported APO curve"]
     assert calls == [
         ("import", str(apo_path)),
@@ -767,6 +784,7 @@ def test_import_apo_preset_path_uses_autoeq_name_and_reveals_utility_pane() -> N
     utility_button = FakeUtilityPaneButton(visible=True)
     fake_window = SimpleNamespace(
         controller=SimpleNamespace(
+            eq_enabled=True,
             import_apo_preset=lambda path: calls.append(("import", path)) or 10,
             state_signature=lambda: "imported-signature",
             build_preset_payload=lambda label: {"name": label},
@@ -805,6 +823,50 @@ def test_import_apo_preset_path_uses_autoeq_name_and_reveals_utility_pane() -> N
         "sync",
         "notify",
     ]
+
+
+def test_on_bypass_changed_persists_only_user_change(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    controller = SimpleNamespace(eq_enabled=True)
+
+    def set_enabled(value: bool) -> None:
+        controller.eq_enabled = value
+
+    controller.set_eq_enabled = set_enabled
+    fake_window = SimpleNamespace(
+        updating_ui=False,
+        controller=controller,
+        refresh_after_eq_state_changed=lambda **_kwargs: None,
+        set_status=lambda _message: None,
+    )
+    assert window.MiniEqWindow.on_bypass_changed(fake_window, FakeSwitch(False), False) is True
+    assert import_mini_eq_module("settings").load_eq_enabled() is False
+
+
+def test_on_bypass_changed_refreshes_after_settings_write_failure(monkeypatch) -> None:
+    controller = SimpleNamespace(eq_enabled=True)
+    calls: list[object] = []
+
+    def set_enabled(value: bool) -> None:
+        controller.eq_enabled = value
+
+    def fail_save(_value: bool) -> None:
+        raise OSError("disk full")
+
+    controller.set_eq_enabled = set_enabled
+    monkeypatch.setattr(window, "save_eq_enabled", fail_save)
+    fake_window = SimpleNamespace(
+        updating_ui=False,
+        controller=controller,
+        refresh_after_eq_state_changed=lambda **kwargs: calls.append(("refresh", kwargs)),
+        sync_control_switches_from_controller=lambda **_kwargs: calls.append("sync"),
+        update_eq_power_indicator=lambda: calls.append("power"),
+        set_status=lambda message: calls.append(("status", message)),
+    )
+
+    assert window.MiniEqWindow.on_bypass_changed(fake_window, FakeSwitch(False), False) is True
+    assert controller.eq_enabled is False
+    assert calls == [("refresh", {"announce_enabled": False}), "sync", "power", ("status", "disk full")]
 
 
 def test_on_bypass_changed_resets_switch_when_engine_update_fails() -> None:

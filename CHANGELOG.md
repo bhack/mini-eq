@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.10 - 2026-10-29
+
+- Remember the A/B Compare setting across restarts, including at login.
+- Update the Flatpak runtime to GNOME 51 and the bundled PipeWire modules to
+  1.6.10.
+- Support GNOME Shell 51 in the Mini EQ Controls extension.
+
 ## 0.8.9 - 2026-10-13
 
 - Keep the audio device stable when changing presets or filter types, avoiding

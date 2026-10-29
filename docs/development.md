@@ -180,7 +180,7 @@ bundles NumPy and libebur128 for analyzer and live LUFS support.
 Install the local build tools:
 
 ```bash
-flatpak --user install flathub org.flatpak.Builder org.gnome.Sdk//50
+flatpak --user install flathub org.flatpak.Builder org.gnome.Sdk//51
 ```
 
 Build and install the local Flatpak:
