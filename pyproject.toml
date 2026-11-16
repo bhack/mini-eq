@@ -72,6 +72,9 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/metainfo" = ["data/io.github.bhack.mini-eq.metainfo.xml"]
+
 [tool.setuptools.package-data]
 mini_eq = [
     "style.css",

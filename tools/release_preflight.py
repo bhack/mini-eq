@@ -456,6 +456,25 @@ def run_wheel_smoke_test(python: Path, wheel: Path, scratch: Path) -> None:
     run([venv_python, "-m", "pip", "install", "--upgrade", "pip"])
     check_pipewire_gobject_sdist_build_environment()
     run([venv_python, "-m", "pip", "install", wheel])
+    run(
+        [
+            venv_python,
+            "-I",
+            "-c",
+            """\
+import sys
+from pathlib import Path
+
+from mini_eq import __version__
+from mini_eq.release_notes import APPSTREAM_FILE_NAME, release_notes_from_metainfo
+
+metainfo = Path(sys.prefix) / "share" / "metainfo" / APPSTREAM_FILE_NAME
+if release_notes_from_metainfo(metainfo, __version__) is None:
+    raise SystemExit(f"Missing What's New notes for {__version__} in {metainfo}")
+""",
+        ],
+        cwd=scratch,
+    )
     run([mini_eq, "--check-deps"])
     run([mini_eq, "--help"])
 
