@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.11 - 2026-11-16
+
+- Adjust left/right balance with the Balance button next to the output
+  selector.
+- Balance stays active during A/B Compare and remembers your setting across
+  presets and outputs. Mono outputs stay centered.
+
 ## 0.8.10 - 2026-10-29
 
 - Remember the A/B Compare setting across restarts, including at login.
