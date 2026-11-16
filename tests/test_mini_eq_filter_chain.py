@@ -73,6 +73,21 @@ def test_native_biquad_solo_and_mute_use_dry_path() -> None:
     assert filter_chain.native_biquad_control_values(bands, 0, True)["band_r_1:Gain 1"] == 0
 
 
+@pytest.mark.parametrize(
+    ("balance", "expected_gains"),
+    [(-100, (1.0, 0.0)), (-25, (1.0, 0.75)), (0, (1.0, 1.0)), (50, (0.5, 1.0)), (100, (0.0, 1.0))],
+)
+def test_balance_attenuates_one_channel_in_both_ab_states(balance, expected_gains) -> None:
+    enabled = filter_chain.native_biquad_control_values([], -6.0, True, balance=balance)
+    bypassed = filter_chain.native_biquad_control_values([], -6.0, False, balance=balance)
+
+    for side, gain in zip(("l", "r"), expected_gains, strict=True):
+        assert enabled[f"preamp_{side}:b0"] == pytest.approx(core.db_to_linear(-6.0))
+        assert bypassed[f"preamp_{side}:b0"] == 1.0
+        assert enabled[f"balance_target_{side}:Add"] == gain
+        assert bypassed[f"balance_target_{side}:Add"] == gain
+
+
 def test_native_graph_skips_off_slots_without_renumbering() -> None:
     bands = core.inactive_eq_bands()
     bands[2] = core.EqBand(core.FILTER_TYPES["Lo-pass"], 1000, 0, 1)
@@ -100,7 +115,7 @@ def test_native_graph_skips_off_slots_without_renumbering() -> None:
     assert len(bands) == core.MAX_BANDS
 
 
-def test_native_all_off_graph_connects_preamp_to_outputs() -> None:
+def test_native_all_off_graph_connects_preamp_through_smoothed_balance() -> None:
     args = filter_chain.build_native_biquad_filter_chain_module_args(
         bands=core.inactive_eq_bands(),
         preamp_db=-6,
@@ -108,9 +123,15 @@ def test_native_all_off_graph_connects_preamp_to_outputs() -> None:
         virtual_sink_name="mini_eq_sink",
         filter_output_name="mini_eq_sink_output",
         output_sink="test",
+        balance=50,
     )
     assert "band_l_" not in args
-    assert 'outputs = [ "preamp_l:Out" "preamp_r:Out" ]' in args
+    assert 'outputs = [ "balance_l:Out" "balance_r:Out" ]' in args
+    assert "name = balance_target_l label = linear control = { Mult = 0 Add = 0.5 }" in args
+    for side in ("l", "r"):
+        assert f'output = "preamp_{side}:Out" input = "balance_{side}:In 1"' in args
+        assert f'output = "balance_target_{side}:Out" input = "balance_smooth_{side}:In"' in args
+        assert f'output = "balance_smooth_{side}:Out" input = "balance_{side}:In 2"' in args
 
 
 def test_builtin_biquad_filter_chain_uses_pipewire_raw_biquads() -> None:

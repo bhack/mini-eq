@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from tests._mini_eq_imports import core, import_mini_eq_module, routing
@@ -130,11 +132,11 @@ def test_constructor_closes_backend_when_output_sink_validation_fails(monkeypatc
 
 
 @pytest.mark.parametrize(
-    ("payload", "expected_enabled"),
-    [(b'{"version": 1, "eq_enabled": false}\n', False), (b"\xff", True)],
+    ("payload", "expected_enabled", "expected_balance"),
+    [(b'{"version": 1, "eq_enabled": false, "output_balance": 45}\n', False, 45), (b"\xff", True, 0)],
 )
-def test_constructor_loads_ab_state_without_rewriting_settings(
-    tmp_path, monkeypatch, payload, expected_enabled
+def test_constructor_loads_ab_and_balance_without_rewriting_settings(
+    tmp_path, monkeypatch, payload, expected_enabled, expected_balance
 ) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     settings = import_mini_eq_module("settings")
@@ -158,6 +160,7 @@ def test_constructor_loads_ab_state_without_rewriting_settings(
     controller = routing.SystemWideEqController("speakers")
 
     assert controller.eq_enabled is expected_enabled
+    assert controller.output_balance == expected_balance
     assert settings_file.read_bytes() == original
 
 
@@ -814,6 +817,31 @@ def test_switch_output_sink_retargets_running_filter_output_without_restart() ->
     ]
 
 
+def test_balance_recenters_for_a_mono_layout_and_restores_on_stereo() -> None:
+    controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
+    controller.output_sink = "headset"
+    controller.output_balance = -65
+    controller.stream_router = None
+    controller.output_analyzer = None
+    controller.filter_output_already_targets_sink = lambda _sink: True
+    balance_on_restart = []
+    controller.restart_engine = lambda: balance_on_restart.append(controller.effective_output_balance())
+    backend = FakeOutputBackend([make_node(1, "headset", properties={"audio.channels": "1"})])
+    controller.output_backend = backend
+
+    controller.switch_output_sink("headset", explicit=False)
+    assert controller.output_balance == -65
+    assert balance_on_restart == [0]
+
+    assert controller.set_output_balance(75)
+    assert controller.output_balance == 75
+    assert balance_on_restart == [0]
+
+    backend.sinks = [make_node(1, "headset", properties={"audio.channels": "2"})]
+    controller.switch_output_sink("headset", explicit=False)
+    assert balance_on_restart == [0, 75]
+
+
 def test_switch_output_sink_retargets_recreated_same_name_sink_without_restart() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     calls: list[object] = []
@@ -1291,10 +1319,11 @@ def test_full_state_biquad_updates_use_active_sample_rate(monkeypatch: pytest.Mo
     controller.bands = [core.EqBand(core.FILTER_TYPES["Bell"], 1000.0, 3.0, 1.0)]
     controller.preamp_db = -2.0
     controller.eq_enabled = True
-    captured: list[float] = []
+    controller.output_balance = -40
+    captured: list[tuple[float, int]] = []
 
-    def fake_state_controls(_bands, _preamp_db, _enabled, sample_rate):
-        captured.append(sample_rate)
+    def fake_state_controls(_bands, _preamp_db, _enabled, sample_rate, *, balance):
+        captured.append((sample_rate, balance))
         return {"band_l_0:b0": 1.0}
 
     monkeypatch.setattr(routing, "builtin_biquad_control_values", fake_state_controls)
@@ -1303,14 +1332,13 @@ def test_full_state_biquad_updates_use_active_sample_rate(monkeypatch: pytest.Mo
 
     routing.SystemWideEqController.apply_state_to_engine(controller)
 
-    assert captured == [44100.0]
+    assert captured == [(44100.0, -40)]
 
 
 def test_start_prepares_analyzer_before_filter_chain_engine() -> None:
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     calls: list[str] = []
 
-    controller.refresh_followed_output_sink = lambda **_kwargs: calls.append("refresh")
     controller.prepare_output_analyzer = lambda: calls.append("prepare") or True
     controller.start_engine = lambda *, on_ready=None, on_error=None: (calls.append("engine"), on_ready and on_ready())
     controller.start_output_event_monitoring = lambda: calls.append("monitor")
@@ -1320,7 +1348,121 @@ def test_start_prepares_analyzer_before_filter_chain_engine() -> None:
 
     routing.SystemWideEqController.start(controller)
 
-    assert calls == ["refresh", "prepare", "engine", "monitor"]
+    assert calls == ["monitor", "prepare", "engine"]
+
+
+@pytest.mark.parametrize(
+    ("output_sink", "change_default"),
+    [(None, True), ("mono", False), (None, False)],
+    ids=["late-default-change", "late-pinned-mono-port", "late-fallback-mono-port"],
+)
+def test_headless_auto_route_waits_for_the_confirmed_output_layout(monkeypatch, output_sink, change_default) -> None:
+    app = import_mini_eq_module("app")
+    stereo = make_node(1, "stereo", properties={"audio.channels": "2"})
+    mono = make_node(2, "mono", properties={"audio.channels": "1"})
+    stereo_defaults = pw_backend.PipeWireDefaults("stereo", None)
+    mono_defaults = pw_backend.PipeWireDefaults("mono", None)
+    graph_args: list[str] = []
+    graph_ready = []
+    input_ready = []
+    controls: list[tuple[int, dict[str, float]]] = []
+    routed_nodes: list[int] = []
+    saved_balances: list[int] = []
+
+    class Backend(FakeDefaultOutputBackend):
+        def connect(self):
+            pass
+
+        def connect_object_added(self, _callback):
+            if not change_default:
+                # The port was registered after construction, before subscription.
+                self.sinks = [mono]
+            return 1
+
+        def connect_object_removed(self, _callback):
+            return 2
+
+        def connect_metadata_changed(self, _callback):
+            return 3
+
+        def load_module(self, _name, _arguments):
+            return object()
+
+        def load_filter_chain_module(self, arguments):
+            graph_args.append(arguments)
+            return object()
+
+        def unload_filter_chain_module(self, _module):
+            pass
+
+        def sync(self):
+            pass
+
+        def watch_for_node(self, _predicate, callback, **_kwargs):
+            graph_ready.append(callback)
+            return pw_backend.PipeWireNodeWatch(lambda: None)
+
+        def watch_for_audio_sink(self, _name, callback, **_kwargs):
+            input_ready.append(callback)
+            return pw_backend.PipeWireNodeWatch(lambda: None)
+
+        def set_node_params(self, node_id, values):
+            controls.append((node_id, values))
+
+    initial_sinks = [stereo, make_node(2, "mono")] if change_default else [make_node(2, "mono")]
+    initial_defaults = stereo_defaults if change_default else pw_backend.PipeWireDefaults(None, None)
+    backend = Backend(initial_sinks, initial_defaults, initial_defaults)
+
+    def finish_graph(index, node_id):
+        graph_ready[index](make_node(node_id, "mini_eq_sink.dsp"))
+        input_ready[index](make_node(41, "mini_eq_sink"))
+
+    class MainLoop:
+        def run(self):
+            assert len(graph_ready) == 1
+            if change_default:
+                # The new default becomes visible just before the first graph is ready.
+                assert 'target.object = "stereo"' in graph_args[0]
+                backend.sinks = [stereo, mono]
+                backend.refreshed_defaults = mono_defaults
+                finish_graph(0, 42)
+                assert not routed_nodes
+                assert len(graph_ready) == 2
+                assert 'target.object = "mono"' in graph_args[1]
+                finish_graph(1, 43)
+                assert routed_nodes == [43]
+            else:
+                finish_graph(0, 42)
+                assert routed_nodes == [42]
+
+        def quit(self):
+            pytest.fail("headless startup quit before audio was routed")
+
+    monkeypatch.setattr(routing, "PipeWireBackend", lambda: backend)
+    monkeypatch.setattr(routing, "load_output_balance", lambda: 100)
+    monkeypatch.setattr(routing, "load_eq_enabled", lambda: False)
+    monkeypatch.setattr(routing.SystemWideEqController, "prepare_output_analyzer", lambda _controller: None)
+    monkeypatch.setattr(routing.SystemWideEqController, "shutdown", lambda _controller: None)
+
+    def ensure_stream_router(controller):
+        def enable():
+            routed_nodes.append(controller.filter_node_id)
+            saved_balances.append(controller.output_balance)
+
+        return SimpleNamespace(enable=enable)
+
+    monkeypatch.setattr(routing.SystemWideEqController, "ensure_stream_router", ensure_stream_router)
+    monkeypatch.setattr(app.GLib, "MainLoop", MainLoop)
+    monkeypatch.setattr(app, "install_unix_signal_handlers", lambda _callback: [])
+    args = SimpleNamespace(duration=None, output_sink=output_sink, import_apo=None, auto_route=True)
+
+    assert app.run_headless(args) == 0
+    assert 'target.object = "mono"' in graph_args[-1]
+    assert "name = balance_target_l label = linear control = { Mult = 0 Add = 1 }" in graph_args[-1]
+    node_id, values = controls[-1]
+    assert node_id == routed_nodes[0]
+    assert saved_balances == [100]
+    assert values["balance_target_l:Add"] == values["balance_target_r:Add"] == 1.0
 
 
 def test_shutdown_skips_route_restore_when_routing_is_inactive() -> None:
@@ -1766,6 +1908,7 @@ def test_start_engine_preserves_completion_across_pending_type_changes(replaceme
     controller.bands = [core.EqBand(core.FILTER_TYPES["Bell"], 1000)]
     controller.preamp_db = 0.0
     controller.eq_enabled = True
+    controller.output_balance = 0
     controller.emit_status = lambda message: None
     controller.start_filter_node_state_monitor = lambda: monitored.append(controller.filter_node_id)
     controller.start_filter_control_param_monitor = lambda: None
@@ -2161,6 +2304,7 @@ def test_preset_payload_excludes_runtime_state_and_load_preserves_it() -> None:
     )
     controller = routing.SystemWideEqController.__new__(routing.SystemWideEqController)
     controller.eq_enabled = False
+    controller.output_balance = -30
     controller.eq_mode = 0
     controller.preamp_db = -3.5
     controller.bands = [default_band]
@@ -2171,6 +2315,7 @@ def test_preset_payload_excludes_runtime_state_and_load_preserves_it() -> None:
     payload = routing.SystemWideEqController.build_preset_payload(controller, "Bypass Test")
 
     assert "enabled" not in payload
+    assert "output_balance" not in payload
     assert "eq_mode" not in payload
     assert payload["name"] == "Bypass Test"
     assert set(payload["bands"][0]) == {"filter_type", "frequency", "gain_db", "q", "mute", "solo"}
@@ -2189,6 +2334,7 @@ def test_preset_payload_excludes_runtime_state_and_load_preserves_it() -> None:
     routing.SystemWideEqController.apply_preset_payload(controller, payload)
 
     assert controller.eq_enabled is False
+    assert controller.output_balance == -30
     assert controller.eq_mode == 0
     assert controller.preamp_db == pytest.approx(1.5)
     assert controller.bands[0].filter_type == core.FILTER_TYPES["Notch"]

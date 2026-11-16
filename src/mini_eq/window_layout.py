@@ -22,10 +22,12 @@ from .core import (
     EQ_Q_MIN,
     FILTER_TYPE_ORDER,
     MAX_BANDS,
+    OUTPUT_BALANCE_MAX,
     clamp,
 )
 from .desktop_integration import APP_ICON_NAME
 from .release_notes import about_release_notes
+from .settings import save_output_balance
 from .window_graph import GRAPH_PLOT_BOTTOM, GRAPH_PLOT_LEFT, GRAPH_PLOT_RIGHT, GRAPH_PLOT_TOP
 from .window_utils import (
     bind_label_to_control,
@@ -146,6 +148,7 @@ class MiniEqWindowLayoutMixin:
         set_accessible_label(self.output_combo, "EQ output")
         bind_label_to_control(output_label, self.output_combo)
         output_inline.append(self.output_combo)
+        output_inline.append(self.make_balance_button())
         primary_tools.append(output_inline)
         toolbar.append(primary_tools)
 
@@ -833,6 +836,49 @@ class MiniEqWindowLayoutMixin:
         self.refresh_output_sinks()
         self.refresh_preset_list()
         self.sync_ui_from_state()
+
+    def make_balance_button(self) -> Gtk.MenuButton:
+        balance_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, -OUTPUT_BALANCE_MAX, OUTPUT_BALANCE_MAX, 1)
+        balance_scale.add_css_class("output-balance")
+        balance_scale.set_flippable(False)
+        balance_scale.set_has_origin(False)
+        balance_scale.set_draw_value(True)
+        balance_scale.set_format_value_func(self.format_balance_value)
+        balance_scale.add_mark(-OUTPUT_BALANCE_MAX, Gtk.PositionType.BOTTOM, "Left")
+        balance_scale.add_mark(0, Gtk.PositionType.BOTTOM, "Center")
+        balance_scale.add_mark(OUTPUT_BALANCE_MAX, Gtk.PositionType.BOTTOM, "Right")
+        balance_scale.set_value(self.controller.output_balance)
+        set_accessible_label(balance_scale, "Left/Right Balance")
+        set_accessible_description(balance_scale, "Applies to playback routed through Mini EQ.")
+        balance_scale.connect("value-changed", self.on_output_balance_changed)
+
+        popover = Gtk.Popover()
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=6, margin_bottom=6)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+        content.set_size_request(224, -1)
+        content.append(balance_scale)
+        popover.set_child(content)
+
+        button = Gtk.MenuButton(label="Balance", popover=popover)
+        button.add_css_class("toolbar-button")
+        button.set_tooltip_text("Adjust left/right balance for audio routed through Mini EQ")
+        return button
+
+    @staticmethod
+    def format_balance_value(_scale: Gtk.Scale, value: float) -> str:
+        position = round(value)
+        if position == 0:
+            return "Center"
+        return f"{abs(position)}% {'left' if position < 0 else 'right'}"
+
+    def on_output_balance_changed(self, scale: Gtk.Scale) -> None:
+        balance = round(scale.get_value())
+        if self.controller.set_output_balance(balance):
+            try:
+                save_output_balance(balance)
+            except OSError as exc:
+                self.set_status(str(exc))
 
     def install_css(self) -> None:
         css = files("mini_eq").joinpath("style.css").read_bytes()

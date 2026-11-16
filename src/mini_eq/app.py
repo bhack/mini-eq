@@ -377,7 +377,8 @@ def run_headless(args: Namespace) -> int:
 
             try:
                 if args.auto_route:
-                    controller.route_system_audio(True, preserve_eq_state=True)
+                    # Startup confirms the output before calling on_ready.
+                    controller.route_system_audio(True, refresh_output=False, preserve_eq_state=True)
             except Exception as exc:
                 exit_code = 1
                 print(str(exc), file=sys.stderr)

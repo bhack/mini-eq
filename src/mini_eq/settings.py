@@ -4,13 +4,14 @@ import json
 from pathlib import Path
 from typing import Final
 
-from .core import app_config_file_path
+from .core import OUTPUT_BALANCE_MAX, app_config_file_path
 
 SETTINGS_FILE_NAME: Final = "settings.json"
 SETTINGS_VERSION_KEY: Final = "version"
 SETTINGS_VERSION: Final = 1
 MONITOR_ENABLED_KEY: Final = "monitor_enabled"
 EQ_ENABLED_KEY: Final = "eq_enabled"
+OUTPUT_BALANCE_KEY: Final = "output_balance"
 APPEARANCE_KEY: Final = "appearance"
 BACKGROUND_MODE_KEY: Final = "background_mode"
 START_AT_LOGIN_KEY: Final = "start_at_login"
@@ -53,6 +54,14 @@ def normalize_settings_values(payload: dict[str, object]) -> dict[str, object]:
     appearance = payload.get(APPEARANCE_KEY)
     if isinstance(appearance, str) and appearance in APPEARANCE_VALUES:
         normalized[APPEARANCE_KEY] = appearance
+
+    balance = payload.get(OUTPUT_BALANCE_KEY)
+    if (
+        isinstance(balance, int)
+        and not isinstance(balance, bool)
+        and -OUTPUT_BALANCE_MAX <= balance <= OUTPUT_BALANCE_MAX
+    ):
+        normalized[OUTPUT_BALANCE_KEY] = balance
 
     return normalized
 
@@ -123,3 +132,12 @@ def load_eq_enabled() -> bool:
 
 def save_eq_enabled(enabled: bool) -> None:
     save_bool_setting(EQ_ENABLED_KEY, enabled)
+
+
+def load_output_balance() -> int:
+    value = load_settings().get(OUTPUT_BALANCE_KEY)
+    return value if isinstance(value, int) else 0
+
+
+def save_output_balance(balance: int) -> None:
+    update_setting(OUTPUT_BALANCE_KEY, balance)
