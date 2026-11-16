@@ -18,6 +18,29 @@ def test_eq_preference_defaults_on_and_remembers_changes(tmp_path, monkeypatch) 
     assert settings.load_eq_enabled() is True
 
 
+def test_output_balance_preference_survives_other_settings_updates(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    assert settings.load_output_balance() == 0
+    settings.save_output_balance(-35)
+    settings.save_eq_enabled(False)
+
+    assert settings.load_output_balance() == -35
+    assert settings.load_eq_enabled() is False
+
+
+@pytest.mark.parametrize("balance", [True, "50", 0.5, -101, 101])
+def test_invalid_output_balance_uses_center_without_rewriting(balance, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    path = settings.settings_path()
+    path.parent.mkdir(parents=True)
+    payload = json.dumps({"version": 1, "output_balance": balance})
+    path.write_text(payload, encoding="utf-8")
+
+    assert settings.load_output_balance() == 0
+    assert path.read_text(encoding="utf-8") == payload
+
+
 def test_invalid_utf8_settings_use_defaults_without_rewriting(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     path = settings.settings_path()

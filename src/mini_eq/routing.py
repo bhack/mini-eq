@@ -20,6 +20,7 @@ from .core import (
     EQ_Q_MIN,
     FILTER_OUTPUT_SUFFIX,
     MAX_BANDS,
+    OUTPUT_BALANCE_MAX,
     PRESET_VERSION,
     SAMPLE_RATE,
     VIRTUAL_SINK_BASE,
@@ -35,6 +36,7 @@ from .core import (
     sanitize_preset_name,
 )
 from .filter_chain import (
+    balance_control_values,
     build_eq_input_module_args,
     builtin_biquad_preamp_control_values,
 )
@@ -50,11 +52,13 @@ from .pipewire_backend import (
     NODE_PROPS_PARAM_NAME,
     PipeWireBackend,
     PipeWireNode,
+    audio_input_port_node_id,
     parse_metadata_node_name,
+    parse_positive_int,
 )
 from .pipewire_routes import PipeWireOutputPresetTarget
 from .pipewire_stream_router import PipeWireStreamRouter
-from .settings import load_eq_enabled
+from .settings import load_eq_enabled, load_output_balance
 
 FILTER_CONTROL_PARAM_ECHO_GRACE_USEC = 500_000
 _OUTPUT_PRESET_TARGET_UNSET = object()
@@ -101,6 +105,9 @@ def output_preset_target_identity(
 
 
 class SystemWideEqController:
+    output_is_mono = False
+    _output_sink_id = 0
+
     def __init__(self, output_sink: str | None) -> None:
         self.output_backend = PipeWireBackend()
         try:
@@ -143,6 +150,7 @@ class SystemWideEqController:
             self.analyzer_levels_callback: Callable[[list[float]], None] | None = None
             self.analyzer_loudness_callback: Callable[[AnalyzerLoudnessSnapshot | None], None] | None = None
             self.eq_enabled = load_eq_enabled()
+            self.output_balance = load_output_balance()
             self.eq_mode = next(iter(EQ_MODES.values()))
             self.preamp_db = 0.0
             self.default_bands: list[EqBand] = self.build_default_bands()
@@ -155,8 +163,10 @@ class SystemWideEqController:
             if not self.is_valid_output_sink(self.output_sink):
                 raise AudioBackendError("output sink cannot be a Mini EQ virtual sink")
 
-            if not self.output_sink or self.get_sink(self.output_sink) is None:
+            sink = self.get_sink(self.output_sink)
+            if sink is None:
                 raise AudioBackendError(f"output sink not found: {self.output_sink}")
+            self.update_output_layout(sink)
         except Exception:
             self.output_backend.close()
             raise
@@ -396,50 +406,52 @@ class SystemWideEqController:
             output_sink = self.get_sink(sink_name)
             if output_sink is None:
                 return
+            layout_changed = self.update_output_layout(output_sink)
 
             self.refresh_output_route_param_monitor()
             if self.stream_router is not None:
                 self.stream_router.set_output_sink_name(sink_name)
             if self.output_analyzer is not None:
-                output_sink_description = output_sink.node_description if output_sink is not None else None
-                self.output_analyzer.set_output_sink_name(sink_name, output_sink_description)
+                self.output_analyzer.set_output_sink_name(sink_name, output_sink.node_description)
 
-            if self.filter_output_already_targets_sink(output_sink):
-                return
-
-            if self.retarget_filter_output():
-                return
-
-            self.restart_engine()
+            if layout_changed or not (
+                self.filter_output_already_targets_sink(output_sink) or self.retarget_filter_output()
+            ):
+                self.restart_engine()
             return
 
         if not self.is_valid_output_sink(sink_name):
             raise AudioBackendError("output sink cannot point to a Mini EQ virtual sink")
 
-        if self.get_sink(sink_name) is None:
+        output_sink = self.get_sink(sink_name)
+        if output_sink is None:
             raise AudioBackendError(f"output sink not found: {sink_name}")
 
         if explicit:
             self.follow_default_output = False
 
         self.output_sink = sink_name
+        layout_changed = self.update_output_layout(output_sink)
         self.invalidate_output_preset_target()
         self.refresh_output_route_param_monitor()
         if self.stream_router is not None:
             self.stream_router.set_output_sink_name(sink_name)
         if self.output_analyzer is not None:
-            output_sink = self.get_sink(sink_name)
-            output_sink_description = output_sink.node_description if output_sink is not None else None
-            self.output_analyzer.set_output_sink_name(sink_name, output_sink_description)
+            self.output_analyzer.set_output_sink_name(sink_name, output_sink.node_description)
 
-        if self.retarget_filter_output():
-            if explicit:
-                self.schedule_output_event_refresh()
-            return
-
-        self.restart_engine()
+        # The playback adapter needs a fresh negotiation when switching between
+        # mono and stereo. Restarting DSP keeps the player-facing sink alive.
+        if layout_changed or not self.retarget_filter_output():
+            self.restart_engine()
         if explicit:
             self.schedule_output_event_refresh()
+
+    def update_output_layout(self, sink: PipeWireNode) -> bool:
+        self._output_sink_id = sink.bound_id
+        is_mono = parse_positive_int(sink.property_value("audio.channels")) == 1
+        changed = is_mono != self.output_is_mono
+        self.output_is_mono = is_mono
+        return changed
 
     def follow_system_default_output(self) -> None:
         previous_output_sink = getattr(self, "output_sink", None)
@@ -459,9 +471,9 @@ class SystemWideEqController:
                 self.switch_output_sink(default_sink, explicit=False)
             except Exception as exc:
                 self.emit_status(f"default output follow warning: {exc}")
-            break
+            return True
 
-        return True
+        return False
 
     def refresh_followed_output_sink_from_event(self, sink_name: str | None) -> bool:
         if not self.follow_default_output:
@@ -476,6 +488,10 @@ class SystemWideEqController:
 
         return self.refresh_followed_output_sink(snapshot=True)
 
+    def refresh_startup_output(self, *, snapshot: bool = False) -> None:
+        if not self.refresh_followed_output_sink(snapshot=snapshot):
+            self.switch_output_sink(self.output_sink, explicit=False)
+
     def schedule_output_event_refresh(self) -> None:
         if not getattr(self, "accept_output_events", False):
             return
@@ -485,6 +501,11 @@ class SystemWideEqController:
 
     def handle_output_object_added(self, _manager, proxy) -> None:
         if not self.accept_output_events:
+            return
+
+        if self._output_sink_id and audio_input_port_node_id(proxy) == self._output_sink_id:
+            self.pending_current_output_sink_refresh = True
+            self.schedule_output_event_refresh()
             return
 
         try:
@@ -497,7 +518,9 @@ class SystemWideEqController:
                 self.pending_current_output_sink_refresh = True
             self.schedule_output_event_refresh()
 
-    def handle_output_object_removed(self, _manager, _proxy) -> None:
+    def handle_output_object_removed(self, _manager, proxy) -> None:
+        if self._output_sink_id and audio_input_port_node_id(proxy) == self._output_sink_id:
+            self.pending_current_output_sink_refresh = True
         # Removed proxies may no longer expose stable properties. Refreshing the
         # output list is cheap enough and keeps the selector accurate.
         self.schedule_output_event_refresh()
@@ -605,7 +628,7 @@ class SystemWideEqController:
             )
 
         self.invalidate_output_preset_target()
-        self.refresh_followed_output_sink(snapshot=True)
+        self.refresh_startup_output(snapshot=True)
         self.refresh_output_route_param_monitor()
 
         if self.outputs_changed_callback is not None:
@@ -736,6 +759,7 @@ class SystemWideEqController:
             filter_output_name=self.filter_output_name,
             output_sink=self.output_sink,
             capture_as_stream=True,
+            balance=self.effective_output_balance(),
         )
 
     @property
@@ -772,6 +796,7 @@ class SystemWideEqController:
             return
 
         self.ensure_input_module()
+        output_layout = (self.output_sink, self.output_is_mono)
         self.engine_module = self.output_backend.load_filter_chain_module(self.build_filter_chain_module_args())
         self.engine_start_pending = True
         start_token = object()
@@ -813,11 +838,22 @@ class SystemWideEqController:
                 fail(RuntimeError(f"filter-chain did not create {self.dsp_input_name}"))
                 return
 
-            # A preset/type edit during creation makes this topology obsolete.
-            # Replace it before announcing readiness, preserving the caller's
-            # completion callbacks (including restart routing restoration).
+            if getattr(self, "accept_output_events", False):
+                try:
+                    self.refresh_startup_output()
+                except Exception as exc:
+                    fail(exc)
+                    return
+                if self._engine_start_token is not start_token:
+                    return
+
+            # Replace obsolete graph topology or output routing before
+            # announcing readiness, preserving the caller's callbacks.
             built_types = getattr(self, "_engine_band_types", None)
-            if built_types is not None and built_types != tuple(band.filter_type for band in self.bands):
+            band_types_changed = built_types is not None and built_types != tuple(
+                band.filter_type for band in self.bands
+            )
+            if band_types_changed or output_layout != (self.output_sink, self.output_is_mono):
                 self.stop_engine(announce=False)
                 try:
                     self.start_engine(on_ready=on_ready, on_error=on_error)
@@ -1109,6 +1145,9 @@ class SystemWideEqController:
     def apply_preamp_to_engine(self) -> None:
         self.set_filter_controls(builtin_biquad_preamp_control_values(self.preamp_db, self.eq_enabled))
 
+    def effective_output_balance(self) -> int:
+        return 0 if self.output_is_mono else self.output_balance
+
     def apply_enabled_to_engine(self) -> None:
         self.apply_state_to_engine()
 
@@ -1125,7 +1164,13 @@ class SystemWideEqController:
         )
 
     def apply_state_to_engine(self) -> None:
-        controls = builtin_biquad_control_values(self.bands, self.preamp_db, self.eq_enabled, self.active_sample_rate())
+        controls = builtin_biquad_control_values(
+            self.bands,
+            self.preamp_db,
+            self.eq_enabled,
+            self.active_sample_rate(),
+            balance=self.effective_output_balance(),
+        )
         self.set_filter_controls(controls)
 
     def start(
@@ -1135,7 +1180,7 @@ class SystemWideEqController:
         on_error: Callable[[Exception], None] | None = None,
     ) -> None:
         try:
-            self.refresh_followed_output_sink()
+            self.start_output_event_monitoring()
             self.prepare_output_analyzer()
         except Exception as exc:
             if self.stream_router is not None:
@@ -1146,21 +1191,6 @@ class SystemWideEqController:
                 on_error(exc)
                 return
             raise
-
-        def on_engine_ready() -> None:
-            try:
-                self.start_output_event_monitoring()
-            except Exception as exc:
-                if self.stream_router is not None:
-                    self.stream_router.stop_monitoring()
-                self.stop_engine()
-                self.stop_output_event_monitoring()
-                if on_error is not None:
-                    on_error(exc)
-                    return
-                raise
-            if on_ready is not None:
-                on_ready()
 
         def on_engine_error(exc: Exception) -> None:
             if self.stream_router is not None:
@@ -1173,7 +1203,7 @@ class SystemWideEqController:
                 self.emit_status(str(exc))
 
         try:
-            self.start_engine(on_ready=on_engine_ready, on_error=on_engine_error)
+            self.start_engine(on_ready=on_ready, on_error=on_engine_error)
         except Exception as exc:
             on_engine_error(exc)
             if on_error is None:
@@ -1243,6 +1273,15 @@ class SystemWideEqController:
             return
         self.preamp_db = preamp_db
         self.apply_preamp_to_engine()
+
+    def set_output_balance(self, value: int) -> bool:
+        balance = max(-OUTPUT_BALANCE_MAX, min(OUTPUT_BALANCE_MAX, value))
+        if self.output_balance == balance:
+            return False
+        self.output_balance = balance
+        if not self.output_is_mono:
+            self.set_filter_controls(balance_control_values(balance))
+        return True
 
     def set_eq_enabled(self, enabled: bool) -> None:
         eq_enabled = bool(enabled)

@@ -70,6 +70,12 @@
     min-height: 32px;
 }
 
+.output-balance value,
+.output-balance mark label {
+    color: var(--window-fg-color);
+    opacity: 1;
+}
+
 .toolbar-compact-actions {
     padding: 0;
     border-radius: 0;

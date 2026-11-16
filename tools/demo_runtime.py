@@ -47,6 +47,7 @@ class DemoController:
         self.virtual_sink_name = DEMO_VIRTUAL_SINK_LABEL
         self.follow_default_output = True
         self.eq_enabled = True
+        self.output_balance = 0
         self.eq_mode = EQ_MODES["Live PipeWire"]
         self.preamp_db = -4.5
         self.default_bands = core.default_eq_bands()
@@ -73,6 +74,11 @@ class DemoController:
                 "node.max-latency": "1024/48000",
             },
         )
+
+    def set_output_balance(self, value: int) -> bool:
+        changed = self.output_balance != value
+        self.output_balance = value
+        return changed
 
     def build_demo_bands(self) -> list[EqBand]:
         bands = core.inactive_eq_bands()

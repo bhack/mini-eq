@@ -24,6 +24,9 @@ sample rate; EQ processing is not pinned to 48 kHz.
 - GTK/Libadwaita interface with a compact 10-band fader workflow.
 - PipeWire routing and default-output tracking through pipewire-gobject.
 - PipeWire filter-chain DSP using builtin biquad filters.
+- Left/right **Balance** next to the EQ output selector follows output and preset
+  changes and stays active during A/B Compare. Mono outputs play centered and
+  Mini EQ restores your balance when you return to stereo.
 - Optional spectrum analyzer and LUFS loudness readout through a PipeWire monitor
   capture stream.
 - Auto preset links can follow the detected PipeWire port when available and

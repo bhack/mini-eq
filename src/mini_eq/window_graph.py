@@ -301,7 +301,7 @@ class MiniEqWindowGraphMixin:
         if self.controller.eq_enabled:
             self.bypass_switch.set_tooltip_text("A/B Compare: equalized audio is playing")
         else:
-            self.bypass_switch.set_tooltip_text("A/B Compare: original audio is playing")
+            self.bypass_switch.set_tooltip_text("A/B Compare: EQ is bypassed")
 
     def sync_ui_from_state(self) -> None:
         self.updating_ui = True

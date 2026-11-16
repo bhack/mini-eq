@@ -178,6 +178,27 @@ class FakeModel:
         return self.items[index]
 
 
+def test_audio_sink_channel_count_uses_playback_ports_when_node_has_no_count() -> None:
+    backend = pw_backend.PipeWireBackend()
+    node = backend._node_from_global(make_node_global(42, "mono"))
+    backend.list_audio_sinks = lambda: [node]
+
+    class Port:
+        def __init__(self, node_id: int, direction: str, channel: str | None) -> None:
+            self.properties = {"node.id": str(node_id), "port.direction": direction, "audio.channel": channel}
+
+        def is_interface(self, interface: str) -> bool:
+            return interface == pw_backend.PIPEWIRE_PORT_INTERFACE
+
+        def dup_property(self, key: str) -> str | None:
+            return self.properties.get(key)
+
+    ports = [Port(42, "in", "MONO"), Port(42, "out", "MONO"), Port(42, "in", None), Port(43, "in", "FL")]
+    backend._registry = SimpleNamespace(dup_globals_by_interface=lambda _interface: FakeModel(ports))
+
+    assert backend.audio_sink_by_name("mono").property_value("audio.channels") == "1"
+
+
 class FakeWaitRegistry:
     def __init__(self, globals_: list[object]) -> None:
         self.globals = globals_

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import math
+
 from .core import (
     EQ_PREAMP_MAX_DB,
     EQ_PREAMP_MIN_DB,
     FILTER_TYPES,
     MAX_BANDS,
+    OUTPUT_BALANCE_MAX,
     OUTPUT_CLIENT_NAME,
     SAMPLE_RATE,
     VIRTUAL_SINK_DESCRIPTION,
@@ -20,6 +23,7 @@ from .core import (
 
 BIQUAD_CONTROL_NAMES = ("b0", "b1", "b2", "a0", "a1", "a2")
 BIQUAD_CONFIG_SAMPLE_RATES = (44100.0, 48000.0, 96000.0, 192000.0)
+BALANCE_SMOOTHING_SECONDS = 0.004
 NATIVE_BIQUAD_LABELS = {
     FILTER_TYPES[name]: label
     for name, label in {
@@ -67,8 +71,11 @@ def native_biquad_control_values(
     preamp_db: float,
     eq_enabled: bool,
     sample_rate: float = SAMPLE_RATE,
+    *,
+    balance: int = 0,
 ) -> dict[str, float]:
     controls = builtin_biquad_preamp_control_values(preamp_db, eq_enabled)
+    controls.update(balance_control_values(balance))
     solo_active = bands_have_solo(bands)
     for index, band in enumerate(bands[:MAX_BANDS]):
         controls.update(native_biquad_band_control_values(index, band, eq_enabled, sample_rate, solo_active))
@@ -154,6 +161,49 @@ def biquad_node_name(side: str, index: int) -> str:
 
 def preamp_node_name(side: str) -> str:
     return f"preamp_{side}"
+
+
+def balance_control_values(balance: int) -> dict[str, float]:
+    position = clamp(balance / OUTPUT_BALANCE_MAX, -1.0, 1.0)
+    return {
+        "balance_target_l:Add": 1.0 - max(0.0, position),
+        "balance_target_r:Add": 1.0 + min(0.0, position),
+    }
+
+
+def balance_smoothing_coefficients(sample_rate: float) -> BiquadCoefficients:
+    # Filter the gain envelope at the audio sample rate. Its state carries over
+    # when the slider moves again, including a reversal before the gain settles.
+    decay = math.exp(-1.0 / (sample_rate * BALANCE_SMOOTHING_SECONDS))
+    return BiquadCoefficients(b0=1.0 - decay, b1=0.0, b2=0.0, a0=1.0, a1=-decay, a2=0.0)
+
+
+def build_balance_stages(output_l: str, output_r: str, balance: int) -> tuple[str, str]:
+    nodes: list[str] = []
+    links: list[str] = []
+    controls = balance_control_values(balance)
+    by_rate = {rate: balance_smoothing_coefficients(rate) for rate in BIQUAD_CONFIG_SAMPLE_RATES}
+    for side, output in (("l", output_l), ("r", output_r)):
+        target = f"balance_target_{side}"
+        smooth = f"balance_smooth_{side}"
+        gain = f"balance_{side}"
+        nodes.extend(
+            (
+                f"      {{ type = builtin name = {target} label = linear "
+                f"control = {{ Mult = 0 Add = {spa_float(controls[f'{target}:Add'])} }} }}",
+                build_biquad_node(smooth, by_rate),
+                f"      {{ type = builtin name = {gain} label = mult }}",
+            )
+        )
+        links.extend(
+            (
+                f'      {{ output = "{output}:Out" input = "{target}:In" }}',
+                f'      {{ output = "{target}:Out" input = "{smooth}:In" }}',
+                f'      {{ output = "{output}:Out" input = "{gain}:In 1" }}',
+                f'      {{ output = "{smooth}:Out" input = "{gain}:In 2" }}',
+            )
+        )
+    return "\n".join(nodes), "\n".join(links)
 
 
 def preamp_biquad_coefficients(preamp_db: float, eq_enabled: bool) -> BiquadCoefficients:
@@ -319,6 +369,7 @@ def build_builtin_biquad_filter_chain_module_args(
     output_sink: str,
     native_biquads: bool = False,
     capture_as_stream: bool = False,
+    balance: int = 0,
 ) -> str:
     graph_bands = bands[:MAX_BANDS]
     band_count = len(graph_bands)
@@ -339,6 +390,11 @@ def build_builtin_biquad_filter_chain_module_args(
     rate_property = "" if native_biquads else f"  audio.rate = {int(SAMPLE_RATE)}\n"
     output_l = biquad_node_name("l", output_index) if output_index is not None else preamp_node_name("l")
     output_r = biquad_node_name("r", output_index) if output_index is not None else preamp_node_name("r")
+    if native_biquads:
+        balance_nodes, balance_links = build_balance_stages(output_l, output_r, balance)
+        nodes = f"{nodes}\n{balance_nodes}"
+        links = f"{links}\n{balance_links}" if links else balance_links
+        output_l, output_r = "balance_l", "balance_r"
 
     return f"""{{
   node.description = {pipewire_quote(VIRTUAL_SINK_DESCRIPTION)}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .pipewire_routes import DEVICE_ROUTE_PARAM_NAME, PipeWireOutputRoute, PipeWireRouteMixin
@@ -16,6 +16,7 @@ SPA_ID_TYPE = "Spa:Id"
 PIPEWIRE_NODE_INTERFACE = "PipeWire:Interface:Node"
 PIPEWIRE_DEVICE_INTERFACE = "PipeWire:Interface:Device"
 PIPEWIRE_LINK_INTERFACE = "PipeWire:Interface:Link"
+PIPEWIRE_PORT_INTERFACE = "PipeWire:Interface:Port"
 STREAM_OUTPUT_AUDIO = "Stream/Output/Audio"
 AUDIO_SINK = "Audio/Sink"
 LINK_STATE_ACTIVE = "active"
@@ -131,6 +132,14 @@ def parse_positive_int(value: str | None) -> int:
         return 0
 
     return parsed if parsed > 0 else 0
+
+
+def audio_input_port_node_id(global_) -> int:
+    if not hasattr(global_, "is_interface") or not global_.is_interface(PIPEWIRE_PORT_INTERFACE):
+        return 0
+    if global_.dup_property("port.direction") != "in" or not global_.dup_property("audio.channel"):
+        return 0
+    return parse_positive_int(global_.dup_property("node.id"))
 
 
 def parse_rate_from_latency(value: str | None) -> int:
@@ -991,7 +1000,13 @@ class PipeWireBackend(PipeWireRouteMixin):
     def audio_sink_by_name(self, node_name: str) -> PipeWireNode | None:
         for sink in self.list_audio_sinks():
             if sink.node_name == node_name:
-                return sink
+                # The registry can omit audio.channels on the sink itself. Count
+                # its current playback channels without including monitor ports.
+                ports = self._registry.dup_globals_by_interface(PIPEWIRE_PORT_INTERFACE)
+                channels = sum(audio_input_port_node_id(port) == sink.bound_id for port in self._iterate_model(ports))
+                return (
+                    replace(sink, properties={**sink.properties, "audio.channels": str(channels)}) if channels else sink
+                )
 
         return None
 
